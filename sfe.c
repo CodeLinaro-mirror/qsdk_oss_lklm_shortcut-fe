@@ -44,6 +44,7 @@ extern int max_ipv6_conn;
 #define sfe_ipv6_addr_copy(src, dest) memcpy((void *)(dest), (void *)(src), 16)
 #define sfe_ipv4_stopped(CTX) (rcu_dereference((CTX)->ipv4_stats_sync_cb) == NULL)
 #define sfe_ipv6_stopped(CTX) (rcu_dereference((CTX)->ipv6_stats_sync_cb) == NULL)
+#define SFE_IPSEC_TUNNEL_TYPE 31
 
 typedef enum sfe_exception {
 	SFE_EXCEPTION_IPV4_MSG_UNKNOW,
@@ -241,6 +242,10 @@ static bool sfe_routed_dev_allow(struct net_device *dev, bool is_routed,  bool c
 	}
 #endif
 
+	if (dev->type == SFE_IPSEC_TUNNEL_TYPE) {
+		return true;
+	}
+
 	return false;
 }
 
@@ -267,6 +272,10 @@ bool sfe_dev_has_hw_csum(struct net_device *dev)
 	 * whose kind is "ip6tnl". The HW csum for these tunnel devices should be disabled.
 	*/
 	if (dev->rtnl_link_ops && !strcmp(dev->rtnl_link_ops->kind, "ip6tnl")) {
+		return false;
+	}
+
+	if (dev->type == SFE_IPSEC_TUNNEL_TYPE) {
 		return false;
 	}
 
@@ -689,6 +698,9 @@ sfe_tx_status_t sfe_create_ipv4_rule_msg(struct sfe_ctx_instance_internal *sfe_c
 		break;
 
 	case IPPROTO_IPV6:
+		break;
+
+	case IPPROTO_ESP:
 		break;
 
 	case IPPROTO_RAW:
@@ -1134,6 +1146,9 @@ sfe_tx_status_t sfe_create_ipv6_rule_msg(struct sfe_ctx_instance_internal *sfe_c
 		break;
 
 	case IPPROTO_GRE:
+		break;
+
+	case IPPROTO_ESP:
 		break;
 
 	case IPPROTO_RAW:

@@ -49,6 +49,7 @@
 #include "sfe_ipv6_pppoe_br.h"
 #include "sfe_ipv6_tunipip6.h"
 #include "sfe_ipv6_gre.h"
+#include "sfe_ipv6_esp.h"
 
 #define sfe_ipv6_addr_copy(src, dest) memcpy((void *)(dest), (void *)(src), 16)
 
@@ -107,7 +108,11 @@ static char *sfe_ipv6_exception_events_string[SFE_IPV6_EXCEPTION_EVENT_LAST] = {
 	"GRE_NO_CONNECTION",
 	"GRE_IP_OPTIONS_OR_INITIAL_FRAGMENT",
 	"GRE_SMALL_TTL",
-	"GRE_NEEDS_FRAGMENTATION"
+	"GRE_NEEDS_FRAGMENTATION",
+	"ESP_NO_CONNECTION",
+	"ESP_IP_OPTIONS_OR_INITIAL_FRAGMENT",
+	"ESP_NEEDS_FRAGMENTATION",
+	"ESP_SMALL_TTL"
 };
 
 static struct sfe_ipv6 __si6;
@@ -936,6 +941,10 @@ int sfe_ipv6_recv(struct net_device *dev, struct sk_buff *skb, struct sfe_l2_inf
 		return sfe_ipv6_recv_tcp(si, skb, dev, len, iph, ihl, sync_on_find, l2_info);
 	}
 
+	if (IPPROTO_ESP == next_hdr) {
+		return sfe_ipv6_recv_esp(si, skb, dev, len, iph, ihl, sync_on_find, tun_outer);
+	}
+
 	if (IPPROTO_ICMPV6 == next_hdr) {
 		return sfe_ipv6_recv_icmp(si, skb, dev, len, iph, ihl);
 	}
@@ -1634,7 +1643,7 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 #ifdef SFE_GRE_TUN_ENABLE
 	if ((IPPROTO_GRE == tuple->protocol) && !(reply_cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_PASSTHROUGH)) {
 		rcu_read_lock();
-		reply_cm->proto = rcu_dereference(inet6_protos[tuple->protocol]);
+		reply_cm->proto = rcu_dereference(inet6_protos[IPPROTO_GRE]);
 		rcu_read_unlock();
 
 		if (unlikely(!reply_cm->proto)) {
@@ -1650,6 +1659,24 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 		}
 	}
 #endif
+
+	if ((IPPROTO_ESP == tuple->protocol) && !(reply_cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_PASSTHROUGH)) {
+		rcu_read_lock();
+		reply_cm->proto = rcu_dereference(inet6_protos[IPPROTO_ESP]);
+		rcu_read_unlock();
+
+		if (unlikely(!reply_cm->proto)) {
+			this_cpu_inc(si->stats_pcpu->connection_create_failures64);
+			spin_unlock_bh(&si->lock);
+			kfree(reply_cm);
+			kfree(original_cm);
+			kfree(c);
+			dev_put(src_dev);
+			dev_put(dest_dev);
+			DEBUG_WARN("sfe: ESP proto handler is not registered\n");
+			return -EPERM;
+		}
+	}
 
 	/*
 	 * Decapsulation path have proto set.

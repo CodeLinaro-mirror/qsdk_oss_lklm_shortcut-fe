@@ -49,6 +49,7 @@
 #include "sfe_ipv4_pppoe_br.h"
 #include "sfe_ipv4_gre.h"
 #include "sfe_ipv4_tun6rd.h"
+#include "sfe_ipv4_esp.h"
 
 static char *sfe_ipv4_exception_events_string[SFE_IPV4_EXCEPTION_EVENT_LAST] = {
 	"UDP_HEADER_INCOMPLETE",
@@ -102,7 +103,11 @@ static char *sfe_ipv4_exception_events_string[SFE_IPV4_EXCEPTION_EVENT_LAST] = {
 	"GRE_NO_CONNECTION",
 	"GRE_IP_OPTIONS_OR_INITIAL_FRAGMENT",
 	"GRE_SMALL_TTL",
-	"GRE_NEEDS_FRAGMENTATION"
+	"GRE_NEEDS_FRAGMENTATION",
+	"ESP_NO_CONNECTION",
+	"ESP_IP_OPTIONS_OR_INITIAL_FRAGMENT",
+	"ESP_NEEDS_FRAGMENTATION",
+	"ESP_SMALL_TTL"
 };
 
 static struct sfe_ipv4 __si;
@@ -913,6 +918,10 @@ int sfe_ipv4_recv(struct net_device *dev, struct sk_buff *skb, struct sfe_l2_inf
 		return sfe_ipv4_recv_tcp(si, skb, dev, len, iph, ihl, sync_on_find, l2_info);
 	}
 
+	if (IPPROTO_ESP == protocol) {
+		return sfe_ipv4_recv_esp(si, skb, dev, len, iph, ihl, sync_on_find, tun_outer);
+	}
+
 	if (IPPROTO_ICMP == protocol) {
 		return sfe_ipv4_recv_icmp(si, skb, dev, len, iph, ihl);
 	}
@@ -1371,7 +1380,8 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 		}
 	}
 
-	if ((IPPROTO_GRE == tuple->protocol) && !sfe_ipv4_is_local_ip(si, original_cm->match_dest_ip)) {
+	if (((IPPROTO_GRE == tuple->protocol) || (IPPROTO_ESP == tuple->protocol)) &&
+					!sfe_ipv4_is_local_ip(si, original_cm->match_dest_ip)) {
 		original_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_PASSTHROUGH;
 	}
 
@@ -1552,7 +1562,8 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 		reply_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_FAST_XMIT_DEV_ADMISSION;
 	}
 
-	if ((IPPROTO_GRE == tuple->protocol) && !sfe_ipv4_is_local_ip(si, reply_cm->match_dest_ip)) {
+	if (((IPPROTO_GRE == tuple->protocol) || (IPPROTO_ESP == tuple->protocol)) &&
+					!sfe_ipv4_is_local_ip(si, reply_cm->match_dest_ip)) {
 		reply_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_PASSTHROUGH;
 	}
 
@@ -1696,6 +1707,22 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 			dev_put(src_dev);
 			dev_put(dest_dev);
 			return -EINVAL;
+		}
+	}
+
+	if ((IPPROTO_ESP == tuple->protocol) && !(reply_cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_PASSTHROUGH)) {
+		rcu_read_lock();
+		reply_cm->proto = rcu_dereference(inet_protos[IPPROTO_ESP]);
+		rcu_read_unlock();
+
+		if (unlikely(!reply_cm->proto)) {
+			kfree(reply_cm);
+			kfree(original_cm);
+			kfree(c);
+			dev_put(src_dev);
+			dev_put(dest_dev);
+			DEBUG_WARN("sfe: ESP proto handler is not registered\n");
+			return -EPERM;
 		}
 	}
 
