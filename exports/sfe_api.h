@@ -45,6 +45,8 @@
 #define SFE_RULE_CREATE_FLAG_USE_FLOW_BOTTOM_INTERFACE (1<<8) /**< Use flow interface number instead of top interface. */
 #define SFE_RULE_CREATE_FLAG_USE_RETURN_BOTTOM_INTERFACE (1<<9) /**< Use return interface number instead of top interface. */
 #define SFE_RULE_CREATE_FLAG_SRC_INTERFACE_CHECK  (1<<10)  /**< Check source interface. */
+#define SFE_RULE_CREATE_FLAG_FLOW_TRANSMIT_FAST (1<<11) /**< original flow transmit fast. */
+#define SFE_RULE_CREATE_FLAG_RETURN_TRANSMIT_FAST (1<<12) /**< return flow transmit fast. */
 
 /**
  * Rule creation validity flags.

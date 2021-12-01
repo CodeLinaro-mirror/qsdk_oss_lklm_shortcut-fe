@@ -85,6 +85,12 @@ struct sfe_ipv6_tcp_connection_match {
 					/* Source interface check.*/
 #define SFE_IPV6_CONNECTION_MATCH_FLAG_PASSTHROUGH (1<<14)
 					/* passthrough flow: encap/decap to be skipped for this flow */
+#define SFE_IPV6_CONNECTION_MATCH_FLAG_FAST_XMIT (1<<15)
+					/* go fast xmit*/
+#define SFE_IPV6_CONNECTION_MATCH_FLAG_FAST_XMIT_FLOW_CHECKED (1<<16)
+					/* fast xmit checked or not*/
+#define SFE_IPV6_CONNECTION_MATCH_FLAG_FAST_XMIT_DEV_ADMISSION (1<<17)
+					/* Fast xmit may be possible for this flow, if SFE check passes */
 
 /*
  * IPv6 connection matching structure.
@@ -194,6 +200,11 @@ struct sfe_ipv6_connection_match {
 	 * Size of all needed L2 headers
 	 */
 	u16 l2_hdr_size;
+
+	/*
+	* xmit device's feature
+	 */
+	netdev_features_t features;
 };
 
 /*
@@ -322,6 +333,7 @@ struct sfe_ipv6_stats {
 	u64 connection_flushes64;		/* Number of IPv6 connection flushes */
 	u64 packets_dropped64;			/* Number of IPv4 packets dropped */
 	u64 packets_forwarded64;		/* Number of IPv6 packets forwarded */
+	u64 packets_fast_xmited64;           /* Number of IPv6 packets fast transmited */
 	u64 packets_not_forwarded64;	/* Number of IPv6 packets not forwarded */
 	u64 exception_events64[SFE_IPV6_EXCEPTION_EVENT_LAST];
 	u64 pppoe_encap_packets_forwarded64;	/* Number of IPv6 PPPoE encap packets forwarded */

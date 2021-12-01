@@ -380,6 +380,46 @@ sfe_alloc_response_msg(sfe_msg_types_t type, void *msg)
 }
 
 /*
+ * sfe_fast_xmit_check()
+ *	Check the fast transmit feasibility.
+ *
+ * This check the per direction's  attribute that could not go fast
+ * transmit
+ * xfrm packets, come from a local socket or need sk validation on the skb
+ */
+bool sfe_fast_xmit_check(struct sk_buff *skb, netdev_features_t features)
+{
+
+#ifdef CONFIG_SOCK_VALIDATE_XMIT
+	if (skb->sk && sk_fullsock(skb->sk) && skb->sk->sk_validate_xmit_skb) {
+		DEBUG_INFO("%px:need sk validation\n", skb);
+		return false;
+#ifdef CONFIG_TLS_DEVICE
+	} else if (skb->decrypted) {
+		DEBUG_INFO("%px:SK or decrypted\n", skb);
+		return false;
+#endif
+	}
+#endif
+	if (skb_vlan_tag_present(skb)) {
+		DEBUG_INFO("%px:Vlan is present\n", skb);
+		return false;
+	}
+
+	if (netif_needs_gso(skb, features)) {
+		DEBUG_INFO("%px:Need to be gso\n", skb);
+		return false;
+	}
+
+	if (skb_sec_path(skb)) {
+		DEBUG_INFO("%px:XFRM is present\n", skb);
+		return false;
+	}
+
+	return true;
+}
+
+/*
  * sfe_enqueue_msg()
  * 	Queue response message
  *

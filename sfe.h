@@ -134,6 +134,11 @@ extern int (*athrs_fast_nat_recv)(struct sk_buff *skb);
 extern int nf_ct_tcp_no_window_check;
 
 /*
+ * Check the fast transmit feasibility.
+ */
+bool sfe_fast_xmit_check(struct sk_buff *skb, netdev_features_t features);
+
+/*
  * This callback will be called in a timer
  * at 100 times per second to sync stats back to
  * Linux connection track.

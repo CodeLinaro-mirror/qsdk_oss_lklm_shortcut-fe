@@ -308,6 +308,7 @@ static void sfe_ipv4_update_summary_stats(struct sfe_ipv4 *si,  struct sfe_ipv4_
 		stats->connection_flushes64 += s->connection_flushes64;
 		stats->packets_dropped64 += s->packets_dropped64;
 		stats->packets_forwarded64 += s->packets_forwarded64;
+		stats->packets_fast_xmited64 += s->packets_fast_xmited64;
 		stats->packets_not_forwarded64 += s->packets_not_forwarded64;
 		stats->pppoe_encap_packets_forwarded64 += s->pppoe_encap_packets_forwarded64;
 		stats->pppoe_decap_packets_forwarded64 += s->pppoe_decap_packets_forwarded64;
@@ -1218,9 +1219,11 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 		original_cm->dscp = msg->dscp_rule.flow_dscp << SFE_IPV4_DSCP_SHIFT;
 		original_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_DSCP_REMARK;
 	}
-
 	if (msg->rule_flags & SFE_RULE_CREATE_FLAG_BRIDGE_FLOW) {
 		original_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_BRIDGE_FLOW;
+	}
+	if (msg->rule_flags & SFE_RULE_CREATE_FLAG_FLOW_TRANSMIT_FAST) {
+		original_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_FAST_XMIT_DEV_ADMISSION;
 	}
 
 	/*
@@ -1415,9 +1418,11 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 		reply_cm->dscp = msg->dscp_rule.return_dscp << SFE_IPV4_DSCP_SHIFT;
 		reply_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_DSCP_REMARK;
 	}
-
 	if (msg->rule_flags & SFE_RULE_CREATE_FLAG_BRIDGE_FLOW) {
 		reply_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_BRIDGE_FLOW;
+	}
+	if (msg->rule_flags & SFE_RULE_CREATE_FLAG_RETURN_TRANSMIT_FAST) {
+		reply_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_FAST_XMIT_DEV_ADMISSION;
 	}
 
 	if ((IPPROTO_GRE == tuple->protocol) && !sfe_ipv4_is_local_ip(si, reply_cm->match_dest_ip)) {
@@ -1984,6 +1989,7 @@ static bool sfe_ipv4_debug_dev_read_connections_connection(struct sfe_ipv4 *si, 
 	u32 packet, byte, original_cm_flags;
 	u16 pppoe_session_id;
 	u8 pppoe_remote_mac[ETH_ALEN];
+	u32 original_fast_xmit, reply_fast_xmit;
 #ifdef CONFIG_NF_FLOW_COOKIE
 	int src_flow_cookie, dst_flow_cookie;
 #endif
@@ -2024,6 +2030,7 @@ static bool sfe_ipv4_debug_dev_read_connections_connection(struct sfe_ipv4 *si, 
 	src_rx_packets = original_cm->rx_packet_count64;
 	src_rx_bytes = original_cm->rx_byte_count64;
 	src_mark = original_cm->mark;
+	original_fast_xmit = (original_cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_FAST_XMIT);
 	dest_dev = c->reply_dev;
 	dest_ip = c->dest_ip;
 	dest_ip_xlate = c->dest_ip_xlate;
@@ -2034,6 +2041,7 @@ static bool sfe_ipv4_debug_dev_read_connections_connection(struct sfe_ipv4 *si, 
 	dest_rx_packets = reply_cm->rx_packet_count64;
 	dest_rx_bytes = reply_cm->rx_byte_count64;
 	dest_mark = reply_cm->mark;
+	reply_fast_xmit = (reply_cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_FAST_XMIT);
 	last_sync_jiffies = get_jiffies_64() - c->last_sync_jiffies;
 	original_cm_flags = original_cm->flags;
 	pppoe_session_id = original_cm->pppoe_session_id;
@@ -2053,12 +2061,14 @@ static bool sfe_ipv4_debug_dev_read_connections_connection(struct sfe_ipv4 *si, 
 				"src_priority=\"%u\" src_dscp=\"%u\" "
 				"src_rx_pkts=\"%llu\" src_rx_bytes=\"%llu\" "
 				"src_mark=\"%08x\" "
+				"src_fast_xmit=\"%s\" "
 				"dest_dev=\"%s\" "
 				"dest_ip=\"%pI4\" dest_ip_xlate=\"%pI4\" "
 				"dest_port=\"%u\" dest_port_xlate=\"%u\" "
 				"dest_priority=\"%u\" dest_dscp=\"%u\" "
 				"dest_rx_pkts=\"%llu\" dest_rx_bytes=\"%llu\" "
 				"dest_mark=\"%08x\" "
+				"reply_fast_xmit=\"%s\" "
 #ifdef CONFIG_NF_FLOW_COOKIE
 				"src_flow_cookie=\"%d\" dst_flow_cookie=\"%d\" "
 #endif
@@ -2070,12 +2080,14 @@ static bool sfe_ipv4_debug_dev_read_connections_connection(struct sfe_ipv4 *si, 
 				src_priority, src_dscp,
 				src_rx_packets, src_rx_bytes,
 				src_mark,
+				original_fast_xmit ? "Yes" : "No",
 				dest_dev->name,
 				&dest_ip, &dest_ip_xlate,
 				ntohs(dest_port), ntohs(dest_port_xlate),
 				dest_priority, dest_dscp,
 				dest_rx_packets, dest_rx_bytes,
 				dest_mark,
+				reply_fast_xmit ? "Yes" : "No",
 #ifdef CONFIG_NF_FLOW_COOKIE
 				src_flow_cookie, dst_flow_cookie,
 #endif
@@ -2220,6 +2232,7 @@ static bool sfe_ipv4_debug_dev_read_stats(struct sfe_ipv4 *si, char *buffer, cha
 	bytes_read = snprintf(msg, CHAR_DEV_MSG_SIZE, "\t<stats "
 			      "num_connections=\"%u\" "
 			      "pkts_dropped=\"%llu\" "
+			      "pkts_fast_xmited=\"%llu\" "
 			      "pkts_forwarded=\"%llu\" pkts_not_forwarded=\"%llu\" "
 			      "create_requests=\"%llu\" create_collisions=\"%llu\" "
 			      "create_failures=\"%llu\" "
@@ -2231,6 +2244,7 @@ static bool sfe_ipv4_debug_dev_read_stats(struct sfe_ipv4 *si, char *buffer, cha
 			      "pppoe_bridge_pkts_fwded=\"%llu\" />\n",
 				num_conn,
 				stats.packets_dropped64,
+				stats.packets_fast_xmited64,
 				stats.packets_forwarded64,
 				stats.packets_not_forwarded64,
 				stats.connection_create_requests64,
@@ -2458,13 +2472,14 @@ static ssize_t sfe_ipv4_set_cpu(struct device *dev,
 	}
 	return size;
 }
+
 /*
  * sysfs attributes.
  */
 static const struct device_attribute sfe_ipv4_cpu_attr =
 	__ATTR(stats_work_cpu, S_IWUSR | S_IRUGO, sfe_ipv4_get_cpu, sfe_ipv4_set_cpu);
 
- /*
+/*
  * sfe_ipv4_conn_match_hash_init()
  *	Initialize conn match hash lists
  */
@@ -2656,6 +2671,7 @@ void sfe_ipv4_exit(void)
 	sysfs_remove_file(si->sys_ipv4, &sfe_ipv4_flow_cookie_attr.attr);
 #endif /* CONFIG_NF_FLOW_COOKIE */
 	sysfs_remove_file(si->sys_ipv4, &sfe_ipv4_debug_dev_attr.attr);
+
 	sysfs_remove_file(si->sys_ipv4, &sfe_ipv4_cpu_attr.attr);
 
 	kobject_put(si->sys_ipv4);

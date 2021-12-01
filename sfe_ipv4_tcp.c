@@ -131,6 +131,8 @@ int sfe_ipv4_recv_tcp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 	bool ret;
 	bool hw_csum;
 	bool bridge_flow;
+	bool fast_xmit;
+	netdev_features_t features;
 
 	/*
 	 * Is our packet too short to contain a valid TCP header?
@@ -690,6 +692,20 @@ int sfe_ipv4_recv_tcp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 		skb->mark = cm->connection->mark;
 	}
 
+	/*
+	 * For the first packets, check if it could got fast xmit.
+	 */
+	if (unlikely(!(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_FAST_XMIT_FLOW_CHECKED)
+				&& (cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_FAST_XMIT_DEV_ADMISSION))){
+		cm->features = netif_skb_features(skb);
+		if (likely(sfe_fast_xmit_check(skb, cm->features))) {
+			cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_FAST_XMIT;
+		}
+		cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_FAST_XMIT_FLOW_CHECKED;
+	}
+	features = cm->features;
+	fast_xmit = !!(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_FAST_XMIT);
+
 	rcu_read_unlock();
 
 	this_cpu_inc(si->stats_pcpu->packets_forwarded64);
@@ -699,6 +715,15 @@ int sfe_ipv4_recv_tcp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 	 * start fetching the necessary cache line now.
 	 */
 	prefetch(skb_shinfo(skb));
+
+	/*
+	 * We do per packet condition check before we could fast xmit the
+	 * packet.
+	 */
+	if (likely(fast_xmit && dev_fast_xmit(skb, xmit_dev, features))) {
+		this_cpu_inc(si->stats_pcpu->packets_fast_xmited64);
+		return 1;
+	}
 
 	/*
 	 * Mark that this packet has been fast forwarded.
