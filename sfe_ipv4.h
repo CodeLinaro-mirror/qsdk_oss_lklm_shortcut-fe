@@ -18,6 +18,9 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+#ifndef __SFE_IPV4_H
+#define __SFE_IPV4_H
+
 #define SFE_IPV4_DSCP_MASK 0x3
 #define SFE_IPV4_DSCP_SHIFT 2
 
@@ -63,6 +66,9 @@ struct sfe_ipv4_tcp_connection_match {
 					/* Bridge flow */
 #define SFE_IPV4_CONNECTION_MATCH_FLAG_MARK (1<<11)
 					/* skb mark of the packet */
+#define SFE_IPV4_CONNECTION_MATCH_FLAG_INSERT_EGRESS_VLAN_TAG (1<<12)
+					/* Insert VLAN tag */
+
 /*
  * IPv4 connection matching structure.
  */
@@ -104,6 +110,13 @@ struct sfe_ipv4_connection_match {
 	union {				/* Protocol-specific state */
 		struct sfe_ipv4_tcp_connection_match tcp;
 	} protocol_state;
+
+	/*
+	 * VLAN headers
+	 */
+	struct sfe_vlan_hdr ingress_vlan_hdr[SFE_MAX_VLAN_DEPTH];
+	struct sfe_vlan_hdr egress_vlan_hdr[SFE_MAX_VLAN_DEPTH];
+
 	/*
 	 * Stats recorded in a sync period. These stats will be added to
 	 * rx_packet_count64/rx_byte_count64 after a sync period.
@@ -146,6 +159,9 @@ struct sfe_ipv4_connection_match {
 	u16 xmit_src_mac[ETH_ALEN / 2];
 					/* Source MAC address to use when forwarding */
 
+	u8 ingress_vlan_hdr_cnt;        /* Ingress active vlan headers count */
+	u8 egress_vlan_hdr_cnt;         /* Egress active vlan headers count */
+
 	/*
 	 * Summary stats.
 	 */
@@ -157,6 +173,11 @@ struct sfe_ipv4_connection_match {
 	 */
 	u16 pppoe_session_id;
 	u8 pppoe_remote_mac[ETH_ALEN];
+
+	/*
+	 * Size of all needed L2 headers
+	 */
+	u16 l2_hdr_size;
 };
 
 /*
@@ -243,6 +264,7 @@ enum sfe_ipv4_exception_events {
 	SFE_IPV4_EXCEPTION_EVENT_INVALID_PPPOE_SESSION,
 	SFE_IPV4_EXCEPTION_EVENT_INCORRECT_PPPOE_PARSING,
 	SFE_IPV4_EXCEPTION_EVENT_PPPOE_NOT_SET_IN_CME,
+	SFE_IPV4_EXCEPTION_EVENT_INGRESS_VLAN_TAG_MISMATCH,
 	SFE_IPV4_EXCEPTION_EVENT_LAST
 };
 
@@ -361,3 +383,5 @@ sfe_ipv4_find_connection_match_rcu(struct sfe_ipv4 *si, struct net_device *dev, 
 
 void sfe_ipv4_exit(void);
 int sfe_ipv4_init(void);
+
+#endif /* __SFE_IPV4_H */

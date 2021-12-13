@@ -18,6 +18,9 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+#ifndef __SFE_IPV6_H
+#define __SFE_IPV6_H
+
 #define CHAR_DEV_MSG_SIZE 768
 
 #define SFE_IPV6_DSCP_MASK 0xf03f
@@ -76,6 +79,9 @@ struct sfe_ipv6_tcp_connection_match {
 					/* Bridge flow */
 #define SFE_IPV6_CONNECTION_MATCH_FLAG_MARK (1<<11)
 					/* set skb mark*/
+#define SFE_IPV6_CONNECTION_MATCH_FLAG_INSERT_EGRESS_VLAN_TAG (1<<12)
+					/* Insert VLAN tag */
+
 /*
  * IPv6 connection matching structure.
  */
@@ -115,6 +121,13 @@ struct sfe_ipv6_connection_match {
 	union {				/* Protocol-specific state */
 		struct sfe_ipv6_tcp_connection_match tcp;
 	} protocol_state;
+
+	/*
+	 * VLAN headers
+	 */
+	struct sfe_vlan_hdr ingress_vlan_hdr[SFE_MAX_VLAN_DEPTH];
+	struct sfe_vlan_hdr egress_vlan_hdr[SFE_MAX_VLAN_DEPTH];
+
 	/*
 	 * Stats recorded in a sync period. These stats will be added to
 	 * rx_packet_count64/rx_byte_count64 after a sync period.
@@ -152,6 +165,9 @@ struct sfe_ipv6_connection_match {
 	u16 xmit_src_mac[ETH_ALEN / 2];
 					/* Source MAC address to use when forwarding */
 
+	u8 ingress_vlan_hdr_cnt;        /* Ingress active vlan headers count */
+	u8 egress_vlan_hdr_cnt;         /* Egress active vlan headers count */
+
 	/*
 	 * Summary stats.
 	 */
@@ -163,6 +179,11 @@ struct sfe_ipv6_connection_match {
 	 */
 	u16 pppoe_session_id;
 	u8 pppoe_remote_mac[ETH_ALEN];
+
+	/*
+	 * Size of all needed L2 headers
+	 */
+	u16 l2_hdr_size;
 };
 
 /*
@@ -248,6 +269,8 @@ enum sfe_ipv6_exception_events {
 	SFE_IPV6_EXCEPTION_EVENT_INVALID_PPPOE_SESSION,
 	SFE_IPV6_EXCEPTION_EVENT_INCORRECT_PPPOE_PARSING,
 	SFE_IPV6_EXCEPTION_EVENT_PPPOE_NOT_SET_IN_CME,
+	SFE_IPV6_EXCEPTION_EVENT_NOT_ENOUGH_HEADROOM,
+	SFE_IPV6_EXCEPTION_EVENT_INGRESS_VLAN_TAG_MISMATCH,
 	SFE_IPV6_EXCEPTION_EVENT_LAST
 };
 
@@ -396,3 +419,5 @@ void sfe_ipv6_sync_status(struct sfe_ipv6 *si,
 
 void sfe_ipv6_exit(void);
 int sfe_ipv6_init(void);
+
+#endif /* __SFE_IPV6_H */

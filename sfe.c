@@ -31,6 +31,7 @@
 #include "sfe_api.h"
 #include "sfe.h"
 #include "sfe_pppoe.h"
+#include "sfe_vlan.h"
 
 extern int max_ipv4_conn;
 extern int max_ipv6_conn;
@@ -457,36 +458,51 @@ static bool sfe_recv_parse_l2(struct net_device *dev, struct sk_buff *skb, struc
 	sfe_l2_hdr_offset_set(l2_info, ((skb->data - ETH_HLEN) - skb->head));
 
 	/*
-	 * TODO: Add VLAN parsing here.
-	 * Add VLAN fields to l2_info structure and update l2_hdr_size
-	 * In case of exception, use l2_hdr_size to move the data pointer back
+	 * VLAN parsing
 	 */
+	if (unlikely(!sfe_vlan_check_and_parse_tag(skb, l2_info))) {
+		return false;
+	}
 
 	/*
 	 * PPPoE parsing
 	 */
-	if (unlikely(htons(ETH_P_PPP_SES) != skb->protocol)) {
-		return false;
-	}
+	if (htons(ETH_P_PPP_SES) == skb->protocol) {
+		/*
+		 * Parse only PPPoE session packets
+		 * skb->data is pointing to PPPoE hdr
+		 */
+		if (!sfe_pppoe_parse_hdr(skb, l2_info)) {
 
-	/*
-	 * Parse only PPPoE session packets
-	 * skb->data is pointing to PPPoE hdr
-	 */
-	if (!sfe_pppoe_parse_hdr(skb, l2_info)) {
+			/*
+			 * For exception from PPPoE return from here without modifying the skb->data
+			 * This includes non-IPv4/v6 cases also
+			 */
+			return false;
+		}
 
 		/*
-		 * For exception from PPPoE return from here without modifying the skb->data
-		 * This includes non-IPv4/v6 cases also
+		 * Pull by L2 header size
 		 */
-		return false;
+		__skb_pull(skb, sfe_l2_hdr_size_get(l2_info));
 	}
+	return true;
+}
+
+/*
+ * sfe_recv_undo_parse_l2()
+ */
+static void sfe_recv_undo_parse_l2(struct net_device *dev, struct sk_buff *skb, struct sfe_l2_info *l2_info)
+{
+	/*
+	 * PPPoE undo
+	 */
+	__skb_push(skb, sfe_l2_hdr_size_get(l2_info));
 
 	/*
-	 * Pull by L2 header size considering all L2.5 headers
+	 * VLAN undo
 	 */
-	__skb_pull(skb, sfe_l2_hdr_size_get(l2_info));
-	return true;
+	sfe_vlan_undo_parse(skb, l2_info);
 }
 
 /*
@@ -1143,6 +1159,8 @@ int sfe_recv(struct sk_buff *skb)
 	 * Setting parse flags to 0 since l2_info is passed for non L2.5 header case as well
 	 */
 	l2_info.parse_flags = 0;
+	l2_info.l2_hdr_size = 0;
+	l2_info.vlan_hdr_cnt = 0;
 
 #ifdef CONFIG_NET_CLS_ACT
 	/*
@@ -1170,7 +1188,7 @@ int sfe_recv(struct sk_buff *skb)
 			return sfe_ipv4_recv(dev, skb, &l2_info, false);
 		}
 
-		DEBUG_TRACE("No IPv4 address for device: %s\n", dev->name);
+		DEBUG_TRACE("No IPv4 address for device: %s skb=%px\n", dev->name, skb);
 		return 0;
 
 	case ETH_P_IPV6:
@@ -1178,7 +1196,7 @@ int sfe_recv(struct sk_buff *skb)
 			return sfe_ipv6_recv(dev, skb, &l2_info, false);
 		}
 
-		DEBUG_TRACE("No IPv6 address for device: %s\n", dev->name);
+		DEBUG_TRACE("No IPv6 address for device: %s skb=%px\n", dev->name, skb);
 		return 0;
 
 	default:
@@ -1189,7 +1207,8 @@ int sfe_recv(struct sk_buff *skb)
 	 * Stop L2 processing if L2 feature is disabled.
 	 */
 	if (!sfe_is_l2_feature_enabled()) {
-		DEBUG_TRACE("Unsupported protocol %d (L2 feature is disabled)\n", ntohs(skb->protocol));
+		DEBUG_TRACE("Unsupported protocol %#x %s (L2 feature is disabled) skb=%px\n",
+				ntohs(skb->protocol), dev->name, skb);
 		return 0;
 	}
 
@@ -1197,8 +1216,8 @@ int sfe_recv(struct sk_buff *skb)
 	 * Parse the L2 headers to find the L3 protocol and the L2 header offset
 	 */
 	if (unlikely(!sfe_recv_parse_l2(dev, skb, &l2_info))) {
-		DEBUG_TRACE("%px: Invalid L2.5 header format with protocol : %d\n", skb, ntohs(skb->protocol));
-		return 0;
+		DEBUG_TRACE("%px: Invalid L2.5 header format with protocol : %x\n", skb, ntohs(skb->protocol));
+		goto send_to_linux;
 	}
 
 	/*
@@ -1215,10 +1234,16 @@ int sfe_recv(struct sk_buff *skb)
 
 	if (likely(l2_info.protocol == ETH_P_IPV6)) {
 		ret = sfe_ipv6_recv(dev, skb, &l2_info, false);
-		if (likely(ret)) {
-			return ret;
+		if (unlikely(!ret)) {
+			goto send_to_linux;
 		}
+		return ret;
 	}
+
+	DEBUG_TRACE("Non-IP(%x) %s skb=%px skb_vlan:%x/%x/%x skb_proto=%x\n",
+			l2_info.protocol, dev->name, skb,
+			ntohs(skb->vlan_proto), skb->vlan_tci, skb_vlan_tag_present(skb),
+		       	htons(skb->protocol));
 
 send_to_linux:
 	/*
@@ -1226,7 +1251,7 @@ send_to_linux:
 	 * a. There is any exception from IPV4/V6
 	 * b. If the next protocol is neither IPV4 nor IPV6
 	 */
-	__skb_push(skb, sfe_l2_hdr_size_get(&l2_info));
+	sfe_recv_undo_parse_l2(dev, skb, &l2_info);
 
 	return 0;
 }

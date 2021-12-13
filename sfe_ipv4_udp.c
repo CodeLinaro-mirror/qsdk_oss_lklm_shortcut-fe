@@ -30,6 +30,7 @@
 #include "sfe_flow_cookie.h"
 #include "sfe_ipv4.h"
 #include "sfe_pppoe.h"
+#include "sfe_vlan.h"
 
 /*
  * sfe_ipv4_udp_sk_deliver()
@@ -207,6 +208,16 @@ int sfe_ipv4_recv_udp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 	}
 #endif
 
+	/*
+	 * Do we expect an ingress VLAN tag for this flow?
+	 */
+	if (unlikely(!sfe_vlan_validate_ingress_tag(skb, cm->ingress_vlan_hdr_cnt, cm->ingress_vlan_hdr, l2_info))) {
+		rcu_read_unlock();
+		sfe_ipv4_exception_stats_inc(si, SFE_IPV4_EXCEPTION_EVENT_INGRESS_VLAN_TAG_MISMATCH);
+		DEBUG_TRACE("VLAN tag mismatch. skb=%px\n", skb);
+		return 0;
+	}
+
 	bridge_flow = !!(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_BRIDGE_FLOW);
 
 	/*
@@ -295,6 +306,16 @@ int sfe_ipv4_recv_udp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 	}
 
 	/*
+	 * Check if skb has enough headroom to write L2 headers
+	 */
+	if (unlikely(skb_headroom(skb) < cm->l2_hdr_size)) {
+		rcu_read_unlock();
+		DEBUG_WARN("%px: Not enough headroom: %u\n", skb, skb_headroom(skb));
+		sfe_ipv4_exception_stats_inc(si, SFE_IPV4_EXCEPTION_EVENT_NO_HEADROOM);
+		return 0;
+	}
+
+	/*
 	 * From this point on we're good to modify the packet.
 	 */
 
@@ -302,18 +323,9 @@ int sfe_ipv4_recv_udp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 	 * For PPPoE flows, add PPPoE header before L2 header is added.
 	 */
 	if (cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_PPPOE_ENCAP) {
-		if (unlikely(!sfe_pppoe_add_header(skb, cm->pppoe_session_id, PPP_IP))) {
-			rcu_read_unlock();
-			DEBUG_WARN("%px: PPPoE header addition failed\n", skb);
-			sfe_ipv4_exception_stats_inc(si, SFE_IPV4_EXCEPTION_EVENT_NO_HEADROOM);
-			return 0;
-		}
+		sfe_pppoe_add_header(skb, cm->pppoe_session_id, PPP_IP);
 		this_cpu_inc(si->stats_pcpu->pppoe_encap_packets_forwarded64);
 	}
-
-	/*
-	 * TODO: VLAN header should be added here when they are supported.
-	 */
 
 	/*
 	 * Enable HW csum if rx checksum is verified and xmit interface is CSUM offload capable.
@@ -454,7 +466,14 @@ int sfe_ipv4_recv_udp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 	skb->dev = xmit_dev;
 
 	/*
-	 * Check to see if we need to write a header.
+	 * Check to see if we need to add VLAN tags
+	 */
+	if (unlikely(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_INSERT_EGRESS_VLAN_TAG)) {
+		sfe_vlan_add_tag(skb, cm->egress_vlan_hdr_cnt, cm->egress_vlan_hdr);
+	}
+
+	/*
+	 * Check to see if we need to write an Ethernet header.
 	 */
 	if (likely(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_WRITE_L2_HDR)) {
 		if (unlikely(!(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_WRITE_FAST_ETH_HDR))) {

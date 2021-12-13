@@ -41,6 +41,7 @@
 #include "sfe_ipv4_udp.h"
 #include "sfe_ipv4_tcp.h"
 #include "sfe_ipv4_icmp.h"
+#include "sfe_pppoe.h"
 
 static char *sfe_ipv4_exception_events_string[SFE_IPV4_EXCEPTION_EVENT_LAST] = {
 	"UDP_HEADER_INCOMPLETE",
@@ -906,6 +907,59 @@ sfe_ipv4_update_protocol_state(struct sfe_ipv4_connection *c,
 	}
 }
 
+/*
+ * sfe_ipv4_match_entry_set_vlan()
+ */
+static void sfe_ipv4_match_entry_set_vlan(
+			struct sfe_ipv4_connection_match *cm,
+			u32 primary_ingress_vlan_tag,
+			u32 primary_egress_vlan_tag,
+			u32 secondary_ingress_vlan_tag,
+			u32 secondary_egress_vlan_tag)
+{
+	u16 tpid;
+	/*
+	 * Prevent stacking header counts when updating.
+	 */
+	cm->ingress_vlan_hdr_cnt = 0;
+	cm->egress_vlan_hdr_cnt = 0;
+	memset(cm->ingress_vlan_hdr, 0, sizeof(cm->ingress_vlan_hdr));
+	memset(cm->egress_vlan_hdr, 0, sizeof(cm->egress_vlan_hdr));
+
+	/*
+	 * vlan_hdr[0] corresponds to outer tag
+	 * vlan_hdr[1] corresponds to inner tag
+	 * Extract the vlan information (tpid and tci) from rule message
+	 */
+	if ((primary_ingress_vlan_tag & VLAN_VID_MASK) != SFE_VLAN_ID_NOT_CONFIGURED) {
+		tpid = (u16)(primary_ingress_vlan_tag >> 16);
+		cm->ingress_vlan_hdr[0].tpid = ntohs(tpid);
+		cm->ingress_vlan_hdr[0].tci = (u16)primary_ingress_vlan_tag;
+		cm->ingress_vlan_hdr_cnt++;
+	}
+
+	if ((secondary_ingress_vlan_tag & VLAN_VID_MASK) != SFE_VLAN_ID_NOT_CONFIGURED) {
+		tpid = (u16)(secondary_ingress_vlan_tag >> 16);
+		cm->ingress_vlan_hdr[1].tpid = ntohs(tpid);
+		cm->ingress_vlan_hdr[1].tci = (u16)secondary_ingress_vlan_tag;
+		cm->ingress_vlan_hdr_cnt++;
+	}
+
+	if ((primary_egress_vlan_tag & VLAN_VID_MASK) != SFE_VLAN_ID_NOT_CONFIGURED) {
+		tpid = (u16)(primary_egress_vlan_tag >> 16);
+		cm->egress_vlan_hdr[0].tpid = ntohs(tpid);
+		cm->egress_vlan_hdr[0].tci = (u16)primary_egress_vlan_tag;
+		cm->egress_vlan_hdr_cnt++;
+	}
+
+	if ((secondary_egress_vlan_tag & VLAN_VID_MASK) != SFE_VLAN_ID_NOT_CONFIGURED) {
+		tpid = (u16)(secondary_egress_vlan_tag >> 16);
+		cm->egress_vlan_hdr[1].tpid = ntohs(tpid);
+		cm->egress_vlan_hdr[1].tci = (u16)secondary_egress_vlan_tag;
+		cm->egress_vlan_hdr_cnt++;
+	}
+}
+
 void sfe_ipv4_update_rule(struct sfe_ipv4_rule_create_msg *msg)
 {
 	struct sfe_ipv4_connection *c;
@@ -1042,11 +1096,11 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	 * trying to create.  If there is then we can't create a new one.
 	 */
 	c_old = sfe_ipv4_find_connection(si,
-						  msg->tuple.protocol,
-						  msg->tuple.flow_ip,
-						  msg->tuple.flow_ident,
-						  msg->tuple.return_ip,
-						  msg->tuple.return_ident);
+					msg->tuple.protocol,
+					msg->tuple.flow_ip,
+					msg->tuple.flow_ident,
+					msg->tuple.return_ip,
+					msg->tuple.return_ident);
 
 	if (c_old != NULL) {
 		this_cpu_inc(si->stats_pcpu->connection_create_collisions64);
@@ -1092,6 +1146,7 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	original_cm->xlate_src_port = msg->conn_rule.flow_ident_xlate;
 	original_cm->xlate_dest_ip = msg->conn_rule.return_ip_xlate;
 	original_cm->xlate_dest_port =msg->conn_rule.return_ident_xlate;
+
 	atomic_set(&original_cm->rx_packet_count, 0);
 	original_cm->rx_packet_count64 = 0;
 	atomic_set(&original_cm->rx_byte_count, 0);
@@ -1102,13 +1157,14 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 
 	original_cm->connection = c;
 	original_cm->counter_match = reply_cm;
+	original_cm->l2_hdr_size = 0;
+	original_cm->flags = 0;
 
 	/*
 	 * UDP Socket is valid only in decap direction.
 	 */
 	RCU_INIT_POINTER(original_cm->up, NULL);
 
-	original_cm->flags = 0;
 	if (msg->valid_flags & SFE_RULE_CREATE_MARK_VALID) {
 		original_cm->mark = msg->mark_rule.flow_mark;
 		original_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_MARK;
@@ -1124,6 +1180,25 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 
 	if (msg->rule_flags & SFE_RULE_CREATE_FLAG_BRIDGE_FLOW) {
 		original_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_BRIDGE_FLOW;
+	}
+
+	/*
+	 * Add VLAN rule to original_cm
+	 */
+	if (msg->valid_flags & SFE_RULE_CREATE_VLAN_VALID) {
+		struct sfe_vlan_rule *vlan_primary_rule = &msg->vlan_primary_rule;
+		struct sfe_vlan_rule *vlan_secondary_rule = &msg->vlan_secondary_rule;
+		sfe_ipv4_match_entry_set_vlan(original_cm,
+					     vlan_primary_rule->ingress_vlan_tag,
+					     vlan_primary_rule->egress_vlan_tag,
+					     vlan_secondary_rule->ingress_vlan_tag,
+					     vlan_secondary_rule->egress_vlan_tag);
+
+		if ((msg->rule_flags & SFE_RULE_CREATE_FLAG_USE_RETURN_BOTTOM_INTERFACE) &&
+			original_cm->egress_vlan_hdr_cnt > 0) {
+			original_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_INSERT_EGRESS_VLAN_TAG;
+			original_cm->l2_hdr_size += original_cm->egress_vlan_hdr_cnt * VLAN_HLEN;
+		}
 	}
 
 #ifdef CONFIG_NF_FLOW_COOKIE
@@ -1149,6 +1224,7 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 		}
 	}
 
+	reply_cm->l2_hdr_size = 0;
 	reply_cm->flags = 0;
 
 	/*
@@ -1169,12 +1245,14 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 		ether_addr_copy(original_cm->pppoe_remote_mac, msg->pppoe_rule.flow_pppoe_remote_mac);
 
 		reply_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_PPPOE_ENCAP;
+		reply_cm->l2_hdr_size += SFE_PPPOE_SESSION_HEADER_SIZE;
 		reply_cm->pppoe_session_id = msg->pppoe_rule.flow_pppoe_session_id;
 		ether_addr_copy(reply_cm->pppoe_remote_mac, msg->pppoe_rule.flow_pppoe_remote_mac);
 	}
 
 	if (msg->valid_flags & SFE_RULE_CREATE_PPPOE_ENCAP_VALID) {
 		original_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_PPPOE_ENCAP;
+		original_cm->l2_hdr_size += SFE_PPPOE_SESSION_HEADER_SIZE;
 		original_cm->pppoe_session_id = msg->pppoe_rule.return_pppoe_session_id;
 		ether_addr_copy(original_cm->pppoe_remote_mac, msg->pppoe_rule.return_pppoe_remote_mac);
 
@@ -1207,6 +1285,7 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 		ether_addr_copy((u8 *)original_cm->xmit_dest_mac, (u8 *)msg->conn_rule.return_mac);
 
 		original_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_WRITE_L2_HDR;
+		original_cm->l2_hdr_size += ETH_HLEN;
 
 		/*
 		 * If our dev writes Ethernet headers then we can write a really fast
@@ -1263,6 +1342,7 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 		reply_cm->priority = msg->qos_rule.return_qos_tag;
 		reply_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_PRIORITY_REMARK;
 	}
+
 	if (msg->valid_flags & SFE_RULE_CREATE_DSCP_MARKING_VALID) {
 		reply_cm->dscp = msg->dscp_rule.return_dscp << SFE_IPV4_DSCP_SHIFT;
 		reply_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_DSCP_REMARK;
@@ -1305,6 +1385,7 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 #else
 		if (!refcount_inc_not_zero(&sk->sk_refcnt)) {
 #endif
+			spin_unlock_bh(&si->lock);
 			kfree(reply_cm);
 			kfree(original_cm);
 			kfree(c);
@@ -1331,6 +1412,25 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 			ntohs(reply_cm->match_src_port), ntohs(reply_cm->xlate_src_port),
 			reply_cm->xmit_dev->name, &reply_cm->match_dest_ip, &reply_cm->xlate_dest_ip,
 			ntohs(reply_cm->match_dest_port), ntohs(reply_cm->xlate_dest_port));
+	}
+
+	/*
+	 * Add VLAN rule to reply_cm
+	 */
+	if (msg->valid_flags & SFE_RULE_CREATE_VLAN_VALID) {
+		struct sfe_vlan_rule *vlan_primary_rule = &msg->vlan_primary_rule;
+		struct sfe_vlan_rule *vlan_secondary_rule = &msg->vlan_secondary_rule;
+		sfe_ipv4_match_entry_set_vlan(reply_cm,
+					     vlan_primary_rule->egress_vlan_tag,
+					     vlan_primary_rule->ingress_vlan_tag,
+					     vlan_secondary_rule->egress_vlan_tag,
+					     vlan_secondary_rule->ingress_vlan_tag);
+
+		if ((msg->rule_flags & SFE_RULE_CREATE_FLAG_USE_FLOW_BOTTOM_INTERFACE) &&
+			reply_cm->egress_vlan_hdr_cnt > 0) {
+			reply_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_INSERT_EGRESS_VLAN_TAG;
+			reply_cm->l2_hdr_size += reply_cm->egress_vlan_hdr_cnt * VLAN_HLEN;
+		}
 	}
 
 #ifdef CONFIG_NF_FLOW_COOKIE
@@ -1381,6 +1481,7 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 		ether_addr_copy((u8 *)reply_cm->xmit_dest_mac, (u8 *)msg->conn_rule.flow_mac);
 
 		reply_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_WRITE_L2_HDR;
+		reply_cm->l2_hdr_size += ETH_HLEN;
 
 		/*
 		 * If our dev writes Ethernet headers then we can write a really fast
@@ -1405,23 +1506,6 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 		reply_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_XLATE_DEST;
 	}
 
-	c->protocol = tuple->protocol;
-	c->src_ip = tuple->flow_ip;
-	c->src_ip_xlate =  msg->conn_rule.flow_ip_xlate;
-	c->src_port = tuple->flow_ident;
-	c->src_port_xlate = msg->conn_rule.flow_ident_xlate;
-	c->original_dev = src_dev;
-	c->original_match = original_cm;
-	c->dest_ip = tuple->return_ip;
-	c->dest_ip_xlate = msg->conn_rule.return_ip_xlate;
-	c->dest_port = tuple->return_ident;
-	c->dest_port_xlate = msg->conn_rule.return_ident_xlate;
-	c->reply_dev = dest_dev;
-	c->reply_match = reply_cm;
-	c->debug_read_seq = 0;
-	c->last_sync_jiffies = get_jiffies_64();
-	c->removed = false;
-
 	/*
 	 * Initialize the protocol-specific information that we track.
 	 */
@@ -1444,6 +1528,26 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 		break;
 	}
 
+	/*
+	 * Fill in the ipv4_connection object.
+	 */
+	c->protocol = tuple->protocol;
+	c->src_ip = tuple->flow_ip;
+	c->src_ip_xlate =  msg->conn_rule.flow_ip_xlate;
+	c->src_port = tuple->flow_ident;
+	c->src_port_xlate = msg->conn_rule.flow_ident_xlate;
+	c->original_dev = src_dev;
+	c->original_match = original_cm;
+	c->dest_ip = tuple->return_ip;
+	c->dest_ip_xlate = msg->conn_rule.return_ip_xlate;
+	c->dest_port = tuple->return_ident;
+	c->dest_port_xlate = msg->conn_rule.return_ident_xlate;
+	c->reply_dev = dest_dev;
+	c->reply_match = reply_cm;
+	c->debug_read_seq = 0;
+	c->last_sync_jiffies = get_jiffies_64();
+	c->removed = false;
+
 	sfe_ipv4_connection_match_compute_translations(original_cm);
 	sfe_ipv4_connection_match_compute_translations(reply_cm);
 	sfe_ipv4_insert_connection(si, c);
@@ -1453,14 +1557,38 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	/*
 	 * We have everything we need!
 	 */
-	DEBUG_INFO("new connection - p: %d\n"
-		   "  s: %s:%pxM(%pxM):%pI4(%pI4):%u(%u)\n"
-		   "  d: %s:%pxM(%pxM):%pI4(%pI4):%u(%u)\n",
+	DEBUG_INFO("NEW connection - p: %d\n"
+		   "original_cm: match_dev=src_dev: %s %d %pM\n"
+		   " xmit_dev=dest_dev: %s %d %pM\n"
+		   " xmit_src_mac: %pM\n"
+		   " xmit_dest_mac: %pM\n"
+		   " flags: %x l2_hdr: %u\n"
+		   "flow_ip: %pI4:%u\n"
+		   "flow_ip_xlate: %pI4:%u\n"
+		   "flow_mac: %pM\n"
+		   "reply_cm: match_dev=dest_dev: %s %d %pM\n"
+		   " xmit_dev=src_dev: %s %d %pM\n"
+		   " xmit_src_mac: %pM\n"
+		   " xmit_dest_mac: %pM\n"
+		   " flags: %x l2_hdr: %u\n"
+		   "return_ip: %pI4:%u\n"
+		   "return_ip_xlate: %pI4:%u\n"
+		   "return_mac: %pM\n"
+		   "flags: valid=%x src_mac_valid=%x\n",
 		   tuple->protocol,
-		   src_dev->name, msg->conn_rule.flow_mac, NULL,
-		   &tuple->flow_ip, &msg->conn_rule.flow_ip_xlate, ntohs(tuple->flow_ident), ntohs(msg->conn_rule.flow_ident_xlate),
-		   dest_dev->name, NULL, msg->conn_rule.return_mac,
-		   &tuple->return_ip, &msg->conn_rule.return_ip_xlate, ntohs(tuple->return_ident), ntohs(msg->conn_rule.return_ident_xlate));
+		   original_cm->match_dev->name, original_cm->match_dev->ifindex, original_cm->match_dev->dev_addr,
+		   original_cm->xmit_dev->name, original_cm->xmit_dev->ifindex, original_cm->xmit_dev->dev_addr,
+		   original_cm->xmit_src_mac, original_cm->xmit_dest_mac, original_cm->flags, original_cm->l2_hdr_size,
+		   &tuple->flow_ip, ntohs(tuple->flow_ident),
+		   &msg->conn_rule.flow_ip_xlate, ntohs(msg->conn_rule.flow_ident_xlate),
+		   msg->conn_rule.flow_mac,
+		   reply_cm->match_dev->name, reply_cm->match_dev->ifindex, reply_cm->match_dev->dev_addr,
+		   reply_cm->xmit_dev->name, reply_cm->xmit_dev->ifindex, reply_cm->xmit_dev->dev_addr,
+		   reply_cm->xmit_src_mac, reply_cm->xmit_dest_mac, reply_cm->flags, reply_cm->l2_hdr_size,
+		   &tuple->return_ip, ntohs(tuple->return_ident),
+		   &msg->conn_rule.return_ip_xlate, ntohs(msg->conn_rule.return_ident_xlate),
+		   msg->conn_rule.return_mac,
+		   msg->valid_flags, msg->src_mac_rule.mac_valid_flags);
 
 	return 0;
 }
