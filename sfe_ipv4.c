@@ -32,6 +32,8 @@
 #include <linux/netfilter.h>
 #include <linux/inetdevice.h>
 #include <linux/netfilter_ipv4.h>
+#include <net/protocol.h>
+#include <net/gre.h>
 
 #include "sfe_debug.h"
 #include "sfe_api.h"
@@ -42,6 +44,7 @@
 #include "sfe_ipv4_tcp.h"
 #include "sfe_ipv4_icmp.h"
 #include "sfe_pppoe.h"
+#include "sfe_ipv4_gre.h"
 
 static char *sfe_ipv4_exception_events_string[SFE_IPV4_EXCEPTION_EVENT_LAST] = {
 	"UDP_HEADER_INCOMPLETE",
@@ -82,6 +85,11 @@ static char *sfe_ipv4_exception_events_string[SFE_IPV4_EXCEPTION_EVENT_LAST] = {
 	"IP_OPTIONS_INCOMPLETE",
 	"UNHANDLED_PROTOCOL",
 	"INVALID_SOURCE_INTERFACE",
+	"GRE_HEADER_INCOMPLETE",
+	"GRE_NO_CONNECTION",
+	"GRE_IP_OPTIONS_OR_INITIAL_FRAGMENT",
+	"GRE_SMALL_TTL",
+	"GRE_NEEDS_FRAGMENTATION"
 };
 
 static struct sfe_ipv4 __si;
@@ -730,6 +738,23 @@ void sfe_ipv4_exception_stats_inc(struct sfe_ipv4 *si, enum sfe_ipv4_exception_e
 }
 
 /*
+ * sfe_ipv4_is_loal_ip()
+ *	Returns true if IP is local; returns false otherwise.
+ */
+static bool sfe_ipv4_is_local_ip(struct sfe_ipv4 *si, __be32 ip_addr)
+{
+	struct net_device *dev;
+
+	dev = ip_dev_find(&init_net, ip_addr);
+	if (dev) {
+		dev_put(dev);
+		return true;
+	}
+
+	return false;
+}
+
+/*
  * sfe_ipv4_recv()
  *	Handle packet receives and forwaring.
  *
@@ -843,6 +868,12 @@ int sfe_ipv4_recv(struct net_device *dev, struct sk_buff *skb, struct sfe_l2_inf
 	if (IPPROTO_ICMP == protocol) {
 		return sfe_ipv4_recv_icmp(si, skb, dev, len, iph, ihl);
 	}
+
+#ifdef SFE_GRE_TUN_ENABLE
+	if (IPPROTO_GRE == protocol) {
+		return sfe_ipv4_recv_gre(si, skb, dev, len, iph, ihl, sync_on_find, tun_outer);
+	}
+#endif
 
 	sfe_ipv4_exception_stats_inc(si, SFE_IPV4_EXCEPTION_EVENT_UNHANDLED_PROTOCOL);
 
@@ -1145,7 +1176,17 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	original_cm->xlate_src_ip = msg->conn_rule.flow_ip_xlate;
 	original_cm->xlate_src_port = msg->conn_rule.flow_ident_xlate;
 	original_cm->xlate_dest_ip = msg->conn_rule.return_ip_xlate;
-	original_cm->xlate_dest_port =msg->conn_rule.return_ident_xlate;
+	original_cm->xlate_dest_port = msg->conn_rule.return_ident_xlate;
+
+	if (tuple->protocol == IPPROTO_GRE) {
+		/*
+		 * the PPTP is 4 tuple lookup.
+		 * During th rule lookup destination call id from packet
+		 * is matched against destination port in cm.
+		 */
+		original_cm->match_src_port = 0;
+		original_cm->xlate_src_port = 0;
+	}
 
 	atomic_set(&original_cm->rx_packet_count, 0);
 	original_cm->rx_packet_count64 = 0;
@@ -1201,6 +1242,10 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 		}
 	}
 
+	if ((IPPROTO_GRE == tuple->protocol) && !sfe_ipv4_is_local_ip(si, original_cm->match_dest_ip)) {
+		original_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_PASSTHROUGH;
+	}
+
 #ifdef CONFIG_NF_FLOW_COOKIE
 	original_cm->flow_cookie = 0;
 #endif
@@ -1217,7 +1262,7 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	 * are used. In such cases, do not use HW csum offload. csum offload is used only when we
 	 * are sending directly to the destination interface that supports it.
 	 */
-	if (likely(dest_dev->features & NETIF_F_HW_CSUM) && !netif_is_vxlan(dest_dev)) {
+	if (likely(dest_dev->features & NETIF_F_HW_CSUM) && sfe_dev_has_hw_csum(dest_dev)) {
 		if ((msg->conn_rule.return_top_interface_num == msg->conn_rule.return_interface_num) ||
 			(msg->rule_flags & SFE_RULE_CREATE_FLAG_USE_RETURN_BOTTOM_INTERFACE)) {
 			original_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_CSUM_OFFLOAD;
@@ -1328,7 +1373,17 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	reply_cm->xlate_src_ip = tuple->return_ip;
 	reply_cm->xlate_src_port = tuple->return_ident;
 	reply_cm->xlate_dest_ip = tuple->flow_ip;
-	reply_cm->xlate_dest_port = tuple->flow_ident;;
+	reply_cm->xlate_dest_port = tuple->flow_ident;
+
+	if (tuple->protocol == IPPROTO_GRE) {
+		/*
+		 * the PPTP is 4 tuple lookup.
+		 * During th rule lookup destination call id from packet
+		 * is matched against destination port in cm.
+		 */
+		reply_cm->match_src_port = 0;
+		reply_cm->xlate_src_port = 0;
+	}
 
 	atomic_set(&reply_cm->rx_packet_count, 0);
 	reply_cm->rx_packet_count64 = 0;
@@ -1357,6 +1412,10 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 
 	if (msg->rule_flags & SFE_RULE_CREATE_FLAG_BRIDGE_FLOW) {
 		reply_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_BRIDGE_FLOW;
+	}
+
+	if ((IPPROTO_GRE == tuple->protocol) && !sfe_ipv4_is_local_ip(si, reply_cm->match_dest_ip)) {
+		reply_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_PASSTHROUGH;
 	}
 
 	/*
@@ -1440,6 +1499,31 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 		}
 	}
 
+	/*
+	 * the net_protocol handler will be used only in decap path
+	 * for non passthrough case.
+	 */
+	original_cm->proto = NULL;
+	reply_cm->proto = NULL;
+
+#ifdef SFE_GRE_TUN_ENABLE
+	if ((IPPROTO_GRE == tuple->protocol) && !(reply_cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_PASSTHROUGH)) {
+		rcu_read_lock();
+		reply_cm->proto = rcu_dereference(inet_protos[IPPROTO_GRE]);
+		rcu_read_unlock();
+
+		if (unlikely(!reply_cm->proto)) {
+			kfree(reply_cm);
+			kfree(original_cm);
+			kfree(c);
+			dev_put(src_dev);
+			dev_put(dest_dev);
+			DEBUG_WARN("sfe: GRE proto handler is not registered\n");
+			return -EPERM;
+		}
+	}
+#endif
+
 #ifdef CONFIG_NF_FLOW_COOKIE
 	reply_cm->flow_cookie = 0;
 #endif
@@ -1457,7 +1541,7 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	 * are used. In such cases, do not use HW csum offload. csum offload is used only when we
 	 * are sending directly to the destination interface that supports it.
 	 */
-	if (likely(src_dev->features & NETIF_F_HW_CSUM) && !(netif_is_vxlan(src_dev) || netif_is_vxlan(dest_dev))) {
+	if (likely(src_dev->features & NETIF_F_HW_CSUM) && sfe_dev_has_hw_csum(src_dev)) {
 		if ((msg->conn_rule.flow_top_interface_num == msg->conn_rule.flow_interface_num) ||
 			(msg->rule_flags & SFE_RULE_CREATE_FLAG_USE_FLOW_BOTTOM_INTERFACE)) {
 			 reply_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_CSUM_OFFLOAD;

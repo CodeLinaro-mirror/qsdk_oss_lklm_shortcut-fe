@@ -26,6 +26,7 @@
 #include <linux/inetdevice.h>
 #include <net/pkt_sched.h>
 #include <net/vxlan.h>
+#include <net/gre.h>
 
 #include "sfe_debug.h"
 #include "sfe_api.h"
@@ -196,6 +197,64 @@ inline bool sfe_dev_is_layer_3_interface(struct net_device *dev, bool check_v4)
 	}
 
 	return false;
+}
+
+/*
+ * sfe_routed_dev_allow()
+ *	check whether routed acceleration allowed
+ */
+static bool sfe_routed_dev_allow(struct net_device *dev, bool is_routed,  bool check_v4)
+{
+	if (!is_routed) {
+		return true;
+	}
+
+	if (sfe_dev_is_layer_3_interface(dev, check_v4)) {
+		return true;
+	}
+
+	/*
+	 * in case of GRE / vxlan, these dev does not have IP address
+	 * so l3 interface check will fail. allow rule creation between gre / vxlan
+	 * and wan dev for routed flow.
+	 */
+	if (netif_is_vxlan(dev)) {
+		return true;
+	}
+
+#ifdef SFE_GRE_TUN_ENABLE
+	if (netif_is_gretap(dev) || netif_is_gre(dev)) {
+		return true;
+	}
+
+	if (netif_is_ip6gre(dev) || netif_is_ip6gretap(dev)) {
+		return true;
+	}
+#endif
+
+	return false;
+}
+
+/* sfe_dev_has_hw_csum()
+ *	check whether device supports hardware checksum offload
+ */
+bool sfe_dev_has_hw_csum(struct net_device *dev)
+{
+	if (netif_is_vxlan(dev)) {
+		return false;
+	}
+
+#ifdef SFE_GRE_TUN_ENABLE
+	if (netif_is_gre(dev) || netif_is_gretap(dev)) {
+		return false;
+	}
+
+	if (netif_is_ip6gre(dev) || netif_is_ip6gretap(dev)) {
+		return false;
+	}
+#endif
+
+	return true;
 }
 
 /*
@@ -546,6 +605,9 @@ sfe_tx_status_t sfe_create_ipv4_rule_msg(struct sfe_ctx_instance_internal *sfe_c
 	case IPPROTO_UDP:
 		break;
 
+	case IPPROTO_GRE:
+		break;
+
 	default:
 		ret = SFE_CMN_RESPONSE_EMSG;
 		sfe_incr_exceptions(SFE_EXCEPTION_PROTOCOL_NOT_SUPPORT);
@@ -569,7 +631,7 @@ sfe_tx_status_t sfe_create_ipv4_rule_msg(struct sfe_ctx_instance_internal *sfe_c
 	 * Does our input device support IP processing?
 	 */
 	src_dev = dev_get_by_index(&init_net, msg->msg.rule_create.conn_rule.flow_top_interface_num);
-	if (!src_dev || (is_routed && !sfe_dev_is_layer_3_interface(src_dev, true) && !netif_is_vxlan(src_dev))) {
+	if (!src_dev || !sfe_routed_dev_allow(src_dev, is_routed, true)) {
 		ret = SFE_CMN_RESPONSE_EINTERFACE;
 		sfe_incr_exceptions(SFE_EXCEPTION_SRC_DEV_NOT_L3);
 		goto failed_ret;
@@ -589,7 +651,7 @@ sfe_tx_status_t sfe_create_ipv4_rule_msg(struct sfe_ctx_instance_internal *sfe_c
 	 * Does our output device support IP processing?
 	 */
 	dest_dev = dev_get_by_index(&init_net, msg->msg.rule_create.conn_rule.return_top_interface_num);
-	if (!dest_dev || (is_routed && !sfe_dev_is_layer_3_interface(dest_dev, true) && !netif_is_vxlan(dest_dev))) {
+	if (!dest_dev || !sfe_routed_dev_allow(dest_dev, is_routed, true)) {
 		ret = SFE_CMN_RESPONSE_EINTERFACE;
 		sfe_incr_exceptions(SFE_EXCEPTION_DEST_DEV_NOT_L3);
 		goto failed_ret;
@@ -911,6 +973,9 @@ sfe_tx_status_t sfe_create_ipv6_rule_msg(struct sfe_ctx_instance_internal *sfe_c
 	case IPPROTO_IPIP:
 		break;
 
+	case IPPROTO_GRE:
+		break;
+
 	default:
 		ret = SFE_CMN_RESPONSE_EMSG;
 		sfe_incr_exceptions(SFE_EXCEPTION_PROTOCOL_NOT_SUPPORT);
@@ -921,7 +986,7 @@ sfe_tx_status_t sfe_create_ipv6_rule_msg(struct sfe_ctx_instance_internal *sfe_c
 	 * Does our input device support IP processing?
 	 */
 	src_dev = dev_get_by_index(&init_net, msg->msg.rule_create.conn_rule.flow_top_interface_num);
-	if (!src_dev || (is_routed && !sfe_dev_is_layer_3_interface(src_dev, false) && !netif_is_vxlan(src_dev))) {
+	if (!src_dev || !sfe_routed_dev_allow(src_dev, is_routed, false)) {
 		ret = SFE_CMN_RESPONSE_EINTERFACE;
 		sfe_incr_exceptions(SFE_EXCEPTION_SRC_DEV_NOT_L3);
 		goto failed_ret;
@@ -941,7 +1006,7 @@ sfe_tx_status_t sfe_create_ipv6_rule_msg(struct sfe_ctx_instance_internal *sfe_c
 	 * Does our output device support IP processing?
 	 */
 	dest_dev = dev_get_by_index(&init_net, msg->msg.rule_create.conn_rule.return_top_interface_num);
-	if (!dest_dev || (is_routed && !sfe_dev_is_layer_3_interface(dest_dev, false) && !netif_is_vxlan(dest_dev))) {
+	if (!dest_dev || !sfe_routed_dev_allow(dest_dev, is_routed, false)) {
 		ret = SFE_CMN_RESPONSE_EINTERFACE;
 		sfe_incr_exceptions(SFE_EXCEPTION_DEST_DEV_NOT_L3);
 		goto failed_ret;

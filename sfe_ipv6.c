@@ -32,6 +32,9 @@
 #include <linux/inetdevice.h>
 #include <linux/netfilter_ipv6.h>
 #include <net/protocol.h>
+#include <net/addrconf.h>
+#include <net/gre.h>
+
 #include "sfe_debug.h"
 #include "sfe_api.h"
 #include "sfe.h"
@@ -42,6 +45,7 @@
 #include "sfe_ipv6_icmp.h"
 #include "sfe_pppoe.h"
 #include "sfe_ipv6_tunipip6.h"
+#include "sfe_ipv6_gre.h"
 
 #define sfe_ipv6_addr_copy(src, dest) memcpy((void *)(dest), (void *)(src), 16)
 
@@ -90,6 +94,11 @@ static char *sfe_ipv6_exception_events_string[SFE_IPV6_EXCEPTION_EVENT_LAST] = {
 	"TUNIPIP6_SMALL_TTL",
 	"TUNIPIP6_NEEDS_FRAGMENTATION",
 	"TUNIPIP6_SYNC_ON_FIND"
+	"GRE_HEADER_INCOMPLETE",
+	"GRE_NO_CONNECTION",
+	"GRE_IP_OPTIONS_OR_INITIAL_FRAGMENT",
+	"GRE_SMALL_TTL",
+	"GRE_NEEDS_FRAGMENTATION"
 };
 
 static struct sfe_ipv6 __si6;
@@ -742,6 +751,25 @@ void sfe_ipv6_exception_stats_inc(struct sfe_ipv6 *si, enum sfe_ipv6_exception_e
 }
 
 /*
+ * sfe_ipv6_is_local_ip()
+ *	return true if it is local ip otherwise return false
+ */
+static bool sfe_ipv6_is_local_ip(struct sfe_ipv6 *si, uint8_t *addr)
+{
+	struct net_device *dev;
+	struct in6_addr ip_addr;
+	memcpy(ip_addr.s6_addr, addr, 16);
+
+	dev = ipv6_dev_find(&init_net, &ip_addr, 1);
+	if (dev) {
+		dev_put(dev);
+		return true;
+	}
+
+	return false;
+}
+
+/*
  * sfe_ipv6_recv()
  *	Handle packet receives and forwaring.
  *
@@ -830,6 +858,12 @@ int sfe_ipv6_recv(struct net_device *dev, struct sk_buff *skb, struct sfe_l2_inf
 	if (IPPROTO_IPIP == next_hdr) {
 		return sfe_ipv6_recv_tunipip6(si, skb, dev, len, iph, ihl, sync_on_find, l2_info, true);
 	}
+
+#ifdef SFE_GRE_TUN_ENABLE
+	if (IPPROTO_GRE == next_hdr) {
+		return sfe_ipv6_recv_gre(si, skb, dev, len, iph, ihl, sync_on_find, tun_outer);
+	}
+#endif
 
 	sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_UNHANDLED_PROTOCOL);
 	DEBUG_TRACE("not UDP, TCP or ICMP: %u\n", next_hdr);
@@ -1198,6 +1232,10 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 		}
 	}
 
+	if ((IPPROTO_GRE == tuple->protocol) && !sfe_ipv6_is_local_ip(si, (uint8_t *)original_cm->match_dest_ip)) {
+		original_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_PASSTHROUGH;
+	}
+
 #ifdef CONFIG_NF_FLOW_COOKIE
 	original_cm->flow_cookie = 0;
 #endif
@@ -1214,7 +1252,7 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 	 * are used. In such cases, do not use HW csum offload. csum offload is used only when we
 	 * are sending directly to the destination interface that supports it.
 	 */
-	if (likely(dest_dev->features & NETIF_F_HW_CSUM) && !netif_is_vxlan(dest_dev)) {
+	if (likely(dest_dev->features & NETIF_F_HW_CSUM) && sfe_dev_has_hw_csum(dest_dev)) {
 		if ((msg->conn_rule.return_top_interface_num == msg->conn_rule.return_interface_num) ||
 			(msg->rule_flags & SFE_RULE_CREATE_FLAG_USE_RETURN_BOTTOM_INTERFACE)) {
 			 original_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_CSUM_OFFLOAD;
@@ -1347,6 +1385,10 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 		reply_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_BRIDGE_FLOW;
 	}
 
+	if ((IPPROTO_GRE == tuple->protocol) && !sfe_ipv6_is_local_ip(si, (uint8_t *)reply_cm->match_dest_ip)) {
+		reply_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_PASSTHROUGH;
+	}
+
 	/*
 	 * Setup UDP Socket if found to be valid for decap.
 	 */
@@ -1441,6 +1483,32 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 		reply_cm->flow_accel = 1;
 	}
 #endif
+
+	/*
+	 * the inet6_protocol handler will be used only in decap path
+	 * for non passthrough case.
+	 */
+	original_cm->proto = NULL;
+	reply_cm->proto = NULL;
+
+#ifdef SFE_GRE_TUN_ENABLE
+	if (!(reply_cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_PASSTHROUGH)) {
+		rcu_read_lock();
+		reply_cm->proto = rcu_dereference(inet6_protos[tuple->protocol]);
+		rcu_read_unlock();
+
+		if (unlikely(!reply_cm->proto)) {
+			kfree(reply_cm);
+			kfree(original_cm);
+			kfree(c);
+			dev_put(src_dev);
+			dev_put(dest_dev);
+			DEBUG_WARN("sfe: GRE proto handler is not registered\n");
+			return -EPERM;
+		}
+	}
+#endif
+
 	/*
 	 * Decapsulation path have proto set.
 	 * This is used to differentiate de/encap, and call protocol specific handler.
@@ -1457,7 +1525,7 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 	 * are used. In such cases, do not use HW csum offload. csum offload is used only when we
 	 * are sending directly to the destination interface that supports it.
 	 */
-	if (likely(src_dev->features & NETIF_F_HW_CSUM) && !(netif_is_vxlan(src_dev) || netif_is_vxlan(dest_dev))) {
+	if (likely(src_dev->features & NETIF_F_HW_CSUM) && sfe_dev_has_hw_csum(src_dev)) {
 		if ((msg->conn_rule.flow_top_interface_num == msg->conn_rule.flow_interface_num) ||
 			(msg->rule_flags & SFE_RULE_CREATE_FLAG_USE_FLOW_BOTTOM_INTERFACE)) {
 			 reply_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_CSUM_OFFLOAD;

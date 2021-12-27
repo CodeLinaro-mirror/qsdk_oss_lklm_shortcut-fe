@@ -70,6 +70,8 @@ struct sfe_ipv4_tcp_connection_match {
 					/* Insert VLAN tag */
 #define SFE_IPV4_CONNECTION_MATCH_FLAG_SRC_INTERFACE_CHECK (1<<13)
 					/* Source interface check.*/
+#define SFE_IPV4_CONNECTION_MATCH_FLAG_PASSTHROUGH (1<<14)
+					/* passthrough flow: encap/decap to be skipped for this flow */
 
 /*
  * IPv4 connection matching structure.
@@ -94,6 +96,7 @@ struct sfe_ipv4_connection_match {
 	__be16 match_dest_port;		/* Destination port/connection ident */
 
 	struct udp_sock *up;		/* Stores UDP sock information; valid only in decap path */
+	struct net_protocol *proto;	/* stores protocol handler; valid only in decap path */
 
 	/*
 	 * Control the operations of the match.
@@ -268,6 +271,11 @@ enum sfe_ipv4_exception_events {
 	SFE_IPV4_EXCEPTION_EVENT_PPPOE_NOT_SET_IN_CME,
 	SFE_IPV4_EXCEPTION_EVENT_INGRESS_VLAN_TAG_MISMATCH,
 	SFE_IPV4_EXCEPTION_EVENT_INVALID_SRC_IFACE,
+	SFE_IPV4_EXCEPTION_EVENT_GRE_HEADER_INCOMPLETE,
+	SFE_IPV4_EXCEPTION_EVENT_GRE_NO_CONNECTION,
+	SFE_IPV4_EXCEPTION_EVENT_GRE_IP_OPTIONS_OR_INITIAL_FRAGMENT,
+	SFE_IPV4_EXCEPTION_EVENT_GRE_SMALL_TTL,
+	SFE_IPV4_EXCEPTION_EVENT_GRE_NEEDS_FRAGMENTATION,
 	SFE_IPV4_EXCEPTION_EVENT_LAST
 };
 
