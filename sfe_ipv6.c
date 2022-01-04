@@ -108,6 +108,8 @@ static char *sfe_ipv6_exception_events_string[SFE_IPV6_EXCEPTION_EVENT_LAST] = {
 };
 
 static struct sfe_ipv6 __si6;
+struct sfe_ipv6_msg *sfe_ipv6_sync_many_msg;
+uint32_t sfe_ipv6_sync_max_number;
 
 /*
  * sfe_ipv6_get_debug_dev()
@@ -710,9 +712,8 @@ void sfe_ipv6_sync_status(struct sfe_ipv6 *si,
 
 	rcu_read_lock();
 	sync_rule_callback = rcu_dereference(si->sync_rule_callback);
-
+	rcu_read_unlock();
 	if (unlikely(!sync_rule_callback)) {
-		rcu_read_unlock();
 		return;
 	}
 
@@ -722,8 +723,6 @@ void sfe_ipv6_sync_status(struct sfe_ipv6 *si,
 	now_jiffies = get_jiffies_64();
 	sfe_ipv6_gen_sync_connection(si, c, &sis, reason, now_jiffies);
 	sync_rule_callback(&sis);
-
-	rcu_read_unlock();
 }
 
 /*
@@ -1774,6 +1773,16 @@ void sfe_ipv6_destroy_rule(struct sfe_ipv6_rule_destroy_msg *msg)
 }
 
 /*
+ * sfe_ipv6_sync_invoke()
+ *	Schedule many sync stats.
+ */
+bool sfe_ipv6_sync_invoke(uint16_t index)
+{
+	struct sfe_ipv6 *si = &__si6;
+	return schedule_delayed_work_on(si->work_cpu, &(si->sync_dwork), 0);
+}
+
+/*
  * sfe_ipv6_register_sync_rule_callback()
  *	Register a callback for rule synchronization.
  */
@@ -1783,6 +1792,19 @@ void sfe_ipv6_register_sync_rule_callback(sfe_sync_rule_callback_t sync_rule_cal
 
 	spin_lock_bh(&si->lock);
 	rcu_assign_pointer(si->sync_rule_callback, sync_rule_callback);
+	spin_unlock_bh(&si->lock);
+}
+
+/*
+ * sfe_ipv6_register_sync_rule_callback()
+ *	Register a callback for rule synchronization.
+ */
+void sfe_ipv6_register_many_sync_callback(sfe_ipv6_many_sync_callback_t cb)
+{
+	struct sfe_ipv6 *si = &__si6;
+
+	spin_lock_bh(&si->lock);
+	rcu_assign_pointer(si->many_sync_callback, cb);
 	spin_unlock_bh(&si->lock);
 }
 
@@ -1853,16 +1875,17 @@ static void sfe_ipv6_periodic_sync(struct work_struct *work)
 	struct sfe_ipv6 *si = container_of((struct delayed_work *)work, struct sfe_ipv6, sync_dwork);
 	u64 now_jiffies;
 	int quota;
-	sfe_sync_rule_callback_t sync_rule_callback;
+	sfe_ipv6_many_sync_callback_t sync_rule_callback;
 	struct sfe_ipv6_connection *c;
+	struct sfe_ipv6_conn_sync *conn_sync;
 
 	now_jiffies = get_jiffies_64();
 
 	rcu_read_lock();
-	sync_rule_callback = rcu_dereference(si->sync_rule_callback);
+	sync_rule_callback = rcu_dereference(si->many_sync_callback);
+	rcu_read_unlock();
 	if (!sync_rule_callback) {
-		rcu_read_unlock();
-		goto done;
+		return;
 	}
 
 	spin_lock_bh(&si->lock);
@@ -1875,10 +1898,12 @@ static void sfe_ipv6_periodic_sync(struct work_struct *work)
 	if (unlikely(!c)) {
 		c = si->all_connections_head;
 	}
+
 	/*
-	 * Get an estimate of the number of connections to parse in this sync.
+	 * Get the max number of connections to be put in this sync msg.
 	 */
-	quota = (si->num_connections + 63) / 64;
+	quota = sfe_ipv6_sync_max_number;
+	conn_sync = sfe_ipv6_sync_many_msg->msg.conn_stats_many.conn_sync;
 
 	/*
 	 * Walk the "all connection" list and sync the connection state.
@@ -1900,37 +1925,36 @@ static void sfe_ipv6_periodic_sync(struct work_struct *work)
 			continue;
 		}
 
-		quota--;
-
 		/*
 		 * Sync the connection state.
 		 */
 		sfe_ipv6_gen_sync_connection(si, c, &sis, SFE_SYNC_REASON_STATS, now_jiffies);
+		sfe_ipv6_stats_convert(conn_sync, &sis);
 
-		si->wc_next = c->all_connections_next;
-
-		spin_unlock_bh(&si->lock);
-		sync_rule_callback(&sis);
-		spin_lock_bh(&si->lock);
-
-		/*
-		 * c must be set and used in the same lock/unlock window;
-		 * because c could be removed when we don't hold the lock,
-		 * so delay grabbing until after the callback and relock.
-		 */
-		c = si->wc_next;
+		quota--;
+		conn_sync++;
+		c = c->all_connections_next;
 	}
 
 	/*
 	 * At the end of loop, put wc_next to the connection we left
 	 */
 	si->wc_next = c;
-
 	spin_unlock_bh(&si->lock);
-	rcu_read_unlock();
 
-done:
-	schedule_delayed_work_on(si->work_cpu, (struct delayed_work *)work, ((HZ + 99) / 100));
+	if (c == NULL) {
+		DEBUG_INFO("Synced all connections\n");
+		sfe_ipv6_sync_many_msg->msg.conn_stats_many.next = 0;
+	} else {
+		DEBUG_INFO("Some connections left\n");
+		sfe_ipv6_sync_many_msg->msg.conn_stats_many.next = sfe_ipv6_sync_max_number - quota;
+	}
+	DEBUG_INFO("Synced [%d] connections\n", (sfe_ipv6_sync_max_number - quota));
+
+	sfe_ipv6_sync_many_msg->msg.conn_stats_many.count = sfe_ipv6_sync_max_number - quota;
+	sfe_ipv6_sync_many_msg->cm.response = SFE_CMN_RESPONSE_ACK;
+
+	sync_rule_callback(sfe_ipv6_sync_many_msg);
 }
 
 /*
@@ -2663,10 +2687,24 @@ int sfe_ipv6_init(void)
 	 * Create work to handle periodic statistics.
 	 */
 	INIT_DELAYED_WORK(&(si->sync_dwork), sfe_ipv6_periodic_sync);
-	schedule_delayed_work_on(si->work_cpu, &(si->sync_dwork), ((HZ + 99) / 100));
-	spin_lock_init(&si->lock);
 
+	sfe_ipv6_sync_many_msg = kzalloc(PAGE_SIZE, GFP_KERNEL);
+	if(!sfe_ipv6_sync_many_msg) {
+		goto exit8;
+	}
+
+	sfe_ipv6_msg_init(sfe_ipv6_sync_many_msg, SFE_SPECIAL_INTERFACE_IPV6,
+			SFE_TX_CONN_STATS_SYNC_MANY_MSG,
+			sizeof(struct sfe_ipv4_conn_sync_many_msg),
+			NULL,
+			NULL);
+	sfe_ipv6_sync_max_number = (PAGE_SIZE - sizeof(struct sfe_ipv6_msg)) / sizeof(struct sfe_ipv6_conn_sync);
+
+	spin_lock_init(&si->lock);
 	return 0;
+
+exit8:
+	unregister_chrdev(si->debug_dev, "sfe_ipv6");
 
 exit7:
 #ifdef SFE_PROCESS_LOCAL_OUT

@@ -381,6 +381,8 @@ struct sfe_ipv6 {
 
 	sfe_sync_rule_callback_t __rcu sync_rule_callback;
 					/* Callback function registered by a connection manager for stats syncing */
+	sfe_ipv6_many_sync_callback_t __rcu many_sync_callback;
+					/* Callback function registered by a connection manager for many stats syncing */
 	struct sfe_ipv6_connection *conn_hash[SFE_IPV6_CONNECTION_HASH_SIZE];
 					/* Connection hash table */
 	struct hlist_head hlist_conn_match_hash_head[SFE_IPV6_CONNECTION_HASH_SIZE];
