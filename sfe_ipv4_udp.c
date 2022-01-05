@@ -127,6 +127,7 @@ int sfe_ipv4_recv_udp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 	__be16 dest_port;
 	struct sfe_ipv4_connection_match *cm;
 	u8 ttl;
+	u32 service_class_id;
 	struct net_device *xmit_dev;
 	bool hw_csum;
 	int err;
@@ -538,6 +539,13 @@ int sfe_ipv4_recv_udp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 	 */
 	if (unlikely(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_MARK)) {
 		skb->mark = cm->mark;
+		/*
+		 * Update service class stats if SAWF is valid.
+		 */
+		if (likely(cm->sawf_valid)) {
+			service_class_id = SFE_GET_SAWF_SERVICE_CLASS(cm->mark);
+			sfe_ipv4_service_class_stats_inc(si, service_class_id, len);
+		}
 	}
 
 	/*

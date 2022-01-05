@@ -132,6 +132,7 @@ int sfe_ipv6_recv_udp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 	struct sfe_ipv6_addr *dest_ip;
 	__be16 src_port;
 	__be16 dest_port;
+	u32 service_class_id;
 	struct sfe_ipv6_connection_match *cm;
 	struct net_device *xmit_dev;
 	int ret;
@@ -529,6 +530,13 @@ int sfe_ipv6_recv_udp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 	 */
 	if (unlikely(cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_MARK)) {
 		skb->mark = cm->mark;
+		/*
+		 * Update service class stats if SAWF is valid.
+		 */
+		if (likely(cm->sawf_valid)) {
+			service_class_id = SFE_GET_SAWF_SERVICE_CLASS(cm->mark);
+			sfe_ipv6_service_class_stats_inc(si, service_class_id, len);
+		}
 	}
 
 	/*

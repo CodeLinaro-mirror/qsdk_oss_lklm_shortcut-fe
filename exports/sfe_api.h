@@ -23,6 +23,9 @@
 
 #define SFE_MAX_VLAN_DEPTH 2
 #define SFE_VLAN_ID_NOT_CONFIGURED 0xfff
+#define SFE_MAX_SERVICE_CLASS_ID 0x80
+#define SFE_INVALID_SERVICE_CLASS_ID 0xff
+#define SFE_INVALID_MSDUQ 0xff
 
 #define SFE_SPECIAL_INTERFACE_BASE 0x7f00
 #define SFE_SPECIAL_INTERFACE_IPV4 (SFE_SPECIAL_INTERFACE_BASE + 1)
@@ -247,6 +250,15 @@ struct sfe_acceleration_direction_rule {
 };
 
 /**
+ * sfe_service_class_rule
+ *	SFE service class rule information in both direction.
+ */
+struct sfe_service_class_rule {
+	uint32_t flow_mark;		/**< Service class information in flow direction */
+	uint32_t return_mark;		/**< Service class information in return direction */
+};
+
+/**
  * The IPv4 rule create sub-message structure.
  */
 struct sfe_ipv4_rule_create_msg {
@@ -269,6 +281,8 @@ struct sfe_ipv4_rule_create_msg {
 	struct sfe_acceleration_direction_rule direction_rule;/* Direction related accleration parameters*/
 #endif
 	/* Response */
+	struct sfe_service_class_rule sawf_rule;
+							/**< Service class related information */
 	u32 index;					/**< Slot ID for cache stats to host OS */
 };
 
@@ -392,6 +406,7 @@ struct sfe_ipv6_rule_create_msg {
 	/*
 	 * Response
 	 */
+	struct sfe_service_class_rule sawf_rule;	/**< Service class related information */
 	u32 index;					/**< Slot ID for cache stats to host OS */
 };
 
