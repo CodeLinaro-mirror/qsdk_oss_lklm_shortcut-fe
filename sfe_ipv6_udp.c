@@ -28,6 +28,7 @@
 #include "sfe.h"
 #include "sfe_flow_cookie.h"
 #include "sfe_ipv6.h"
+#include "sfe_pppoe.h"
 
 /*
  * sfe_ipv6_recv_udp()
@@ -44,6 +45,7 @@ int sfe_ipv6_recv_udp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 	struct sfe_ipv6_connection_match *cm;
 	struct net_device *xmit_dev;
 	bool ret;
+	bool hw_csum;
 
 	/*
 	 * Is our packet too short to contain a valid UDP header?
@@ -186,6 +188,23 @@ int sfe_ipv6_recv_udp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 	}
 
 	/*
+	 * For PPPoE flows, add PPPoE header before L2 header is added.
+	 */
+	if (cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_PPPOE_ENCAP) {
+		if (unlikely(!sfe_pppoe_add_header(skb, cm->pppoe_session_id, PPP_IPV6))) {
+			rcu_read_unlock();
+			DEBUG_WARN("%px: PPPoE header addition failed\n", skb);
+			sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_PPPOE_HEADER_ENCAP_FAILED);
+			return 0;
+		}
+		this_cpu_inc(si->stats_pcpu->pppoe_encap_packets_forwarded64);
+	}
+
+	/*
+	 * TODO: VLAN header should be added here when they are supported.
+	 */
+
+	/*
 	 * Update DSCP
 	 */
 	if (unlikely(cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_DSCP_REMARK)) {
@@ -196,6 +215,13 @@ int sfe_ipv6_recv_udp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 	 * Decrement our hop_limit.
 	 */
 	iph->hop_limit -= 1;
+
+	/*
+	 * Enable HW csum if rx checksum is verified and xmit interface is CSUM offload capable.
+	 * Note: If L4 csum at Rx was found to be incorrect, we (router) should use incremental L4 checksum here
+	 * so that HW does not re-calculate/replace the L4 csum
+	 */
+	hw_csum = !!(cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_CSUM_OFFLOAD) && (skb->ip_summed == CHECKSUM_UNNECESSARY);
 
 	/*
 	 * Do we have to perform translations of the source address/port?
@@ -213,11 +239,13 @@ int sfe_ipv6_recv_udp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 		 * Do we have a non-zero UDP checksum?  If we do then we need
 		 * to update it.
 		 */
-		udp_csum = udph->check;
-		if (likely(udp_csum)) {
-			u32 sum = udp_csum + cm->xlate_src_csum_adjustment;
-			sum = (sum & 0xffff) + (sum >> 16);
-			udph->check = (u16)sum;
+		if (unlikely(!hw_csum)) {
+			udp_csum = udph->check;
+			if (likely(udp_csum)) {
+				u32 sum = udp_csum + cm->xlate_src_csum_adjustment;
+				sum = (sum & 0xffff) + (sum >> 16);
+				udph->check = (u16)sum;
+			}
 		}
 	}
 
@@ -237,12 +265,25 @@ int sfe_ipv6_recv_udp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 		 * Do we have a non-zero UDP checksum?  If we do then we need
 		 * to update it.
 		 */
-		udp_csum = udph->check;
-		if (likely(udp_csum)) {
-			u32 sum = udp_csum + cm->xlate_dest_csum_adjustment;
-			sum = (sum & 0xffff) + (sum >> 16);
-			udph->check = (u16)sum;
+		if (unlikely(!hw_csum)) {
+			udp_csum = udph->check;
+			if (likely(udp_csum)) {
+				u32 sum = udp_csum + cm->xlate_dest_csum_adjustment;
+				sum = (sum & 0xffff) + (sum >> 16);
+				udph->check = (u16)sum;
+			}
 		}
+	}
+
+	/*
+	 * If HW checksum offload is not possible, incremental L4 checksum is used to update the packet.
+	 * Setting ip_summed to CHECKSUM_UNNECESSARY ensures checksum is not recalculated further in packet
+	 * path.
+	 */
+	if (likely(hw_csum)) {
+		skb->ip_summed = CHECKSUM_PARTIAL;
+	} else {
+		skb->ip_summed = CHECKSUM_UNNECESSARY;
 	}
 
 	/*

@@ -28,6 +28,7 @@
 #include "sfe.h"
 #include "sfe_flow_cookie.h"
 #include "sfe_ipv4.h"
+#include "sfe_pppoe.h"
 
 /*
  * sfe_ipv4_process_tcp_option_sack()
@@ -127,6 +128,7 @@ int sfe_ipv4_recv_tcp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 	u32 flags;
 	struct net_device *xmit_dev;
 	bool ret;
+	bool hw_csum;
 
 	/*
 	 * Is our packet too short to contain a valid UDP header?
@@ -484,6 +486,23 @@ int sfe_ipv4_recv_tcp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 	}
 
 	/*
+	 * For PPPoE flows, add PPPoE header before L2 header is added.
+	 */
+	if (cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_PPPOE_ENCAP) {
+		if (unlikely(!sfe_pppoe_add_header(skb, cm->pppoe_session_id, PPP_IP))) {
+			rcu_read_unlock();
+			DEBUG_WARN("%px: PPPoE header addition failed\n", skb);
+			sfe_ipv4_exception_stats_inc(si, SFE_IPV4_EXCEPTION_EVENT_PPPOE_HEADER_ENCAP_FAILED);
+			return 0;
+		}
+		this_cpu_inc(si->stats_pcpu->pppoe_encap_packets_forwarded64);
+	}
+
+	/*
+	 * TODO : VLAN headers if any should be added here when supported.
+	 */
+
+	/*
 	 * Update DSCP
 	 */
 	if (unlikely(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_DSCP_REMARK)) {
@@ -496,6 +515,13 @@ int sfe_ipv4_recv_tcp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 	iph->ttl = ttl - 1;
 
 	/*
+	 * Enable HW csum if rx checksum is verified and xmit interface is CSUM offload capable.
+	 * Note: If L4 csum at Rx was found to be incorrect, we (router) should use incremental L4 checksum here
+	 * so that HW does not re-calculate/replace the L4 csum
+	 */
+	hw_csum = !!(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_CSUM_OFFLOAD) && (skb->ip_summed == CHECKSUM_UNNECESSARY);
+
+	/*
 	 * Do we have to perform translations of the source address/port?
 	 */
 	if (unlikely(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_XLATE_SRC)) {
@@ -505,19 +531,17 @@ int sfe_ipv4_recv_tcp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 		iph->saddr = cm->xlate_src_ip;
 		tcph->source = cm->xlate_src_port;
 
-		/*
-		 * Do we have a non-zero UDP checksum?  If we do then we need
-		 * to update it.
-		 */
-		tcp_csum = tcph->check;
-		if (unlikely(skb->ip_summed == CHECKSUM_PARTIAL)) {
-			sum = tcp_csum + cm->xlate_src_partial_csum_adjustment;
-		} else {
-			sum = tcp_csum + cm->xlate_src_csum_adjustment;
-		}
+		if (unlikely(!hw_csum)) {
+			tcp_csum = tcph->check;
+			if (unlikely(skb->ip_summed == CHECKSUM_PARTIAL)) {
+				sum = tcp_csum + cm->xlate_src_partial_csum_adjustment;
+			} else {
+				sum = tcp_csum + cm->xlate_src_csum_adjustment;
+			}
 
-		sum = (sum & 0xffff) + (sum >> 16);
-		tcph->check = (u16)sum;
+			sum = (sum & 0xffff) + (sum >> 16);
+			tcph->check = (u16)sum;
+		}
 	}
 
 	/*
@@ -530,25 +554,30 @@ int sfe_ipv4_recv_tcp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 		iph->daddr = cm->xlate_dest_ip;
 		tcph->dest = cm->xlate_dest_port;
 
-		/*
-		 * Do we have a non-zero UDP checksum?  If we do then we need
-		 * to update it.
-		 */
-		tcp_csum = tcph->check;
-		if (unlikely(skb->ip_summed == CHECKSUM_PARTIAL)) {
-			sum = tcp_csum + cm->xlate_dest_partial_csum_adjustment;
-		} else {
-			sum = tcp_csum + cm->xlate_dest_csum_adjustment;
-		}
+		if (unlikely(!hw_csum)) {
+			tcp_csum = tcph->check;
+			if (unlikely(skb->ip_summed == CHECKSUM_PARTIAL)) {
+				sum = tcp_csum + cm->xlate_dest_partial_csum_adjustment;
+			} else {
+				sum = tcp_csum + cm->xlate_dest_csum_adjustment;
+			}
 
-		sum = (sum & 0xffff) + (sum >> 16);
-		tcph->check = (u16)sum;
+			sum = (sum & 0xffff) + (sum >> 16);
+			tcph->check = (u16)sum;
+		}
 	}
 
 	/*
-	 * Replace the IP checksum.
+	 * If HW checksum offload is not possible, full L3 checksum and incremental L4 checksum
+	 * are used to update the packet. Setting ip_summed to CHECKSUM_UNNECESSARY ensures checksum is
+	 * not recalculated further in packet path.
 	 */
-	iph->check = sfe_ipv4_gen_ip_csum(iph);
+	if (likely(hw_csum)) {
+		skb->ip_summed = CHECKSUM_PARTIAL;
+	} else {
+		iph->check = sfe_ipv4_gen_ip_csum(iph);
+		skb->ip_summed = CHECKSUM_UNNECESSARY;
+	}
 
 	/*
 	 * Update traffic stats.

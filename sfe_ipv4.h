@@ -53,6 +53,12 @@ struct sfe_ipv4_tcp_connection_match {
 					/* remark priority of SKB */
 #define SFE_IPV4_CONNECTION_MATCH_FLAG_DSCP_REMARK (1<<6)
 					/* remark DSCP of packet */
+#define SFE_IPV4_CONNECTION_MATCH_FLAG_CSUM_OFFLOAD (1<<7)
+					/* checksum offload.*/
+#define SFE_IPV4_CONNECTION_MATCH_FLAG_PPPOE_DECAP (1<<8)
+					/* Indicates that PPPoE should be decapsulated */
+#define SFE_IPV4_CONNECTION_MATCH_FLAG_PPPOE_ENCAP (1<<9)
+					/* Indicates that PPPoE should be encapsulated */
 
 /*
  * IPv4 connection matching structure.
@@ -139,6 +145,12 @@ struct sfe_ipv4_connection_match {
 	 */
 	u64 rx_packet_count64;
 	u64 rx_byte_count64;
+
+	/*
+	 * PPPoE information
+	 */
+	u16 pppoe_session_id;
+	u8 pppoe_remote_mac[ETH_ALEN];
 };
 
 /*
@@ -214,12 +226,14 @@ enum sfe_ipv4_exception_events {
 	SFE_IPV4_EXCEPTION_EVENT_ICMP_NO_CONNECTION,
 	SFE_IPV4_EXCEPTION_EVENT_ICMP_FLUSHED_CONNECTION,
 	SFE_IPV4_EXCEPTION_EVENT_HEADER_INCOMPLETE,
+	SFE_IPV4_EXCEPTION_EVENT_HEADER_CSUM_BAD,
 	SFE_IPV4_EXCEPTION_EVENT_BAD_TOTAL_LENGTH,
 	SFE_IPV4_EXCEPTION_EVENT_NON_V4,
 	SFE_IPV4_EXCEPTION_EVENT_NON_INITIAL_FRAGMENT,
 	SFE_IPV4_EXCEPTION_EVENT_DATAGRAM_INCOMPLETE,
 	SFE_IPV4_EXCEPTION_EVENT_IP_OPTIONS_INCOMPLETE,
 	SFE_IPV4_EXCEPTION_EVENT_UNHANDLED_PROTOCOL,
+	SFE_IPV4_EXCEPTION_EVENT_PPPOE_HEADER_ENCAP_FAILED,
 	SFE_IPV4_EXCEPTION_EVENT_LAST
 };
 
@@ -249,6 +263,7 @@ struct sfe_ipv4_stats {
 	u64 packets_forwarded64;		/* Number of IPv4 packets forwarded */
 	u64 packets_not_forwarded64;	/* Number of IPv4 packets not forwarded */
 	u64 exception_events64[SFE_IPV4_EXCEPTION_EVENT_LAST];
+	u64 pppoe_encap_packets_forwarded64;	/* Number of IPv4 PPPOE encap packets forwarded */
 };
 
 /*

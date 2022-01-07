@@ -42,18 +42,30 @@
 #define SFE_RULE_UPDATE_FLAG_CHANGE_MTU   (1<<5) /**< Update MTU of connection interfaces */
 #define SFE_RULE_CREATE_FLAG_ICMP_NO_CME_FLUSH (1<<6)/**< Rule for not flushing CME on ICMP pkt */
 #define SFE_RULE_CREATE_FLAG_L2_ENCAP     (1<<7) /**< consists of an encapsulating protocol that carries an IPv4 payload within it. */
+#define SFE_RULE_CREATE_FLAG_USE_FLOW_BOTTOM_INTERFACE (1<<8) /**< Use flow interface number instead of top interface. */
+#define SFE_RULE_CREATE_FLAG_USE_RETURN_BOTTOM_INTERFACE (1<<9) /**< Use return interface number instead of top interface. */
 
 /**
  * Rule creation validity flags.
  */
 #define SFE_RULE_CREATE_CONN_VALID         (1<<0) /**< IPv4 Connection is valid */
 #define SFE_RULE_CREATE_TCP_VALID          (1<<1) /**< TCP Protocol fields are valid */
-#define SFE_RULE_CREATE_PPPOE_VALID        (1<<2) /**< PPPoE fields are valid */
-#define SFE_RULE_CREATE_QOS_VALID          (1<<3) /**< QoS fields are valid */
-#define SFE_RULE_CREATE_VLAN_VALID         (1<<4) /**< VLAN fields are valid */
-#define SFE_RULE_CREATE_DSCP_MARKING_VALID (1<<5) /**< DSCP marking fields are valid */
-#define SFE_RULE_CREATE_VLAN_MARKING_VALID (1<<6) /**< VLAN marking fields are valid */
-#define SFE_RULE_CREATE_DIRECTION_VALID    (1<<7) /**< specify acceleration directions */
+#define SFE_RULE_CREATE_PPPOE_DECAP_VALID  (1<<2) /**< PPPoE fields are valid */
+#define SFE_RULE_CREATE_PPPOE_ENCAP_VALID  (1<<3) /**< PPPoE fields are valid */
+#define SFE_RULE_CREATE_QOS_VALID          (1<<4) /**< QoS fields are valid */
+#define SFE_RULE_CREATE_VLAN_VALID         (1<<5) /**< VLAN fields are valid */
+#define SFE_RULE_CREATE_DSCP_MARKING_VALID (1<<6) /**< DSCP marking fields are valid */
+#define SFE_RULE_CREATE_VLAN_MARKING_VALID (1<<7) /**< VLAN marking fields are valid */
+#define SFE_RULE_CREATE_DIRECTION_VALID    (1<<8) /**< specify acceleration directions */
+#define SFE_RULE_CREATE_SRC_MAC_VALID	   (1<<9) /**< Source MAC valid */
+
+/*
+ * Source MAC address valid flags (to be used with mac_valid_flags field of sfe_ipv4_src_mac_rule structure)
+ */
+#define SFE_SRC_MAC_FLOW_VALID 0x01
+		/**< MAC address for the flow interface is valid. */
+#define SFE_SRC_MAC_RETURN_VALID 0x02
+		/**< MAC address for the return interface is valid. */
 
 /*
  * 32/64 bits pointer type
@@ -175,9 +187,19 @@ struct sfe_protocol_tcp_rule {
  */
 struct sfe_pppoe_rule {
 	u16 flow_pppoe_session_id;		/**< Flow direction`s PPPoE session ID. */
-	u16 flow_pppoe_remote_mac[3];	/**< Flow direction`s PPPoE Server MAC address */
+	u8 flow_pppoe_remote_mac[ETH_ALEN];	/**< Flow direction`s PPPoE Server MAC address */
 	u16 return_pppoe_session_id;	/**< Return direction's PPPoE session ID. */
-	u16 return_pppoe_remote_mac[3];	/**< Return direction's PPPoE Server MAC address */
+	u8 return_pppoe_remote_mac[ETH_ALEN];	/**< Return direction's PPPoE Server MAC address */
+};
+
+/**
+ * sfe_src_mac_rule
+ *	Information for source MAC address rules.
+ */
+struct sfe_src_mac_rule {
+	uint32_t mac_valid_flags;	/**< MAC address validity flags. */
+	uint16_t flow_src_mac[3];	/**< Source MAC address for the flow direction. */
+	uint16_t return_src_mac[3];	/**< Source MAC address for the return direction. */
 };
 
 /**
@@ -229,6 +251,7 @@ struct sfe_ipv4_rule_create_msg {
 	struct sfe_protocol_tcp_rule tcp_rule;		/**< TCP related accleration parameters */
 	struct sfe_pppoe_rule pppoe_rule;		/**< PPPoE related accleration parameters */
 	struct sfe_qos_rule qos_rule;			/**< QoS related accleration parameters */
+	struct sfe_src_mac_rule src_mac_rule;		/**< Src Mac rule */
 	struct sfe_dscp_rule dscp_rule;			/**< DSCP related accleration parameters */
 	struct sfe_vlan_rule vlan_primary_rule;		/**< Primary VLAN related accleration parameters */
 	struct sfe_vlan_rule vlan_secondary_rule;	/**< Secondary VLAN related accleration parameters */
@@ -348,6 +371,7 @@ struct sfe_ipv6_rule_create_msg {
 	struct sfe_protocol_tcp_rule tcp_rule;		/**< Protocol related accleration parameters */
 	struct sfe_pppoe_rule pppoe_rule;		/**< PPPoE related accleration parameters */
 	struct sfe_qos_rule qos_rule;			/**< QoS related accleration parameters */
+	struct sfe_src_mac_rule src_mac_rule;		/**< Src Mac rule */
 	struct sfe_dscp_rule dscp_rule;			/**< DSCP related accleration parameters */
 	struct sfe_vlan_rule vlan_primary_rule;		/**< VLAN related accleration parameters */
 	struct sfe_vlan_rule vlan_secondary_rule;	/**< VLAN related accleration parameters */

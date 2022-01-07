@@ -909,6 +909,26 @@ void sfe_ipv6_update_rule(struct sfe_ipv6_rule_create_msg *msg)
 }
 
 /*
+ * sfe_ipv6_xmit_eth_type_check
+ *	Checking if MAC header has to be written.
+ */
+static inline bool sfe_ipv6_xmit_eth_type_check(struct net_device *dev, u32 cm_flags)
+{
+	if (!(dev->flags & IFF_NOARP)) {
+		return true;
+	}
+
+	/*
+	 * For PPPoE, since we are now supporting PPPoE encapsulation, we are writing L2 header.
+	 */
+	if (cm_flags & SFE_IPV6_CONNECTION_MATCH_FLAG_PPPOE_ENCAP) {
+		return true;
+	}
+
+	return false;
+}
+
+/*
  * sfe_ipv6_create_rule()
  *	Create a forwarding rule.
  */
@@ -921,19 +941,29 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 	struct net_device *dest_dev;
 	struct net_device *src_dev;
 	struct sfe_ipv6_5tuple *tuple = &msg->tuple;
+	s32 flow_interface_num = msg->conn_rule.flow_top_interface_num;
+	s32 return_interface_num = msg->conn_rule.return_top_interface_num;
 
-	src_dev = dev_get_by_index(&init_net, msg->conn_rule.flow_top_interface_num);
+	if (msg->rule_flags & SFE_RULE_CREATE_FLAG_USE_FLOW_BOTTOM_INTERFACE) {
+		flow_interface_num = msg->conn_rule.flow_interface_num;
+	}
+
+	if (msg->rule_flags & SFE_RULE_CREATE_FLAG_USE_RETURN_BOTTOM_INTERFACE) {
+		return_interface_num = msg->conn_rule.return_interface_num;
+	}
+
+	src_dev = dev_get_by_index(&init_net, flow_interface_num);
 	if (!src_dev) {
 		DEBUG_WARN("%px: Unable to find src_dev corresponding to %d\n", msg,
-						msg->conn_rule.flow_top_interface_num);
+						flow_interface_num);
 		this_cpu_inc(si->stats_pcpu->connection_create_failures64);
 		return -EINVAL;
 	}
 
-	dest_dev = dev_get_by_index(&init_net, msg->conn_rule.return_top_interface_num);
+	dest_dev = dev_get_by_index(&init_net, return_interface_num);
 	if (!dest_dev) {
 		DEBUG_WARN("%px: Unable to find dest_dev corresponding to %d\n", msg,
-						msg->conn_rule.return_top_interface_num);
+						return_interface_num);
 		this_cpu_inc(si->stats_pcpu->connection_create_failures64);
 		dev_put(src_dev);
 		return -EINVAL;
@@ -1043,8 +1073,7 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 	original_cm->xmit_dev = dest_dev;
 
 	original_cm->xmit_dev_mtu = msg->conn_rule.return_mtu;
-	memcpy(original_cm->xmit_src_mac, dest_dev->dev_addr, ETH_ALEN);
-	memcpy(original_cm->xmit_dest_mac, msg->conn_rule.return_mac, ETH_ALEN);
+
 	original_cm->connection = c;
 	original_cm->counter_match = reply_cm;
 	original_cm->flags = 0;
@@ -1066,11 +1095,37 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 		original_cm->flow_accel = 1;
 	}
 #endif
+	/*
+	 * If l2_features are disabled and flow uses l2 features such as macvlan/bridge/pppoe/vlan,
+	 * bottom interfaces are expected to be disabled in the flow rule and always top interfaces
+	 * are used. In such cases, do not use HW csum offload. csum offload is used only when we
+	 * are sending directly to the destination interface that supports it.
+	 */
+	if (likely(dest_dev->features & NETIF_F_HW_CSUM)) {
+		if ((msg->conn_rule.return_top_interface_num == msg->conn_rule.return_interface_num) ||
+			(msg->rule_flags & SFE_RULE_CREATE_FLAG_USE_RETURN_BOTTOM_INTERFACE)) {
+			 original_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_CSUM_OFFLOAD;
+		}
+	}
 
 	/*
 	 * For the non-arp interface, we don't write L2 HDR.
+	 * Excluding PPPoE from this, since we are now supporting PPPoE encap/decap.
 	 */
-	if (!(dest_dev->flags & IFF_NOARP)) {
+	if (sfe_ipv6_xmit_eth_type_check(dest_dev, original_cm->flags)) {
+
+		/*
+		 * Check whether the rule has configured a specific source MAC address to use.
+		 * This is needed when virtual L3 interfaces such as br-lan, macvlan, vlan are used during egress
+		 */
+		if ((msg->valid_flags & SFE_RULE_CREATE_SRC_MAC_VALID) &&
+		    (msg->src_mac_rule.mac_valid_flags & SFE_SRC_MAC_RETURN_VALID)) {
+			ether_addr_copy((u8 *)original_cm->xmit_src_mac, (u8 *)msg->src_mac_rule.return_src_mac);
+		} else {
+			ether_addr_copy((u8 *)original_cm->xmit_src_mac, (u8 *)dest_dev->dev_addr);
+		}
+		ether_addr_copy((u8 *)original_cm->xmit_dest_mac, (u8 *)msg->conn_rule.return_mac);
+
 		original_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_WRITE_L2_HDR;
 
 		/*
@@ -1104,8 +1159,7 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 	reply_cm->rx_byte_count64 = 0;
 	reply_cm->xmit_dev = src_dev;
 	reply_cm->xmit_dev_mtu = msg->conn_rule.flow_mtu;
-	memcpy(reply_cm->xmit_src_mac, src_dev->dev_addr, ETH_ALEN);
-	memcpy(reply_cm->xmit_dest_mac, msg->conn_rule.flow_mac, ETH_ALEN);
+
 	reply_cm->connection = c;
 	reply_cm->counter_match = original_cm;
 	reply_cm->flags = 0;
@@ -1117,6 +1171,39 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 		reply_cm->dscp = msg->dscp_rule.return_dscp << SFE_IPV6_DSCP_SHIFT;
 		reply_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_DSCP_REMARK;
 	}
+
+	/*
+	 * Adding PPPoE parameters to original and reply entries based on the direction where
+	 * PPPoE header is valid in ECM rule.
+	 *
+	 * If PPPoE is valid in flow direction (from interface is PPPoE), then
+	 *	original cm will have PPPoE at ingress (strip PPPoE header)
+	 *	reply cm will have PPPoE at egress (add PPPoE header)
+	 *
+	 * If PPPoE is valid in return direction (to interface is PPPoE), then
+	 *	original cm will have PPPoE at egress (add PPPoE header)
+	 *	reply cm will have PPPoE at ingress (strip PPPoE header)
+	 */
+	if (msg->valid_flags & SFE_RULE_CREATE_PPPOE_DECAP_VALID) {
+		original_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_PPPOE_DECAP;
+		original_cm->pppoe_session_id = msg->pppoe_rule.flow_pppoe_session_id;
+		ether_addr_copy(original_cm->pppoe_remote_mac, msg->pppoe_rule.flow_pppoe_remote_mac);
+
+		reply_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_PPPOE_ENCAP;
+		reply_cm->pppoe_session_id = msg->pppoe_rule.flow_pppoe_session_id;
+		ether_addr_copy(reply_cm->pppoe_remote_mac, msg->pppoe_rule.flow_pppoe_remote_mac);
+	}
+
+	if (msg->valid_flags & SFE_RULE_CREATE_PPPOE_ENCAP_VALID) {
+		original_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_PPPOE_ENCAP;
+		original_cm->pppoe_session_id = msg->pppoe_rule.return_pppoe_session_id;
+		ether_addr_copy(original_cm->pppoe_remote_mac, msg->pppoe_rule.return_pppoe_remote_mac);
+
+		reply_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_PPPOE_DECAP;
+		reply_cm->pppoe_session_id = msg->pppoe_rule.return_pppoe_session_id;
+		ether_addr_copy(reply_cm->pppoe_remote_mac, msg->pppoe_rule.return_pppoe_remote_mac);
+	}
+
 #ifdef CONFIG_NF_FLOW_COOKIE
 	reply_cm->flow_cookie = 0;
 #endif
@@ -1128,9 +1215,37 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 	}
 #endif
 	/*
-	 * For the non-arp interface, we don't write L2 HDR.
+	 * If l2_features are disabled and flow uses l2 features such as macvlan/bridge/pppoe/vlan,
+	 * bottom interfaces are expected to be disabled in the flow rule and always top interfaces
+	 * are used. In such cases, do not use HW csum offload. csum offload is used only when we
+	 * are sending directly to the destination interface that supports it.
 	 */
-	if (!(src_dev->flags & IFF_NOARP)) {
+	if (likely(src_dev->features & NETIF_F_HW_CSUM)) {
+		if ((msg->conn_rule.flow_top_interface_num == msg->conn_rule.flow_interface_num) ||
+			(msg->rule_flags & SFE_RULE_CREATE_FLAG_USE_FLOW_BOTTOM_INTERFACE)) {
+			 reply_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_CSUM_OFFLOAD;
+		}
+	}
+
+	/*
+	 * For the non-arp interface, we don't write L2 HDR.
+	 * Excluding PPPoE from this, since we are now supporting PPPoE encap/decap.
+	 */
+	if (sfe_ipv6_xmit_eth_type_check(src_dev, reply_cm->flags)) {
+
+		/*
+		 * Check whether the rule has configured a specific source MAC address to use.
+		 * This is needed when virtual L3 interfaces such as br-lan, macvlan, vlan are used during egress
+		 */
+		if ((msg->valid_flags & SFE_RULE_CREATE_SRC_MAC_VALID) &&
+		    (msg->src_mac_rule.mac_valid_flags & SFE_SRC_MAC_FLOW_VALID)) {
+			ether_addr_copy((u8 *)reply_cm->xmit_src_mac, (u8 *)msg->src_mac_rule.flow_src_mac);
+		} else {
+			ether_addr_copy((u8 *)reply_cm->xmit_src_mac, (u8 *)src_dev->dev_addr);
+		}
+
+		ether_addr_copy((u8 *)reply_cm->xmit_dest_mac, (u8 *)msg->conn_rule.flow_mac);
+
 		reply_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_WRITE_L2_HDR;
 
 		/*
@@ -1488,7 +1603,9 @@ static bool sfe_ipv6_debug_dev_read_connections_connection(struct sfe_ipv6 *si, 
 	u64 dest_rx_bytes;
 	u64 last_sync_jiffies;
 	u32 mark, src_priority, dest_priority, src_dscp, dest_dscp;
-	u32 packet, byte;
+	u32 packet, byte, original_cm_flags;
+	u16 pppoe_session_id;
+	u8 pppoe_remote_mac[ETH_ALEN];
 #ifdef CONFIG_NF_FLOW_COOKIE
 	int src_flow_cookie, dst_flow_cookie;
 #endif
@@ -1539,6 +1656,10 @@ static bool sfe_ipv6_debug_dev_read_connections_connection(struct sfe_ipv6 *si, 
 	dest_rx_bytes = reply_cm->rx_byte_count64;
 	last_sync_jiffies = get_jiffies_64() - c->last_sync_jiffies;
 	mark = c->mark;
+	original_cm_flags = original_cm->flags;
+	pppoe_session_id = original_cm->pppoe_session_id;
+	ether_addr_copy(pppoe_remote_mac, original_cm->pppoe_remote_mac);
+
 #ifdef CONFIG_NF_FLOW_COOKIE
 	src_flow_cookie = original_cm->flow_cookie;
 	dst_flow_cookie = reply_cm->flow_cookie;
@@ -1561,7 +1682,7 @@ static bool sfe_ipv6_debug_dev_read_connections_connection(struct sfe_ipv6 *si, 
 				"src_flow_cookie=\"%d\" dst_flow_cookie=\"%d\" "
 #endif
 				"last_sync=\"%llu\" "
-				"mark=\"%08x\" />\n",
+				"mark=\"%08x\"  ",
 				protocol,
 				src_dev->name,
 				&src_ip, &src_ip_xlate,
@@ -1577,6 +1698,13 @@ static bool sfe_ipv6_debug_dev_read_connections_connection(struct sfe_ipv6 *si, 
 				src_flow_cookie, dst_flow_cookie,
 #endif
 				last_sync_jiffies, mark);
+
+	if (original_cm_flags &= (SFE_IPV6_CONNECTION_MATCH_FLAG_PPPOE_DECAP | SFE_IPV6_CONNECTION_MATCH_FLAG_PPPOE_ENCAP)) {
+		bytes_read += snprintf(msg + bytes_read, CHAR_DEV_MSG_SIZE, "pppoe_session_id=\"%u\" pppoe_server_MAC=\"%pM\" ",
+			pppoe_session_id, pppoe_remote_mac);
+	}
+
+	bytes_read += snprintf(msg + bytes_read, CHAR_DEV_MSG_SIZE, ")/>\n");
 
 	if (copy_to_user(buffer + *total_read, msg, CHAR_DEV_MSG_SIZE)) {
 		return false;
