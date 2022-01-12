@@ -304,6 +304,7 @@ static void sfe_ipv6_update_summary_stats(struct sfe_ipv6 *si, struct sfe_ipv6_s
 		stats->packets_not_forwarded64 += s->packets_not_forwarded64;
 		stats->pppoe_encap_packets_forwarded64 += s->pppoe_encap_packets_forwarded64;
 		stats->pppoe_decap_packets_forwarded64 += s->pppoe_decap_packets_forwarded64;
+		stats->pppoe_bridge_packets_forwarded64 += s->pppoe_bridge_packets_forwarded64;
 	}
 }
 
@@ -1314,7 +1315,6 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 	reply_cm->connection = c;
 	reply_cm->counter_match = original_cm;
 
-	reply_cm->flags = 0;
 	if (msg->valid_flags & SFE_RULE_CREATE_MARK_VALID) {
 		reply_cm->mark =  msg->mark_rule.return_mark;
 		reply_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_MARK;
@@ -2068,7 +2068,8 @@ static bool sfe_ipv6_debug_dev_read_stats(struct sfe_ipv6 *si, char *buffer, cha
 			      "flushes=\"%llu\" "
 			      "hash_hits=\"%llu\" hash_reorders=\"%llu\" "
 			      "pppoe_encap_pkts_fwded=\"%llu\" "
-			      "pppoe_decap_pkts_fwded=\"%llu\" />\n",
+			      "pppoe_decap_pkts_fwded=\"%llu\" "
+			      "pppoe_bridge_pkts_fwded=\"%llu\" />\n",
 
 				num_conn,
 				stats.packets_dropped64,
@@ -2083,7 +2084,8 @@ static bool sfe_ipv6_debug_dev_read_stats(struct sfe_ipv6 *si, char *buffer, cha
 				stats.connection_match_hash_hits64,
 				stats.connection_match_hash_reorders64,
 				stats.pppoe_encap_packets_forwarded64,
-				stats.pppoe_decap_packets_forwarded64);
+				stats.pppoe_decap_packets_forwarded64,
+				stats.pppoe_bridge_packets_forwarded64);
 	if (copy_to_user(buffer + *total_read, msg, CHAR_DEV_MSG_SIZE)) {
 		return false;
 	}

@@ -302,8 +302,9 @@ struct sfe_ipv6_stats {
 	u64 packets_forwarded64;		/* Number of IPv6 packets forwarded */
 	u64 packets_not_forwarded64;	/* Number of IPv6 packets not forwarded */
 	u64 exception_events64[SFE_IPV6_EXCEPTION_EVENT_LAST];
-	u64 pppoe_encap_packets_forwarded64;	/* Number of IPv6 PPPOE encap packets forwarded */
-	u64 pppoe_decap_packets_forwarded64;	/* Number of IPv6 PPPOE decap packets forwarded */
+	u64 pppoe_encap_packets_forwarded64;	/* Number of IPv6 PPPoE encap packets forwarded */
+	u64 pppoe_decap_packets_forwarded64;	/* Number of IPv6 PPPoE decap packets forwarded */
+	u64 pppoe_bridge_packets_forwarded64;	/* Number of IPv6 PPPoE decap packets forwarded */
 };
 
 /*
