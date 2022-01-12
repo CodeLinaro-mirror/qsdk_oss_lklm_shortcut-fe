@@ -3,7 +3,7 @@
  *	Shortcut forwarding engine header file for IPv6.
  *
  * Copyright (c) 2015-2016, 2019-2020, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021,2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -72,6 +72,8 @@ struct sfe_ipv6_tcp_connection_match {
 					/* Indicates that PPPoE should be decapsulated */
 #define SFE_IPV6_CONNECTION_MATCH_FLAG_PPPOE_ENCAP (1<<9)
 					/* Indicates that PPPoE should be encapsulated */
+#define SFE_IPV6_CONNECTION_MATCH_FLAG_BRIDGE_FLOW (1<<10)
+					/* Bridge flow */
 
 /*
  * IPv6 connection matching structure.
@@ -94,6 +96,7 @@ struct sfe_ipv6_connection_match {
 	__be16 match_src_port;		/* Source port/connection ident */
 	__be16 match_dest_port;		/* Destination port/connection ident */
 
+	struct udp_sock *up;		/* Stores UDP sock information; valid only in decap path */
 	/*
 	 * Control the operations of the match.
 	 */
@@ -241,6 +244,9 @@ enum sfe_ipv6_exception_events {
 	SFE_IPV6_EXCEPTION_EVENT_UNHANDLED_PROTOCOL,
 	SFE_IPV6_EXCEPTION_EVENT_FLOW_COOKIE_ADD_FAIL,
 	SFE_IPV6_EXCEPTION_EVENT_PPPOE_HEADER_ENCAP_FAILED,
+	SFE_IPV6_EXCEPTION_EVENT_INVALID_PPPOE_SESSION,
+	SFE_IPV6_EXCEPTION_EVENT_INCORRECT_PPPOE_PARSING,
+	SFE_IPV6_EXCEPTION_EVENT_PPPOE_NOT_SET_IN_CME,
 	SFE_IPV6_EXCEPTION_EVENT_LAST
 };
 
@@ -268,10 +274,12 @@ struct sfe_ipv6_stats {
 	u64 connection_match_hash_reorders64;
 					/* Number of IPv6 connection match hash reorders */
 	u64 connection_flushes64;		/* Number of IPv6 connection flushes */
+	u64 packets_dropped64;			/* Number of IPv4 packets dropped */
 	u64 packets_forwarded64;		/* Number of IPv6 packets forwarded */
 	u64 packets_not_forwarded64;	/* Number of IPv6 packets not forwarded */
 	u64 exception_events64[SFE_IPV6_EXCEPTION_EVENT_LAST];
 	u64 pppoe_encap_packets_forwarded64;	/* Number of IPv6 PPPOE encap packets forwarded */
+	u64 pppoe_decap_packets_forwarded64;	/* Number of IPv6 PPPOE decap packets forwarded */
 };
 
 /*

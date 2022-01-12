@@ -3,7 +3,7 @@
  *	 SFE exported function headers for SFE engine
  *
  * Copyright (c) 2015,2016, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021,2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -50,8 +50,8 @@
  */
 #define SFE_RULE_CREATE_CONN_VALID         (1<<0) /**< IPv4 Connection is valid */
 #define SFE_RULE_CREATE_TCP_VALID          (1<<1) /**< TCP Protocol fields are valid */
-#define SFE_RULE_CREATE_PPPOE_DECAP_VALID  (1<<2) /**< PPPoE fields are valid */
-#define SFE_RULE_CREATE_PPPOE_ENCAP_VALID  (1<<3) /**< PPPoE fields are valid */
+#define SFE_RULE_CREATE_PPPOE_DECAP_VALID  (1<<2) /**< PPPoE Decap fields are valid */
+#define SFE_RULE_CREATE_PPPOE_ENCAP_VALID  (1<<3) /**< PPPoE Encap fields are valid */
 #define SFE_RULE_CREATE_QOS_VALID          (1<<4) /**< QoS fields are valid */
 #define SFE_RULE_CREATE_VLAN_VALID         (1<<5) /**< VLAN fields are valid */
 #define SFE_RULE_CREATE_DSCP_MARKING_VALID (1<<6) /**< DSCP marking fields are valid */
@@ -571,5 +571,12 @@ sfe_tx_status_t sfe_tun6rd_tx(struct sfe_ctx_instance *sfe_ctx, struct sfe_tun6r
  */
 void sfe_tun6rd_msg_init(struct sfe_tun6rd_msg *ncm, u16 if_num, u32 type,  u32 len,
 			 void *cb, void *app_data);
+
+/*
+ *
+ * sfe_is_l2_feature_enabled()
+ *	l2 feature flag is enabled or disabled
+ */
+bool sfe_is_l2_feature_enabled(void);
 
 #endif /* __SFE_API_H */
