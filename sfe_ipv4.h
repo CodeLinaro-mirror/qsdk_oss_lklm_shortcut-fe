@@ -3,7 +3,7 @@
  *	Shortcut forwarding engine header file for IPv4.
  *
  * Copyright (c) 2013-2016, 2019-2020, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021,2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -53,6 +53,12 @@ struct sfe_ipv4_tcp_connection_match {
 					/* remark priority of SKB */
 #define SFE_IPV4_CONNECTION_MATCH_FLAG_DSCP_REMARK (1<<6)
 					/* remark DSCP of packet */
+#define SFE_IPV4_CONNECTION_MATCH_FLAG_CSUM_OFFLOAD (1<<7)
+					/* checksum offload.*/
+#define SFE_IPV4_CONNECTION_MATCH_FLAG_PPPOE_DECAP (1<<8)
+					/* Indicates that PPPoE should be decapsulated */
+#define SFE_IPV4_CONNECTION_MATCH_FLAG_PPPOE_ENCAP (1<<9)
+					/* Indicates that PPPoE should be encapsulated */
 
 /*
  * IPv4 connection matching structure.
@@ -75,6 +81,8 @@ struct sfe_ipv4_connection_match {
 	__be32 match_dest_ip;		/* Destination IP address */
 	__be16 match_src_port;		/* Source port/connection ident */
 	__be16 match_dest_port;		/* Destination port/connection ident */
+
+	struct udp_sock *up;		/* Stores UDP sock information; valid only in decap path */
 
 	/*
 	 * Control the operations of the match.
@@ -139,6 +147,12 @@ struct sfe_ipv4_connection_match {
 	 */
 	u64 rx_packet_count64;
 	u64 rx_byte_count64;
+
+	/*
+	 * PPPoE information
+	 */
+	u16 pppoe_session_id;
+	u8 pppoe_remote_mac[ETH_ALEN];
 };
 
 /*
@@ -214,12 +228,17 @@ enum sfe_ipv4_exception_events {
 	SFE_IPV4_EXCEPTION_EVENT_ICMP_NO_CONNECTION,
 	SFE_IPV4_EXCEPTION_EVENT_ICMP_FLUSHED_CONNECTION,
 	SFE_IPV4_EXCEPTION_EVENT_HEADER_INCOMPLETE,
+	SFE_IPV4_EXCEPTION_EVENT_HEADER_CSUM_BAD,
 	SFE_IPV4_EXCEPTION_EVENT_BAD_TOTAL_LENGTH,
 	SFE_IPV4_EXCEPTION_EVENT_NON_V4,
 	SFE_IPV4_EXCEPTION_EVENT_NON_INITIAL_FRAGMENT,
 	SFE_IPV4_EXCEPTION_EVENT_DATAGRAM_INCOMPLETE,
 	SFE_IPV4_EXCEPTION_EVENT_IP_OPTIONS_INCOMPLETE,
 	SFE_IPV4_EXCEPTION_EVENT_UNHANDLED_PROTOCOL,
+	SFE_IPV4_EXCEPTION_EVENT_PPPOE_HEADER_ENCAP_FAILED,
+	SFE_IPV4_EXCEPTION_EVENT_INVALID_PPPOE_SESSION,
+	SFE_IPV4_EXCEPTION_EVENT_INCORRECT_PPPOE_PARSING,
+	SFE_IPV4_EXCEPTION_EVENT_PPPOE_NOT_SET_IN_CME,
 	SFE_IPV4_EXCEPTION_EVENT_LAST
 };
 
@@ -246,9 +265,12 @@ struct sfe_ipv4_stats {
 	u64 connection_match_hash_reorders64;
 					/* Number of IPv4 connection match hash reorders */
 	u64 connection_flushes64;		/* Number of IPv4 connection flushes */
+	u64 packets_dropped64;			/* Number of IPv4 packets dropped */
 	u64 packets_forwarded64;		/* Number of IPv4 packets forwarded */
 	u64 packets_not_forwarded64;	/* Number of IPv4 packets not forwarded */
 	u64 exception_events64[SFE_IPV4_EXCEPTION_EVENT_LAST];
+	u64 pppoe_encap_packets_forwarded64;	/* Number of IPv4 PPPOE encap packets forwarded */
+	u64 pppoe_decap_packets_forwarded64;	/* Number of IPv4 PPPOE decap packets forwarded */
 };
 
 /*
