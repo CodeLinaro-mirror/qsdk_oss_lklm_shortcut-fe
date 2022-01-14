@@ -31,7 +31,7 @@
 #include <linux/netfilter.h>
 #include <linux/inetdevice.h>
 #include <linux/netfilter_ipv6.h>
-
+#include <net/protocol.h>
 #include "sfe_debug.h"
 #include "sfe_api.h"
 #include "sfe.h"
@@ -41,6 +41,7 @@
 #include "sfe_ipv6_tcp.h"
 #include "sfe_ipv6_icmp.h"
 #include "sfe_pppoe.h"
+#include "sfe_ipv6_tunipip6.h"
 
 #define sfe_ipv6_addr_copy(src, dest) memcpy((void *)(dest), (void *)(src), 16)
 
@@ -83,6 +84,12 @@ static char *sfe_ipv6_exception_events_string[SFE_IPV6_EXCEPTION_EVENT_LAST] = {
 	"UNHANDLED_PROTOCOL",
 	"FLOW_COOKIE_ADD_FAIL",
 	"INVALID_SOURCE_INTERFACE",
+	"TUNIPIP6_HEADER_INCOMPLETE",
+	"TUNIPIP6_NO_CONNECTION",
+	"TUNIPIP6_IP_OPTIONS_OR_INITIAL_FRAGMENT",
+	"TUNIPIP6_SMALL_TTL",
+	"TUNIPIP6_NEEDS_FRAGMENTATION",
+	"TUNIPIP6_SYNC_ON_FIND"
 };
 
 static struct sfe_ipv6 __si6;
@@ -820,6 +827,10 @@ int sfe_ipv6_recv(struct net_device *dev, struct sk_buff *skb, struct sfe_l2_inf
 		return sfe_ipv6_recv_icmp(si, skb, dev, len, iph, ihl);
 	}
 
+	if (IPPROTO_IPIP == next_hdr) {
+		return sfe_ipv6_recv_tunipip6(si, skb, dev, len, iph, ihl, sync_on_find, l2_info, true);
+	}
+
 	sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_UNHANDLED_PROTOCOL);
 	DEBUG_TRACE("not UDP, TCP or ICMP: %u\n", next_hdr);
 	return 0;
@@ -1430,6 +1441,16 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 		reply_cm->flow_accel = 1;
 	}
 #endif
+	/*
+	 * Decapsulation path have proto set.
+	 * This is used to differentiate de/encap, and call protocol specific handler.
+	 */
+	if (IPPROTO_IPIP == tuple->protocol) {
+		original_cm->proto = NULL;
+		rcu_read_lock();
+		reply_cm->proto = rcu_dereference(inet6_protos[tuple->protocol]);
+		rcu_read_unlock();
+	}
 	/*
 	 * If l2_features are disabled and flow uses l2 features such as macvlan/bridge/pppoe/vlan,
 	 * bottom interfaces are expected to be disabled in the flow rule and always top interfaces

@@ -4,7 +4,7 @@
 
 SFE_BASE_OBJS := sfe.o sfe_init.o
 SFE_IPV4_OBJS := sfe_ipv4.o sfe_ipv4_udp.o sfe_ipv4_tcp.o sfe_ipv4_icmp.o
-SFE_IPV6_OBJS := sfe_ipv6.o sfe_ipv6_udp.o sfe_ipv6_tcp.o sfe_ipv6_icmp.o
+SFE_IPV6_OBJS := sfe_ipv6.o sfe_ipv6_udp.o sfe_ipv6_tcp.o sfe_ipv6_icmp.o sfe_ipv6_tunipip6.o
 SFE_PPPOE_OBJS := sfe_pppoe.o
 
 obj-m += qca-nss-sfe.o

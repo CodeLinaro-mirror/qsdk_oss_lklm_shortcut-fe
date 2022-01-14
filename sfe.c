@@ -908,6 +908,9 @@ sfe_tx_status_t sfe_create_ipv6_rule_msg(struct sfe_ctx_instance_internal *sfe_c
 	case IPPROTO_UDP:
 		break;
 
+	case IPPROTO_IPIP:
+		break;
+
 	default:
 		ret = SFE_CMN_RESPONSE_EMSG;
 		sfe_incr_exceptions(SFE_EXCEPTION_PROTOCOL_NOT_SUPPORT);

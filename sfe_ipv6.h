@@ -106,6 +106,12 @@ struct sfe_ipv6_connection_match {
 	__be16 match_dest_port;		/* Destination port/connection ident */
 
 	struct udp_sock *up;		/* Stores UDP sock information; valid only in decap path */
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 13, 0))
+	const struct inet6_protocol *proto;	/* stores protocol handler; valid only in decap path */
+#else
+	struct inet6_protocol *proto;	/* stores protocol handler; valid only in decap path */
+#endif
+
 	/*
 	 * Control the operations of the match.
 	 */
@@ -274,6 +280,12 @@ enum sfe_ipv6_exception_events {
 	SFE_IPV6_EXCEPTION_EVENT_NOT_ENOUGH_HEADROOM,
 	SFE_IPV6_EXCEPTION_EVENT_INGRESS_VLAN_TAG_MISMATCH,
 	SFE_IPV6_EXCEPTION_EVENT_INVALID_SRC_IFACE,
+	SFE_IPV6_EXCEPTION_EVENT_TUNIPIP6_HEADER_INCOMPLETE,
+	SFE_IPV6_EXCEPTION_EVENT_TUNIPIP6_NO_CONNECTION,
+	SFE_IPV6_EXCEPTION_EVENT_TUNIPIP6_IP_OPTIONS_OR_INITIAL_FRAGMENT,
+	SFE_IPV6_EXCEPTION_EVENT_TUNIPIP6_SMALL_TTL,
+	SFE_IPV6_EXCEPTION_EVENT_TUNIPIP6_NEEDS_FRAGMENTATION,
+	SFE_IPV6_EXCEPTION_EVENT_TUNIPIP6_SYNC_ON_FIND,
 	SFE_IPV6_EXCEPTION_EVENT_LAST
 };
 
