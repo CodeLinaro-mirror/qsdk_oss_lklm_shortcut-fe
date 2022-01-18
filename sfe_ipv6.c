@@ -81,7 +81,8 @@ static char *sfe_ipv6_exception_events_string[SFE_IPV6_EXCEPTION_EVENT_LAST] = {
 	"DATAGRAM_INCOMPLETE",
 	"IP_OPTIONS_INCOMPLETE",
 	"UNHANDLED_PROTOCOL",
-	"FLOW_COOKIE_ADD_FAIL"
+	"FLOW_COOKIE_ADD_FAIL",
+	"INVALID_SOURCE_INTERFACE",
 };
 
 static struct sfe_ipv6 __si6;
@@ -106,12 +107,11 @@ static inline unsigned int sfe_ipv6_get_connection_match_hash(struct net_device 
 							      struct sfe_ipv6_addr *dest_ip, __be16 dest_port)
 {
 	u32 idx, hash = 0;
-	size_t dev_addr = (size_t)dev;
 
 	for (idx = 0; idx < 4; idx++) {
 		hash ^= src_ip->addr[idx] ^ dest_ip->addr[idx];
 	}
-	hash = ((u32)dev_addr) ^ hash ^ protocol ^ ntohs(src_port ^ dest_port);
+	hash =  hash ^ protocol ^ ntohs(src_port ^ dest_port);
 	return ((hash >> SFE_IPV6_CONNECTION_HASH_SHIFT) ^ hash) & SFE_IPV6_CONNECTION_HASH_MASK;
 }
 
@@ -1247,6 +1247,10 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 		ether_addr_copy(reply_cm->pppoe_remote_mac, msg->pppoe_rule.return_pppoe_remote_mac);
 	}
 
+	if (msg->rule_flags & SFE_RULE_CREATE_FLAG_SRC_INTERFACE_CHECK) {
+		original_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_SRC_INTERFACE_CHECK;
+	}
+
 	/*
 	 * For the non-arp interface, we don't write L2 HDR.
 	 * Excluding PPPoE from this, since we are now supporting PPPoE encap/decap.
@@ -1437,6 +1441,10 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 			(msg->rule_flags & SFE_RULE_CREATE_FLAG_USE_FLOW_BOTTOM_INTERFACE)) {
 			 reply_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_CSUM_OFFLOAD;
 		}
+	}
+
+	if (msg->rule_flags & SFE_RULE_CREATE_FLAG_SRC_INTERFACE_CHECK) {
+		reply_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_SRC_INTERFACE_CHECK;
 	}
 
 	/*

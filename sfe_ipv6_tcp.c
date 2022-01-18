@@ -191,7 +191,25 @@ int sfe_ipv6_recv_tcp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 	}
 
 	/*
-	 * If our packet has been marked as "sync on find" we can't actually
+	 * Source interface validate.
+	 */
+	if (unlikely((cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_SRC_INTERFACE_CHECK) && (cm->match_dev != dev))) {
+		struct sfe_ipv6_connection *c = cm->connection;
+		spin_lock_bh(&si->lock);
+		ret = sfe_ipv6_remove_connection(si, c);
+		spin_unlock_bh(&si->lock);
+
+		if (ret) {
+			sfe_ipv6_flush_connection(si, c, SFE_SYNC_REASON_FLUSH);
+		}
+		rcu_read_unlock();
+		sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_INVALID_SRC_IFACE);
+		DEBUG_TRACE("flush on wrong source interface check failure\n");
+		return 0;
+	}
+
+	/*
+	 * If our packet has beern marked as "flush on find" we can't actually
 	 * forward it in the fast path, but now that we've found an associated
 	 * connection we need sync its status before throw it slow path.
 	 */
@@ -636,7 +654,6 @@ int sfe_ipv6_recv_tcp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 
 	xmit_dev = cm->xmit_dev;
 	skb->dev = xmit_dev;
-
 
 	/*
 	 * Check to see if we need to add VLAN tags

@@ -81,6 +81,8 @@ struct sfe_ipv6_tcp_connection_match {
 					/* set skb mark*/
 #define SFE_IPV6_CONNECTION_MATCH_FLAG_INSERT_EGRESS_VLAN_TAG (1<<12)
 					/* Insert VLAN tag */
+#define SFE_IPV6_CONNECTION_MATCH_FLAG_SRC_INTERFACE_CHECK (1<<13)
+					/* Source interface check.*/
 
 /*
  * IPv6 connection matching structure.
@@ -271,6 +273,7 @@ enum sfe_ipv6_exception_events {
 	SFE_IPV6_EXCEPTION_EVENT_PPPOE_NOT_SET_IN_CME,
 	SFE_IPV6_EXCEPTION_EVENT_NOT_ENOUGH_HEADROOM,
 	SFE_IPV6_EXCEPTION_EVENT_INGRESS_VLAN_TAG_MISMATCH,
+	SFE_IPV6_EXCEPTION_EVENT_INVALID_SRC_IFACE,
 	SFE_IPV6_EXCEPTION_EVENT_LAST
 };
 

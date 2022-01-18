@@ -68,6 +68,8 @@ struct sfe_ipv4_tcp_connection_match {
 					/* skb mark of the packet */
 #define SFE_IPV4_CONNECTION_MATCH_FLAG_INSERT_EGRESS_VLAN_TAG (1<<12)
 					/* Insert VLAN tag */
+#define SFE_IPV4_CONNECTION_MATCH_FLAG_SRC_INTERFACE_CHECK (1<<13)
+					/* Source interface check.*/
 
 /*
  * IPv4 connection matching structure.
@@ -265,6 +267,7 @@ enum sfe_ipv4_exception_events {
 	SFE_IPV4_EXCEPTION_EVENT_INCORRECT_PPPOE_PARSING,
 	SFE_IPV4_EXCEPTION_EVENT_PPPOE_NOT_SET_IN_CME,
 	SFE_IPV4_EXCEPTION_EVENT_INGRESS_VLAN_TAG_MISMATCH,
+	SFE_IPV4_EXCEPTION_EVENT_INVALID_SRC_IFACE,
 	SFE_IPV4_EXCEPTION_EVENT_LAST
 };
 

@@ -44,6 +44,7 @@
 #define SFE_RULE_CREATE_FLAG_L2_ENCAP     (1<<7) /**< consists of an encapsulating protocol that carries an IPv4 payload within it. */
 #define SFE_RULE_CREATE_FLAG_USE_FLOW_BOTTOM_INTERFACE (1<<8) /**< Use flow interface number instead of top interface. */
 #define SFE_RULE_CREATE_FLAG_USE_RETURN_BOTTOM_INTERFACE (1<<9) /**< Use return interface number instead of top interface. */
+#define SFE_RULE_CREATE_FLAG_SRC_INTERFACE_CHECK  (1<<10)  /**< Check source interface. */
 
 /**
  * Rule creation validity flags.

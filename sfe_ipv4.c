@@ -80,7 +80,8 @@ static char *sfe_ipv4_exception_events_string[SFE_IPV4_EXCEPTION_EVENT_LAST] = {
 	"NON_INITIAL_FRAGMENT",
 	"DATAGRAM_INCOMPLETE",
 	"IP_OPTIONS_INCOMPLETE",
-	"UNHANDLED_PROTOCOL"
+	"UNHANDLED_PROTOCOL",
+	"INVALID_SOURCE_INTERFACE",
 };
 
 static struct sfe_ipv4 __si;
@@ -120,8 +121,7 @@ static inline unsigned int sfe_ipv4_get_connection_match_hash(struct net_device 
 							      __be32 src_ip, __be16 src_port,
 							      __be32 dest_ip, __be16 dest_port)
 {
-	size_t dev_addr = (size_t)dev;
-	u32 hash = ((u32)dev_addr) ^ ntohl(src_ip ^ dest_ip) ^ protocol ^ ntohs(src_port ^ dest_port);
+	u32 hash =  ntohl(src_ip ^ dest_ip) ^ protocol ^ ntohs(src_port ^ dest_port);
 	return ((hash >> SFE_IPV4_CONNECTION_HASH_SHIFT) ^ hash) & SFE_IPV4_CONNECTION_HASH_MASK;
 }
 
@@ -151,8 +151,7 @@ sfe_ipv4_find_connection_match_rcu(struct sfe_ipv4 *si, struct net_device *dev, 
 			   || cm->match_dest_port != dest_port
 			   || cm->match_src_ip != src_ip
 			   || cm->match_dest_ip != dest_ip
-			   || cm->match_protocol != protocol
-			   || cm->match_dev != dev) {
+			   || cm->match_protocol != protocol) {
 			continue;
 		}
 
@@ -1226,6 +1225,10 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	}
 
 	reply_cm->l2_hdr_size = 0;
+	if (msg->rule_flags & SFE_RULE_CREATE_FLAG_SRC_INTERFACE_CHECK) {
+		original_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_SRC_INTERFACE_CHECK;
+	}
+
 	reply_cm->flags = 0;
 
 	/*
@@ -1260,6 +1263,10 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 		reply_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_PPPOE_DECAP;
 		reply_cm->pppoe_session_id = msg->pppoe_rule.return_pppoe_session_id;
 		ether_addr_copy(reply_cm->pppoe_remote_mac, msg->pppoe_rule.return_pppoe_remote_mac);
+	}
+
+	if (msg->rule_flags & SFE_RULE_CREATE_FLAG_SRC_INTERFACE_CHECK) {
+		reply_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_SRC_INTERFACE_CHECK;
 	}
 
 	/*
