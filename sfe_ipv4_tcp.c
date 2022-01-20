@@ -689,7 +689,7 @@ int sfe_ipv4_recv_tcp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 	 * Mark outgoing packet
 	 */
 	if (unlikely(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_MARK)) {
-		skb->mark = cm->connection->mark;
+		skb->mark = cm->mark;
 	}
 
 	/*

@@ -225,7 +225,6 @@ struct sfe_ipv4_connection {
 					/* Pointer to the next entry in the list of all connections */
 	struct sfe_ipv4_connection *all_connections_prev;
 					/* Pointer to the previous entry in the list of all connections */
-	u32 mark;			/* mark for outgoing packet */
 	u32 debug_read_seq;		/* sequence number for debug dump */
 	bool removed;			/* Indicates the connection is removed */
 	struct rcu_head rcu;		/* delay rcu free */
