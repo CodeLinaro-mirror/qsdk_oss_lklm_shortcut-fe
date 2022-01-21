@@ -1343,9 +1343,9 @@ int sfe_init_if(void)
 	int result = -1;
 
 	/*
-	 * L2 feature is disabled by default
+	 * L2 feature is enabled by default
 	 */
-	sfe_ctx->l2_feature_support = 0;
+	sfe_ctx->l2_feature_support = 1;
 
 	/*
 	 * Create sys/sfe
