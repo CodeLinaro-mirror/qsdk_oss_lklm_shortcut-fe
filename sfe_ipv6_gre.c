@@ -29,13 +29,15 @@
 #include "sfe.h"
 #include "sfe_flow_cookie.h"
 #include "sfe_ipv6.h"
+#include "sfe_vlan.h"
 
 /*
  * sfe_ipv6_recv_gre()
  *	Handle GRE packet receives and forwarding.
  */
 int sfe_ipv6_recv_gre(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_device *dev,
-			     unsigned int len, struct ipv6hdr *iph, unsigned int ihl, bool sync_on_find, bool tun_outer)
+		      unsigned int len, struct ipv6hdr *iph, unsigned int ihl, bool sync_on_find,
+		      struct sfe_l2_info *l2_info, bool tun_outer)
 {
 	struct sfe_ipv6_connection_match *cm;
 	struct sfe_ipv6_addr *dest_ip;
@@ -80,6 +82,16 @@ int sfe_ipv6_recv_gre(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 		rcu_read_unlock();
 		sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_GRE_NO_CONNECTION);
 		DEBUG_TRACE("no connection match found dev %s src ip %pI6 dest ip %pI6\n", dev->name, src_ip, dest_ip);
+		return 0;
+	}
+
+	/*
+	 * Do we expect an ingress VLAN tag for this flow?
+	 */
+	if (unlikely(!sfe_vlan_validate_ingress_tag(skb, cm->ingress_vlan_hdr_cnt, cm->ingress_vlan_hdr, l2_info))) {
+		rcu_read_unlock();
+		sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_INGRESS_VLAN_TAG_MISMATCH);
+		DEBUG_TRACE("VLAN tag mismatch. skb=%px\n", skb);
 		return 0;
 	}
 
@@ -159,10 +171,21 @@ int sfe_ipv6_recv_gre(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 	}
 
 	/*
+	 * Check if skb has enough headroom to write L2 headers
+	 */
+	if (unlikely(skb_headroom(skb) < cm->l2_hdr_size)) {
+		rcu_read_unlock();
+		DEBUG_WARN("%px: Not enough headroom: %u\n", skb, skb_headroom(skb));
+		sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_NO_HEADROOM);
+		return 0;
+	}
+
+	/*
 	 * protocol handler will be valid only in decap-path.
 	 */
 	if (cm->proto) {
 		struct inet6_protocol *ipprot = cm->proto;
+		skb_reset_network_header(skb);
 		skb_pull(skb, ihl);
 		skb_reset_transport_header(skb);
 		skb->fast_forwarded = 1;
@@ -221,6 +244,13 @@ int sfe_ipv6_recv_gre(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 
 	xmit_dev = cm->xmit_dev;
 	skb->dev = xmit_dev;
+
+	/*
+	 * Check to see if we need to add VLAN tags
+	 */
+	if (unlikely(cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_INSERT_EGRESS_VLAN_TAG)) {
+		sfe_vlan_add_tag(skb, cm->egress_vlan_hdr_cnt, cm->egress_vlan_hdr);
+	}
 
 	if (cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_WRITE_FAST_ETH_HDR) {
 		/*
