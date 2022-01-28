@@ -29,6 +29,7 @@
 #include "sfe.h"
 #include "sfe_flow_cookie.h"
 #include "sfe_ipv6.h"
+#include "sfe_pppoe.h"
 #include "sfe_vlan.h"
 
 /*
@@ -147,10 +148,6 @@ int sfe_ipv6_recv_gre(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 	}
 
 	/*
-	 * From this point on we're good to modify the packet.
-	 */
-
-	/*
 	 * Check if skb was cloned. If it was, unshare it. Because
 	 * the data area is going to be written in this path and we don't want to
 	 * change the cloned skb's data section.
@@ -171,13 +168,54 @@ int sfe_ipv6_recv_gre(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 	}
 
 	/*
-	 * Check if skb has enough headroom to write L2 headers
+	 * For PPPoE packets, match server MAC and session id
 	 */
-	if (unlikely(skb_headroom(skb) < cm->l2_hdr_size)) {
-		rcu_read_unlock();
-		DEBUG_WARN("%px: Not enough headroom: %u\n", skb, skb_headroom(skb));
-		sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_NO_HEADROOM);
-		return 0;
+	if (unlikely(cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_PPPOE_DECAP)) {
+		struct ethhdr *eth;
+		bool pppoe_match;
+
+		if (unlikely(!sfe_l2_parse_flag_check(l2_info, SFE_L2_PARSE_FLAGS_PPPOE_INGRESS))) {
+			rcu_read_unlock();
+			DEBUG_TRACE("%px: PPPoE header not present in packet for PPPoE rule\n", skb);
+			sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_INCORRECT_PPPOE_PARSING);
+			return 0;
+		}
+
+		eth = eth_hdr(skb);
+
+		pppoe_match = (cm->pppoe_session_id == sfe_l2_pppoe_session_id_get(l2_info)) &&
+				ether_addr_equal((u8*)cm->pppoe_remote_mac, (u8 *)eth->h_source);
+
+		if (unlikely(!pppoe_match)) {
+			DEBUG_TRACE("%px: PPPoE sessions ID %d and %d or MAC %pM and %pM did not match\n",
+					skb, cm->pppoe_session_id, sfe_l2_pppoe_session_id_get(l2_info),
+					cm->pppoe_remote_mac, eth->h_source);
+			rcu_read_unlock();
+			sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_INVALID_PPPOE_SESSION);
+			return 0;
+		}
+
+		skb->protocol = htons(l2_info->protocol);
+		this_cpu_inc(si->stats_pcpu->pppoe_decap_packets_forwarded64);
+	} else if (unlikely(sfe_l2_parse_flag_check(l2_info, SFE_L2_PARSE_FLAGS_PPPOE_INGRESS))) {
+
+		/*
+		 * If packet contains PPPoE header but CME doesn't contain PPPoE flag yet we are exceptioning the packet to linux
+		 */
+		if (unlikely(!(cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_BRIDGE_FLOW))) {
+			rcu_read_unlock();
+			DEBUG_TRACE("%px: CME doesn't contain PPPoE flag but packet has PPPoE header\n", skb);
+			sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_PPPOE_NOT_SET_IN_CME);
+			return 0;
+
+		}
+
+		/*
+		 * For bridged flows when packet contains PPPoE header, restore the header back and forward to xmit interface
+		 */
+		__skb_push(skb, (sizeof(struct pppoe_hdr) + sizeof(struct sfe_ppp_hdr)));
+
+		this_cpu_inc(si->stats_pcpu->pppoe_bridge_packets_forwarded64);
 	}
 
 	/*
@@ -185,7 +223,6 @@ int sfe_ipv6_recv_gre(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 	 */
 	if (cm->proto) {
 		struct inet6_protocol *ipprot = cm->proto;
-		skb_reset_network_header(skb);
 		skb_pull(skb, ihl);
 		skb_reset_transport_header(skb);
 		skb->fast_forwarded = 1;
@@ -207,6 +244,16 @@ int sfe_ipv6_recv_gre(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 		rcu_read_unlock();
 		DEBUG_TRACE("%p: %s decap done\n",skb, __func__);
 		return 1;
+	}
+
+	/*
+	 * Check if skb has enough headroom to write L2 headers
+	 */
+	if (unlikely(skb_headroom(skb) < cm->l2_hdr_size)) {
+		rcu_read_unlock();
+		DEBUG_WARN("%px: Not enough headroom: %u\n", skb, skb_headroom(skb));
+		sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_NO_HEADROOM);
+		return 0;
 	}
 
 	/*
@@ -241,6 +288,14 @@ int sfe_ipv6_recv_gre(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 	skb->dev = xmit_dev;
 
 	/*
+	 * For PPPoE flows, add PPPoE header before L2 header is added.
+	 */
+	if (unlikely(cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_PPPOE_ENCAP)) {
+		sfe_pppoe_add_header(skb, cm->pppoe_session_id, PPP_IPV6);
+		this_cpu_inc(si->stats_pcpu->pppoe_encap_packets_forwarded64);
+	}
+
+	/*
 	 * Check to see if we need to add VLAN tags
 	 */
 	if (unlikely(cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_INSERT_EGRESS_VLAN_TAG)) {
@@ -252,11 +307,11 @@ int sfe_ipv6_recv_gre(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 		 * For the simple case we write this really fast.
 		 */
 		struct ethhdr *eth = (struct ethhdr *)__skb_push(skb, ETH_HLEN);
-		eth->h_proto = htons(ETH_P_IPV6);
+		eth->h_proto = skb->protocol;
 		ether_addr_copy((u8 *)eth->h_dest, (u8 *)cm->xmit_dest_mac);
 		ether_addr_copy((u8 *)eth->h_source, (u8 *)cm->xmit_src_mac);
 	} else if (cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_WRITE_L2_HDR) {
-		dev_hard_header(skb, xmit_dev, ETH_P_IPV6,
+		dev_hard_header(skb, xmit_dev, ntohs(skb->protocol),
 				cm->xmit_dest_mac, cm->xmit_src_mac, len);
 	}
 
