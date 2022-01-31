@@ -53,6 +53,14 @@ typedef enum sfe_sync_reason {
 } sfe_sync_reason_t;
 
 /*
+ * VLAN header (aka VLAN tag)
+ */
+struct sfe_vlan_hdr {
+	u16 tpid;               /* Tag Protocol Identifier */
+	u16 tci;                /* Tag Control Information */
+};
+
+/*
  * Structure used to store L2 information
  */
 struct sfe_l2_info {
@@ -61,6 +69,9 @@ struct sfe_l2_info {
 	u16 l2_hdr_size;	/* L2 header size */
 	u16 pppoe_hdr_offset;	/* PPPOE header offset */
 	u16 protocol;		/* L3 Protocol */
+	struct sfe_vlan_hdr vlan_hdr[SFE_MAX_VLAN_DEPTH];
+				/* VLAN tag(s) of ingress packet */
+	u8 vlan_hdr_cnt;        /* Number of VLAN tags in the ingress packet */
 };
 
 /*
@@ -96,7 +107,7 @@ struct sfe_connection_sync {
 	u64 dest_byte_count;
 	u32 dest_new_packet_count;
 	u32 dest_new_byte_count;
-	u32 reason;		/* reason for stats sync message, i.e. destroy, flush, period sync */
+	u32 reason;                     /* reason for stats sync message, i.e. destroy, flush, period sync */
 	u64 delta_jiffies;		/* Time to be added to the current timeout to keep the connection alive */
 };
 
@@ -141,6 +152,7 @@ void sfe_ipv4_destroy_rule(struct sfe_ipv4_rule_destroy_msg *msg);
 void sfe_ipv4_destroy_all_rules_for_dev(struct net_device *dev);
 void sfe_ipv4_register_sync_rule_callback(sfe_sync_rule_callback_t callback);
 void sfe_ipv4_update_rule(struct sfe_ipv4_rule_create_msg *msg);
+bool sfe_dev_has_hw_csum(struct net_device *dev);
 
 #ifdef SFE_SUPPORT_IPV6
 /*

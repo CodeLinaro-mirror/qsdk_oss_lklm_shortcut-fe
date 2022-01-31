@@ -29,6 +29,7 @@
 #include "sfe_flow_cookie.h"
 #include "sfe_ipv4.h"
 #include "sfe_pppoe.h"
+#include "sfe_vlan.h"
 
 /*
  * sfe_ipv4_process_tcp_option_sack()
@@ -132,7 +133,7 @@ int sfe_ipv4_recv_tcp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 	bool bridge_flow;
 
 	/*
-	 * Is our packet too short to contain a valid UDP header?
+	 * Is our packet too short to contain a valid TCP header?
 	 */
 	if (unlikely(!pskb_may_pull(skb, (sizeof(struct tcphdr) + ihl)))) {
 		sfe_ipv4_exception_stats_inc(si, SFE_IPV4_EXCEPTION_EVENT_TCP_HEADER_INCOMPLETE);
@@ -188,7 +189,25 @@ int sfe_ipv4_recv_tcp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 	}
 
 	/*
-	 * If our packet has beern marked as "sync on find" we can't actually
+	 * Source interface validate.
+	 */
+	if (unlikely((cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_SRC_INTERFACE_CHECK) && (cm->match_dev != dev))) {
+		struct sfe_ipv4_connection *c = cm->connection;
+		spin_lock_bh(&si->lock);
+		ret = sfe_ipv4_remove_connection(si, c);
+		spin_unlock_bh(&si->lock);
+
+		if (ret) {
+			sfe_ipv4_flush_connection(si, c, SFE_SYNC_REASON_FLUSH);
+		}
+		rcu_read_unlock();
+		sfe_ipv4_exception_stats_inc(si, SFE_IPV4_EXCEPTION_EVENT_INVALID_SRC_IFACE);
+		DEBUG_TRACE("flush on wrong source interface check failure\n");
+		return 0;
+	}
+
+	/*
+	 * If our packet has beern marked as "flush on find" we can't actually
 	 * forward it in the fast path, but now that we've found an associated
 	 * connection we need sync its status before throw it slow path.
 	 */
@@ -212,6 +231,16 @@ int sfe_ipv4_recv_tcp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 		return 0;
 	}
 #endif
+
+	/*
+	 * Do we expect an ingress VLAN tag for this flow?
+	 */
+	if (unlikely(!sfe_vlan_validate_ingress_tag(skb, cm->ingress_vlan_hdr_cnt, cm->ingress_vlan_hdr, l2_info))) {
+		rcu_read_unlock();
+		sfe_ipv4_exception_stats_inc(si, SFE_IPV4_EXCEPTION_EVENT_INGRESS_VLAN_TAG_MISMATCH);
+		DEBUG_TRACE("VLAN tag mismatch. skb=%px\n", skb);
+		return 0;
+	}
 
 	bridge_flow = !!(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_BRIDGE_FLOW);
 
@@ -238,7 +267,7 @@ int sfe_ipv4_recv_tcp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 		sfe_ipv4_sync_status(si, cm->connection, SFE_SYNC_REASON_STATS);
 		rcu_read_unlock();
 
-		sfe_ipv4_exception_stats_inc(si, SFE_IPV4_EXCEPTION_EVENT_UDP_IP_OPTIONS_OR_INITIAL_FRAGMENT);
+		sfe_ipv4_exception_stats_inc(si, SFE_IPV4_EXCEPTION_EVENT_TCP_IP_OPTIONS_OR_INITIAL_FRAGMENT);
 		DEBUG_TRACE("Larger than MTU\n");
 		return 0;
 	}
@@ -493,11 +522,30 @@ int sfe_ipv4_recv_tcp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 	} else if (unlikely(sfe_l2_parse_flag_check(l2_info, SFE_L2_PARSE_FLAGS_PPPOE_INGRESS))) {
 
 		/*
-		 * If packet contains PPPOE header but CME doesn't contain PPPoE flag yet we are exceptioning the packet to linux
+		 * If packet contains PPPoE header but CME doesn't contain PPPoE flag yet we are exceptioning the packet to linux
 		 */
+		if (unlikely(!(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_BRIDGE_FLOW))) {
+			rcu_read_unlock();
+			DEBUG_TRACE("%px: CME doesn't contain PPPoE flag but packet has PPPoE header\n", skb);
+			sfe_ipv4_exception_stats_inc(si, SFE_IPV4_EXCEPTION_EVENT_PPPOE_NOT_SET_IN_CME);
+			return 0;
+		}
+
+		/*
+		 * For bridged flows when packet contains PPPoE header, restore the header back and forward to xmit interface
+		 */
+		__skb_push(skb, (sizeof(struct pppoe_hdr) + sizeof(struct sfe_ppp_hdr)));
+		l2_info->l2_hdr_size -= (sizeof(struct pppoe_hdr) + sizeof(struct sfe_ppp_hdr));
+		this_cpu_inc(si->stats_pcpu->pppoe_bridge_packets_forwarded64);
+	}
+
+	/*
+	 * Check if skb has enough headroom to write L2 headers
+	 */
+	if (unlikely(skb_headroom(skb) < cm->l2_hdr_size)) {
 		rcu_read_unlock();
-		DEBUG_TRACE("%px: CME doesn't contain PPPOE flag but packet has PPPoE header\n", skb);
-		sfe_ipv4_exception_stats_inc(si, SFE_IPV4_EXCEPTION_EVENT_PPPOE_NOT_SET_IN_CME);
+		DEBUG_WARN("%px: Not enough headroom: %u\n", skb, skb_headroom(skb));
+		sfe_ipv4_exception_stats_inc(si, SFE_IPV4_EXCEPTION_EVENT_NO_HEADROOM);
 		return 0;
 	}
 
@@ -508,19 +556,10 @@ int sfe_ipv4_recv_tcp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 	/*
 	 * For PPPoE flows, add PPPoE header before L2 header is added.
 	 */
-	if (cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_PPPOE_ENCAP) {
-		if (unlikely(!sfe_pppoe_add_header(skb, cm->pppoe_session_id, PPP_IP))) {
-			rcu_read_unlock();
-			DEBUG_WARN("%px: PPPoE header addition failed\n", skb);
-			sfe_ipv4_exception_stats_inc(si, SFE_IPV4_EXCEPTION_EVENT_NO_HEADROOM);
-			return 0;
-		}
+	if (unlikely(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_PPPOE_ENCAP)) {
+		sfe_pppoe_add_header(skb, cm->pppoe_session_id, PPP_IP);
 		this_cpu_inc(si->stats_pcpu->pppoe_encap_packets_forwarded64);
 	}
-
-	/*
-	 * TODO : VLAN headers if any should be added here when supported.
-	 */
 
 	/*
 	 * Update DSCP
@@ -611,7 +650,14 @@ int sfe_ipv4_recv_tcp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 	skb->dev = xmit_dev;
 
 	/*
-	 * Check to see if we need to write a header.
+	 * Check to see if we need to add VLAN tags
+	 */
+	if (unlikely(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_INSERT_EGRESS_VLAN_TAG)) {
+		sfe_vlan_add_tag(skb, cm->egress_vlan_hdr_cnt, cm->egress_vlan_hdr);
+	}
+
+	/*
+	 * Check to see if we need to write an Ethernet header.
 	 */
 	if (likely(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_WRITE_L2_HDR)) {
 		if (unlikely(!(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_WRITE_FAST_ETH_HDR))) {

@@ -32,21 +32,12 @@
  *
  * skb->data will point to PPPoE header after the function
  */
-bool sfe_pppoe_add_header(struct sk_buff *skb, u16 pppoe_session_id, u16 ppp_protocol)
+void sfe_pppoe_add_header(struct sk_buff *skb, u16 pppoe_session_id, u16 ppp_protocol)
 {
 	u16 *l2_header;
 	struct pppoe_hdr *ph;
 	struct sfe_ppp_hdr *ppp;
 	u16 *l3_header = (u16 *)skb->data;
-
-	/*
-	 * Check that we have space for PPPoE header, PPP header (2 bytes) and Ethernet header
-	 * TODO: Calculate the l2_hdr_len during rule push so that this is avoided in datapath
-	 */
-	if (unlikely(skb_headroom(skb) < ((sizeof(struct pppoe_hdr) + sizeof(struct sfe_ppp_hdr)) + ETH_HLEN))) {
-		DEBUG_TRACE("%px: Not enough headroom for PPPoE header\n", skb);
-		return false;
-	}
 
 	/*
 	 * PPPoE header (6 bytes) + PPP header (2 bytes)
@@ -80,8 +71,6 @@ bool sfe_pppoe_add_header(struct sk_buff *skb, u16 pppoe_session_id, u16 ppp_pro
 	 * L2 header offset will point to PPPoE header,
 	 */
 	__skb_push(skb, (sizeof(struct pppoe_hdr) + sizeof(struct sfe_ppp_hdr)));
-
-	return true;
 }
 
 /*

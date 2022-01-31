@@ -26,11 +26,13 @@
 #include <linux/inetdevice.h>
 #include <net/pkt_sched.h>
 #include <net/vxlan.h>
+#include <net/gre.h>
 
 #include "sfe_debug.h"
 #include "sfe_api.h"
 #include "sfe.h"
 #include "sfe_pppoe.h"
+#include "sfe_vlan.h"
 
 extern int max_ipv4_conn;
 extern int max_ipv6_conn;
@@ -195,6 +197,64 @@ inline bool sfe_dev_is_layer_3_interface(struct net_device *dev, bool check_v4)
 	}
 
 	return false;
+}
+
+/*
+ * sfe_routed_dev_allow()
+ *	check whether routed acceleration allowed
+ */
+static bool sfe_routed_dev_allow(struct net_device *dev, bool is_routed,  bool check_v4)
+{
+	if (!is_routed) {
+		return true;
+	}
+
+	if (sfe_dev_is_layer_3_interface(dev, check_v4)) {
+		return true;
+	}
+
+	/*
+	 * in case of GRE / vxlan, these dev does not have IP address
+	 * so l3 interface check will fail. allow rule creation between gre / vxlan
+	 * and wan dev for routed flow.
+	 */
+	if (netif_is_vxlan(dev)) {
+		return true;
+	}
+
+#ifdef SFE_GRE_TUN_ENABLE
+	if (netif_is_gretap(dev) || netif_is_gre(dev)) {
+		return true;
+	}
+
+	if (netif_is_ip6gre(dev) || netif_is_ip6gretap(dev)) {
+		return true;
+	}
+#endif
+
+	return false;
+}
+
+/* sfe_dev_has_hw_csum()
+ *	check whether device supports hardware checksum offload
+ */
+bool sfe_dev_has_hw_csum(struct net_device *dev)
+{
+	if (netif_is_vxlan(dev)) {
+		return false;
+	}
+
+#ifdef SFE_GRE_TUN_ENABLE
+	if (netif_is_gre(dev) || netif_is_gretap(dev)) {
+		return false;
+	}
+
+	if (netif_is_ip6gre(dev) || netif_is_ip6gretap(dev)) {
+		return false;
+	}
+#endif
+
+	return true;
 }
 
 /*
@@ -457,36 +517,51 @@ static bool sfe_recv_parse_l2(struct net_device *dev, struct sk_buff *skb, struc
 	sfe_l2_hdr_offset_set(l2_info, ((skb->data - ETH_HLEN) - skb->head));
 
 	/*
-	 * TODO: Add VLAN parsing here.
-	 * Add VLAN fields to l2_info structure and update l2_hdr_size
-	 * In case of exception, use l2_hdr_size to move the data pointer back
+	 * VLAN parsing
 	 */
+	if (unlikely(!sfe_vlan_check_and_parse_tag(skb, l2_info))) {
+		return false;
+	}
 
 	/*
 	 * PPPoE parsing
 	 */
-	if (unlikely(htons(ETH_P_PPP_SES) != skb->protocol)) {
-		return false;
-	}
+	if (htons(ETH_P_PPP_SES) == skb->protocol) {
+		/*
+		 * Parse only PPPoE session packets
+		 * skb->data is pointing to PPPoE hdr
+		 */
+		if (!sfe_pppoe_parse_hdr(skb, l2_info)) {
 
-	/*
-	 * Parse only PPPoE session packets
-	 * skb->data is pointing to PPPoE hdr
-	 */
-	if (!sfe_pppoe_parse_hdr(skb, l2_info)) {
+			/*
+			 * For exception from PPPoE return from here without modifying the skb->data
+			 * This includes non-IPv4/v6 cases also
+			 */
+			return false;
+		}
 
 		/*
-		 * For exception from PPPoE return from here without modifying the skb->data
-		 * This includes non-IPv4/v6 cases also
+		 * Pull by L2 header size
 		 */
-		return false;
+		__skb_pull(skb, sfe_l2_hdr_size_get(l2_info));
 	}
+	return true;
+}
+
+/*
+ * sfe_recv_undo_parse_l2()
+ */
+static void sfe_recv_undo_parse_l2(struct net_device *dev, struct sk_buff *skb, struct sfe_l2_info *l2_info)
+{
+	/*
+	 * PPPoE undo
+	 */
+	__skb_push(skb, sfe_l2_hdr_size_get(l2_info));
 
 	/*
-	 * Pull by L2 header size considering all L2.5 headers
+	 * VLAN undo
 	 */
-	__skb_pull(skb, sfe_l2_hdr_size_get(l2_info));
-	return true;
+	sfe_vlan_undo_parse(skb, l2_info);
 }
 
 /*
@@ -530,6 +605,9 @@ sfe_tx_status_t sfe_create_ipv4_rule_msg(struct sfe_ctx_instance_internal *sfe_c
 	case IPPROTO_UDP:
 		break;
 
+	case IPPROTO_GRE:
+		break;
+
 	default:
 		ret = SFE_CMN_RESPONSE_EMSG;
 		sfe_incr_exceptions(SFE_EXCEPTION_PROTOCOL_NOT_SUPPORT);
@@ -553,7 +631,7 @@ sfe_tx_status_t sfe_create_ipv4_rule_msg(struct sfe_ctx_instance_internal *sfe_c
 	 * Does our input device support IP processing?
 	 */
 	src_dev = dev_get_by_index(&init_net, msg->msg.rule_create.conn_rule.flow_top_interface_num);
-	if (!src_dev || (is_routed && !sfe_dev_is_layer_3_interface(src_dev, true) && !netif_is_vxlan(src_dev))) {
+	if (!src_dev || !sfe_routed_dev_allow(src_dev, is_routed, true)) {
 		ret = SFE_CMN_RESPONSE_EINTERFACE;
 		sfe_incr_exceptions(SFE_EXCEPTION_SRC_DEV_NOT_L3);
 		goto failed_ret;
@@ -573,7 +651,7 @@ sfe_tx_status_t sfe_create_ipv4_rule_msg(struct sfe_ctx_instance_internal *sfe_c
 	 * Does our output device support IP processing?
 	 */
 	dest_dev = dev_get_by_index(&init_net, msg->msg.rule_create.conn_rule.return_top_interface_num);
-	if (!dest_dev || (is_routed && !sfe_dev_is_layer_3_interface(dest_dev, true) && !netif_is_vxlan(dest_dev))) {
+	if (!dest_dev || !sfe_routed_dev_allow(dest_dev, is_routed, true)) {
 		ret = SFE_CMN_RESPONSE_EINTERFACE;
 		sfe_incr_exceptions(SFE_EXCEPTION_DEST_DEV_NOT_L3);
 		goto failed_ret;
@@ -892,6 +970,12 @@ sfe_tx_status_t sfe_create_ipv6_rule_msg(struct sfe_ctx_instance_internal *sfe_c
 	case IPPROTO_UDP:
 		break;
 
+	case IPPROTO_IPIP:
+		break;
+
+	case IPPROTO_GRE:
+		break;
+
 	default:
 		ret = SFE_CMN_RESPONSE_EMSG;
 		sfe_incr_exceptions(SFE_EXCEPTION_PROTOCOL_NOT_SUPPORT);
@@ -902,7 +986,7 @@ sfe_tx_status_t sfe_create_ipv6_rule_msg(struct sfe_ctx_instance_internal *sfe_c
 	 * Does our input device support IP processing?
 	 */
 	src_dev = dev_get_by_index(&init_net, msg->msg.rule_create.conn_rule.flow_top_interface_num);
-	if (!src_dev || (is_routed && !sfe_dev_is_layer_3_interface(src_dev, false) && !netif_is_vxlan(src_dev))) {
+	if (!src_dev || !sfe_routed_dev_allow(src_dev, is_routed, false)) {
 		ret = SFE_CMN_RESPONSE_EINTERFACE;
 		sfe_incr_exceptions(SFE_EXCEPTION_SRC_DEV_NOT_L3);
 		goto failed_ret;
@@ -922,7 +1006,7 @@ sfe_tx_status_t sfe_create_ipv6_rule_msg(struct sfe_ctx_instance_internal *sfe_c
 	 * Does our output device support IP processing?
 	 */
 	dest_dev = dev_get_by_index(&init_net, msg->msg.rule_create.conn_rule.return_top_interface_num);
-	if (!dest_dev || (is_routed && !sfe_dev_is_layer_3_interface(dest_dev, false) && !netif_is_vxlan(dest_dev))) {
+	if (!dest_dev || !sfe_routed_dev_allow(dest_dev, is_routed, false)) {
 		ret = SFE_CMN_RESPONSE_EINTERFACE;
 		sfe_incr_exceptions(SFE_EXCEPTION_DEST_DEV_NOT_L3);
 		goto failed_ret;
@@ -1143,6 +1227,8 @@ int sfe_recv(struct sk_buff *skb)
 	 * Setting parse flags to 0 since l2_info is passed for non L2.5 header case as well
 	 */
 	l2_info.parse_flags = 0;
+	l2_info.l2_hdr_size = 0;
+	l2_info.vlan_hdr_cnt = 0;
 
 #ifdef CONFIG_NET_CLS_ACT
 	/*
@@ -1170,7 +1256,7 @@ int sfe_recv(struct sk_buff *skb)
 			return sfe_ipv4_recv(dev, skb, &l2_info, false);
 		}
 
-		DEBUG_TRACE("No IPv4 address for device: %s\n", dev->name);
+		DEBUG_TRACE("No IPv4 address for device: %s skb=%px\n", dev->name, skb);
 		return 0;
 
 	case ETH_P_IPV6:
@@ -1178,7 +1264,7 @@ int sfe_recv(struct sk_buff *skb)
 			return sfe_ipv6_recv(dev, skb, &l2_info, false);
 		}
 
-		DEBUG_TRACE("No IPv6 address for device: %s\n", dev->name);
+		DEBUG_TRACE("No IPv6 address for device: %s skb=%px\n", dev->name, skb);
 		return 0;
 
 	default:
@@ -1189,7 +1275,8 @@ int sfe_recv(struct sk_buff *skb)
 	 * Stop L2 processing if L2 feature is disabled.
 	 */
 	if (!sfe_is_l2_feature_enabled()) {
-		DEBUG_TRACE("Unsupported protocol %d (L2 feature is disabled)\n", ntohs(skb->protocol));
+		DEBUG_TRACE("Unsupported protocol %#x %s (L2 feature is disabled) skb=%px\n",
+				ntohs(skb->protocol), dev->name, skb);
 		return 0;
 	}
 
@@ -1197,8 +1284,8 @@ int sfe_recv(struct sk_buff *skb)
 	 * Parse the L2 headers to find the L3 protocol and the L2 header offset
 	 */
 	if (unlikely(!sfe_recv_parse_l2(dev, skb, &l2_info))) {
-		DEBUG_TRACE("%px: Invalid L2.5 header format with protocol : %d\n", skb, ntohs(skb->protocol));
-		return 0;
+		DEBUG_TRACE("%px: Invalid L2.5 header format with protocol : %x\n", skb, ntohs(skb->protocol));
+		goto send_to_linux;
 	}
 
 	/*
@@ -1215,10 +1302,16 @@ int sfe_recv(struct sk_buff *skb)
 
 	if (likely(l2_info.protocol == ETH_P_IPV6)) {
 		ret = sfe_ipv6_recv(dev, skb, &l2_info, false);
-		if (likely(ret)) {
-			return ret;
+		if (unlikely(!ret)) {
+			goto send_to_linux;
 		}
+		return ret;
 	}
+
+	DEBUG_TRACE("Non-IP(%x) %s skb=%px skb_vlan:%x/%x/%x skb_proto=%x\n",
+			l2_info.protocol, dev->name, skb,
+			ntohs(skb->vlan_proto), skb->vlan_tci, skb_vlan_tag_present(skb),
+		       	htons(skb->protocol));
 
 send_to_linux:
 	/*
@@ -1226,7 +1319,7 @@ send_to_linux:
 	 * a. There is any exception from IPV4/V6
 	 * b. If the next protocol is neither IPV4 nor IPV6
 	 */
-	__skb_push(skb, sfe_l2_hdr_size_get(&l2_info));
+	sfe_recv_undo_parse_l2(dev, skb, &l2_info);
 
 	return 0;
 }

@@ -18,6 +18,9 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+#ifndef __SFE_IPV4_H
+#define __SFE_IPV4_H
+
 #define SFE_IPV4_DSCP_MASK 0x3
 #define SFE_IPV4_DSCP_SHIFT 2
 
@@ -63,6 +66,13 @@ struct sfe_ipv4_tcp_connection_match {
 					/* Bridge flow */
 #define SFE_IPV4_CONNECTION_MATCH_FLAG_MARK (1<<11)
 					/* skb mark of the packet */
+#define SFE_IPV4_CONNECTION_MATCH_FLAG_INSERT_EGRESS_VLAN_TAG (1<<12)
+					/* Insert VLAN tag */
+#define SFE_IPV4_CONNECTION_MATCH_FLAG_SRC_INTERFACE_CHECK (1<<13)
+					/* Source interface check.*/
+#define SFE_IPV4_CONNECTION_MATCH_FLAG_PASSTHROUGH (1<<14)
+					/* passthrough flow: encap/decap to be skipped for this flow */
+
 /*
  * IPv4 connection matching structure.
  */
@@ -86,6 +96,7 @@ struct sfe_ipv4_connection_match {
 	__be16 match_dest_port;		/* Destination port/connection ident */
 
 	struct udp_sock *up;		/* Stores UDP sock information; valid only in decap path */
+	struct net_protocol *proto;	/* stores protocol handler; valid only in decap path */
 
 	/*
 	 * Control the operations of the match.
@@ -104,6 +115,13 @@ struct sfe_ipv4_connection_match {
 	union {				/* Protocol-specific state */
 		struct sfe_ipv4_tcp_connection_match tcp;
 	} protocol_state;
+
+	/*
+	 * VLAN headers
+	 */
+	struct sfe_vlan_hdr ingress_vlan_hdr[SFE_MAX_VLAN_DEPTH];
+	struct sfe_vlan_hdr egress_vlan_hdr[SFE_MAX_VLAN_DEPTH];
+
 	/*
 	 * Stats recorded in a sync period. These stats will be added to
 	 * rx_packet_count64/rx_byte_count64 after a sync period.
@@ -146,6 +164,9 @@ struct sfe_ipv4_connection_match {
 	u16 xmit_src_mac[ETH_ALEN / 2];
 					/* Source MAC address to use when forwarding */
 
+	u8 ingress_vlan_hdr_cnt;        /* Ingress active vlan headers count */
+	u8 egress_vlan_hdr_cnt;         /* Egress active vlan headers count */
+
 	/*
 	 * Summary stats.
 	 */
@@ -157,6 +178,11 @@ struct sfe_ipv4_connection_match {
 	 */
 	u16 pppoe_session_id;
 	u8 pppoe_remote_mac[ETH_ALEN];
+
+	/*
+	 * Size of all needed L2 headers
+	 */
+	u16 l2_hdr_size;
 };
 
 /*
@@ -243,6 +269,13 @@ enum sfe_ipv4_exception_events {
 	SFE_IPV4_EXCEPTION_EVENT_INVALID_PPPOE_SESSION,
 	SFE_IPV4_EXCEPTION_EVENT_INCORRECT_PPPOE_PARSING,
 	SFE_IPV4_EXCEPTION_EVENT_PPPOE_NOT_SET_IN_CME,
+	SFE_IPV4_EXCEPTION_EVENT_INGRESS_VLAN_TAG_MISMATCH,
+	SFE_IPV4_EXCEPTION_EVENT_INVALID_SRC_IFACE,
+	SFE_IPV4_EXCEPTION_EVENT_GRE_HEADER_INCOMPLETE,
+	SFE_IPV4_EXCEPTION_EVENT_GRE_NO_CONNECTION,
+	SFE_IPV4_EXCEPTION_EVENT_GRE_IP_OPTIONS_OR_INITIAL_FRAGMENT,
+	SFE_IPV4_EXCEPTION_EVENT_GRE_SMALL_TTL,
+	SFE_IPV4_EXCEPTION_EVENT_GRE_NEEDS_FRAGMENTATION,
 	SFE_IPV4_EXCEPTION_EVENT_LAST
 };
 
@@ -273,8 +306,9 @@ struct sfe_ipv4_stats {
 	u64 packets_forwarded64;		/* Number of IPv4 packets forwarded */
 	u64 packets_not_forwarded64;	/* Number of IPv4 packets not forwarded */
 	u64 exception_events64[SFE_IPV4_EXCEPTION_EVENT_LAST];
-	u64 pppoe_encap_packets_forwarded64;	/* Number of IPv4 PPPOE encap packets forwarded */
-	u64 pppoe_decap_packets_forwarded64;	/* Number of IPv4 PPPOE decap packets forwarded */
+	u64 pppoe_encap_packets_forwarded64;	/* Number of IPv4 PPPoE encap packets forwarded */
+	u64 pppoe_decap_packets_forwarded64;	/* Number of IPv4 PPPoE decap packets forwarded */
+	u64 pppoe_bridge_packets_forwarded64;	/* Number of IPv4 PPPoE bridge packets forwarded */
 };
 
 /*
@@ -361,3 +395,5 @@ sfe_ipv4_find_connection_match_rcu(struct sfe_ipv4 *si, struct net_device *dev, 
 
 void sfe_ipv4_exit(void);
 int sfe_ipv4_init(void);
+
+#endif /* __SFE_IPV4_H */

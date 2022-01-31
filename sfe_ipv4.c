@@ -32,6 +32,8 @@
 #include <linux/netfilter.h>
 #include <linux/inetdevice.h>
 #include <linux/netfilter_ipv4.h>
+#include <net/protocol.h>
+#include <net/gre.h>
 
 #include "sfe_debug.h"
 #include "sfe_api.h"
@@ -41,6 +43,8 @@
 #include "sfe_ipv4_udp.h"
 #include "sfe_ipv4_tcp.h"
 #include "sfe_ipv4_icmp.h"
+#include "sfe_pppoe.h"
+#include "sfe_ipv4_gre.h"
 
 static char *sfe_ipv4_exception_events_string[SFE_IPV4_EXCEPTION_EVENT_LAST] = {
 	"UDP_HEADER_INCOMPLETE",
@@ -79,7 +83,13 @@ static char *sfe_ipv4_exception_events_string[SFE_IPV4_EXCEPTION_EVENT_LAST] = {
 	"NON_INITIAL_FRAGMENT",
 	"DATAGRAM_INCOMPLETE",
 	"IP_OPTIONS_INCOMPLETE",
-	"UNHANDLED_PROTOCOL"
+	"UNHANDLED_PROTOCOL",
+	"INVALID_SOURCE_INTERFACE",
+	"GRE_HEADER_INCOMPLETE",
+	"GRE_NO_CONNECTION",
+	"GRE_IP_OPTIONS_OR_INITIAL_FRAGMENT",
+	"GRE_SMALL_TTL",
+	"GRE_NEEDS_FRAGMENTATION"
 };
 
 static struct sfe_ipv4 __si;
@@ -119,8 +129,7 @@ static inline unsigned int sfe_ipv4_get_connection_match_hash(struct net_device 
 							      __be32 src_ip, __be16 src_port,
 							      __be32 dest_ip, __be16 dest_port)
 {
-	size_t dev_addr = (size_t)dev;
-	u32 hash = ((u32)dev_addr) ^ ntohl(src_ip ^ dest_ip) ^ protocol ^ ntohs(src_port ^ dest_port);
+	u32 hash =  ntohl(src_ip ^ dest_ip) ^ protocol ^ ntohs(src_port ^ dest_port);
 	return ((hash >> SFE_IPV4_CONNECTION_HASH_SHIFT) ^ hash) & SFE_IPV4_CONNECTION_HASH_MASK;
 }
 
@@ -150,8 +159,7 @@ sfe_ipv4_find_connection_match_rcu(struct sfe_ipv4 *si, struct net_device *dev, 
 			   || cm->match_dest_port != dest_port
 			   || cm->match_src_ip != src_ip
 			   || cm->match_dest_ip != dest_ip
-			   || cm->match_protocol != protocol
-			   || cm->match_dev != dev) {
+			   || cm->match_protocol != protocol) {
 			continue;
 		}
 
@@ -303,6 +311,7 @@ static void sfe_ipv4_update_summary_stats(struct sfe_ipv4 *si,  struct sfe_ipv4_
 		stats->packets_not_forwarded64 += s->packets_not_forwarded64;
 		stats->pppoe_encap_packets_forwarded64 += s->pppoe_encap_packets_forwarded64;
 		stats->pppoe_decap_packets_forwarded64 += s->pppoe_decap_packets_forwarded64;
+		stats->pppoe_bridge_packets_forwarded64 += s->pppoe_bridge_packets_forwarded64;
 	}
 
 }
@@ -729,6 +738,23 @@ void sfe_ipv4_exception_stats_inc(struct sfe_ipv4 *si, enum sfe_ipv4_exception_e
 }
 
 /*
+ * sfe_ipv4_is_loal_ip()
+ *	Returns true if IP is local; returns false otherwise.
+ */
+static bool sfe_ipv4_is_local_ip(struct sfe_ipv4 *si, __be32 ip_addr)
+{
+	struct net_device *dev;
+
+	dev = ip_dev_find(&init_net, ip_addr);
+	if (dev) {
+		dev_put(dev);
+		return true;
+	}
+
+	return false;
+}
+
+/*
  * sfe_ipv4_recv()
  *	Handle packet receives and forwaring.
  *
@@ -843,6 +869,12 @@ int sfe_ipv4_recv(struct net_device *dev, struct sk_buff *skb, struct sfe_l2_inf
 		return sfe_ipv4_recv_icmp(si, skb, dev, len, iph, ihl);
 	}
 
+#ifdef SFE_GRE_TUN_ENABLE
+	if (IPPROTO_GRE == protocol) {
+		return sfe_ipv4_recv_gre(si, skb, dev, len, iph, ihl, sync_on_find, tun_outer);
+	}
+#endif
+
 	sfe_ipv4_exception_stats_inc(si, SFE_IPV4_EXCEPTION_EVENT_UNHANDLED_PROTOCOL);
 
 	DEBUG_TRACE("not UDP, TCP or ICMP: %u\n", protocol);
@@ -903,6 +935,59 @@ sfe_ipv4_update_protocol_state(struct sfe_ipv4_connection *c,
 	case IPPROTO_TCP:
 		sfe_ipv4_update_tcp_state(c, msg);
 		break;
+	}
+}
+
+/*
+ * sfe_ipv4_match_entry_set_vlan()
+ */
+static void sfe_ipv4_match_entry_set_vlan(
+			struct sfe_ipv4_connection_match *cm,
+			u32 primary_ingress_vlan_tag,
+			u32 primary_egress_vlan_tag,
+			u32 secondary_ingress_vlan_tag,
+			u32 secondary_egress_vlan_tag)
+{
+	u16 tpid;
+	/*
+	 * Prevent stacking header counts when updating.
+	 */
+	cm->ingress_vlan_hdr_cnt = 0;
+	cm->egress_vlan_hdr_cnt = 0;
+	memset(cm->ingress_vlan_hdr, 0, sizeof(cm->ingress_vlan_hdr));
+	memset(cm->egress_vlan_hdr, 0, sizeof(cm->egress_vlan_hdr));
+
+	/*
+	 * vlan_hdr[0] corresponds to outer tag
+	 * vlan_hdr[1] corresponds to inner tag
+	 * Extract the vlan information (tpid and tci) from rule message
+	 */
+	if ((primary_ingress_vlan_tag & VLAN_VID_MASK) != SFE_VLAN_ID_NOT_CONFIGURED) {
+		tpid = (u16)(primary_ingress_vlan_tag >> 16);
+		cm->ingress_vlan_hdr[0].tpid = ntohs(tpid);
+		cm->ingress_vlan_hdr[0].tci = (u16)primary_ingress_vlan_tag;
+		cm->ingress_vlan_hdr_cnt++;
+	}
+
+	if ((secondary_ingress_vlan_tag & VLAN_VID_MASK) != SFE_VLAN_ID_NOT_CONFIGURED) {
+		tpid = (u16)(secondary_ingress_vlan_tag >> 16);
+		cm->ingress_vlan_hdr[1].tpid = ntohs(tpid);
+		cm->ingress_vlan_hdr[1].tci = (u16)secondary_ingress_vlan_tag;
+		cm->ingress_vlan_hdr_cnt++;
+	}
+
+	if ((primary_egress_vlan_tag & VLAN_VID_MASK) != SFE_VLAN_ID_NOT_CONFIGURED) {
+		tpid = (u16)(primary_egress_vlan_tag >> 16);
+		cm->egress_vlan_hdr[0].tpid = ntohs(tpid);
+		cm->egress_vlan_hdr[0].tci = (u16)primary_egress_vlan_tag;
+		cm->egress_vlan_hdr_cnt++;
+	}
+
+	if ((secondary_egress_vlan_tag & VLAN_VID_MASK) != SFE_VLAN_ID_NOT_CONFIGURED) {
+		tpid = (u16)(secondary_egress_vlan_tag >> 16);
+		cm->egress_vlan_hdr[1].tpid = ntohs(tpid);
+		cm->egress_vlan_hdr[1].tci = (u16)secondary_egress_vlan_tag;
+		cm->egress_vlan_hdr_cnt++;
 	}
 }
 
@@ -1042,11 +1127,11 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	 * trying to create.  If there is then we can't create a new one.
 	 */
 	c_old = sfe_ipv4_find_connection(si,
-						  msg->tuple.protocol,
-						  msg->tuple.flow_ip,
-						  msg->tuple.flow_ident,
-						  msg->tuple.return_ip,
-						  msg->tuple.return_ident);
+					msg->tuple.protocol,
+					msg->tuple.flow_ip,
+					msg->tuple.flow_ident,
+					msg->tuple.return_ip,
+					msg->tuple.return_ident);
 
 	if (c_old != NULL) {
 		this_cpu_inc(si->stats_pcpu->connection_create_collisions64);
@@ -1091,7 +1176,18 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	original_cm->xlate_src_ip = msg->conn_rule.flow_ip_xlate;
 	original_cm->xlate_src_port = msg->conn_rule.flow_ident_xlate;
 	original_cm->xlate_dest_ip = msg->conn_rule.return_ip_xlate;
-	original_cm->xlate_dest_port =msg->conn_rule.return_ident_xlate;
+	original_cm->xlate_dest_port = msg->conn_rule.return_ident_xlate;
+
+	if (tuple->protocol == IPPROTO_GRE) {
+		/*
+		 * the PPTP is 4 tuple lookup.
+		 * During th rule lookup destination call id from packet
+		 * is matched against destination port in cm.
+		 */
+		original_cm->match_src_port = 0;
+		original_cm->xlate_src_port = 0;
+	}
+
 	atomic_set(&original_cm->rx_packet_count, 0);
 	original_cm->rx_packet_count64 = 0;
 	atomic_set(&original_cm->rx_byte_count, 0);
@@ -1102,13 +1198,14 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 
 	original_cm->connection = c;
 	original_cm->counter_match = reply_cm;
+	original_cm->l2_hdr_size = 0;
+	original_cm->flags = 0;
 
 	/*
 	 * UDP Socket is valid only in decap direction.
 	 */
 	RCU_INIT_POINTER(original_cm->up, NULL);
 
-	original_cm->flags = 0;
 	if (msg->valid_flags & SFE_RULE_CREATE_MARK_VALID) {
 		original_cm->mark = msg->mark_rule.flow_mark;
 		original_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_MARK;
@@ -1124,6 +1221,29 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 
 	if (msg->rule_flags & SFE_RULE_CREATE_FLAG_BRIDGE_FLOW) {
 		original_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_BRIDGE_FLOW;
+	}
+
+	/*
+	 * Add VLAN rule to original_cm
+	 */
+	if (msg->valid_flags & SFE_RULE_CREATE_VLAN_VALID) {
+		struct sfe_vlan_rule *vlan_primary_rule = &msg->vlan_primary_rule;
+		struct sfe_vlan_rule *vlan_secondary_rule = &msg->vlan_secondary_rule;
+		sfe_ipv4_match_entry_set_vlan(original_cm,
+					     vlan_primary_rule->ingress_vlan_tag,
+					     vlan_primary_rule->egress_vlan_tag,
+					     vlan_secondary_rule->ingress_vlan_tag,
+					     vlan_secondary_rule->egress_vlan_tag);
+
+		if ((msg->rule_flags & SFE_RULE_CREATE_FLAG_USE_RETURN_BOTTOM_INTERFACE) &&
+			original_cm->egress_vlan_hdr_cnt > 0) {
+			original_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_INSERT_EGRESS_VLAN_TAG;
+			original_cm->l2_hdr_size += original_cm->egress_vlan_hdr_cnt * VLAN_HLEN;
+		}
+	}
+
+	if ((IPPROTO_GRE == tuple->protocol) && !sfe_ipv4_is_local_ip(si, original_cm->match_dest_ip)) {
+		original_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_PASSTHROUGH;
 	}
 
 #ifdef CONFIG_NF_FLOW_COOKIE
@@ -1142,11 +1262,16 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	 * are used. In such cases, do not use HW csum offload. csum offload is used only when we
 	 * are sending directly to the destination interface that supports it.
 	 */
-	if (likely(dest_dev->features & NETIF_F_HW_CSUM) && !netif_is_vxlan(dest_dev)) {
+	if (likely(dest_dev->features & NETIF_F_HW_CSUM) && sfe_dev_has_hw_csum(dest_dev)) {
 		if ((msg->conn_rule.return_top_interface_num == msg->conn_rule.return_interface_num) ||
 			(msg->rule_flags & SFE_RULE_CREATE_FLAG_USE_RETURN_BOTTOM_INTERFACE)) {
 			original_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_CSUM_OFFLOAD;
 		}
+	}
+
+	reply_cm->l2_hdr_size = 0;
+	if (msg->rule_flags & SFE_RULE_CREATE_FLAG_SRC_INTERFACE_CHECK) {
+		original_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_SRC_INTERFACE_CHECK;
 	}
 
 	reply_cm->flags = 0;
@@ -1169,18 +1294,24 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 		ether_addr_copy(original_cm->pppoe_remote_mac, msg->pppoe_rule.flow_pppoe_remote_mac);
 
 		reply_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_PPPOE_ENCAP;
+		reply_cm->l2_hdr_size += SFE_PPPOE_SESSION_HEADER_SIZE;
 		reply_cm->pppoe_session_id = msg->pppoe_rule.flow_pppoe_session_id;
 		ether_addr_copy(reply_cm->pppoe_remote_mac, msg->pppoe_rule.flow_pppoe_remote_mac);
 	}
 
 	if (msg->valid_flags & SFE_RULE_CREATE_PPPOE_ENCAP_VALID) {
 		original_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_PPPOE_ENCAP;
+		original_cm->l2_hdr_size += SFE_PPPOE_SESSION_HEADER_SIZE;
 		original_cm->pppoe_session_id = msg->pppoe_rule.return_pppoe_session_id;
 		ether_addr_copy(original_cm->pppoe_remote_mac, msg->pppoe_rule.return_pppoe_remote_mac);
 
 		reply_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_PPPOE_DECAP;
 		reply_cm->pppoe_session_id = msg->pppoe_rule.return_pppoe_session_id;
 		ether_addr_copy(reply_cm->pppoe_remote_mac, msg->pppoe_rule.return_pppoe_remote_mac);
+	}
+
+	if (msg->rule_flags & SFE_RULE_CREATE_FLAG_SRC_INTERFACE_CHECK) {
+		reply_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_SRC_INTERFACE_CHECK;
 	}
 
 	/*
@@ -1207,6 +1338,7 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 		ether_addr_copy((u8 *)original_cm->xmit_dest_mac, (u8 *)msg->conn_rule.return_mac);
 
 		original_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_WRITE_L2_HDR;
+		original_cm->l2_hdr_size += ETH_HLEN;
 
 		/*
 		 * If our dev writes Ethernet headers then we can write a really fast
@@ -1241,7 +1373,17 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	reply_cm->xlate_src_ip = tuple->return_ip;
 	reply_cm->xlate_src_port = tuple->return_ident;
 	reply_cm->xlate_dest_ip = tuple->flow_ip;
-	reply_cm->xlate_dest_port = tuple->flow_ident;;
+	reply_cm->xlate_dest_port = tuple->flow_ident;
+
+	if (tuple->protocol == IPPROTO_GRE) {
+		/*
+		 * the PPTP is 4 tuple lookup.
+		 * During th rule lookup destination call id from packet
+		 * is matched against destination port in cm.
+		 */
+		reply_cm->match_src_port = 0;
+		reply_cm->xlate_src_port = 0;
+	}
 
 	atomic_set(&reply_cm->rx_packet_count, 0);
 	reply_cm->rx_packet_count64 = 0;
@@ -1254,7 +1396,6 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	reply_cm->connection = c;
 	reply_cm->counter_match = original_cm;
 
-	reply_cm->flags = 0;
 	if (msg->valid_flags & SFE_RULE_CREATE_MARK_VALID) {
 		reply_cm->mark = msg->mark_rule.return_mark;
 		reply_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_MARK;
@@ -1263,6 +1404,7 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 		reply_cm->priority = msg->qos_rule.return_qos_tag;
 		reply_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_PRIORITY_REMARK;
 	}
+
 	if (msg->valid_flags & SFE_RULE_CREATE_DSCP_MARKING_VALID) {
 		reply_cm->dscp = msg->dscp_rule.return_dscp << SFE_IPV4_DSCP_SHIFT;
 		reply_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_DSCP_REMARK;
@@ -1270,6 +1412,10 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 
 	if (msg->rule_flags & SFE_RULE_CREATE_FLAG_BRIDGE_FLOW) {
 		reply_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_BRIDGE_FLOW;
+	}
+
+	if ((IPPROTO_GRE == tuple->protocol) && !sfe_ipv4_is_local_ip(si, reply_cm->match_dest_ip)) {
+		reply_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_PASSTHROUGH;
 	}
 
 	/*
@@ -1305,6 +1451,7 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 #else
 		if (!refcount_inc_not_zero(&sk->sk_refcnt)) {
 #endif
+			spin_unlock_bh(&si->lock);
 			kfree(reply_cm);
 			kfree(original_cm);
 			kfree(c);
@@ -1333,6 +1480,50 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 			ntohs(reply_cm->match_dest_port), ntohs(reply_cm->xlate_dest_port));
 	}
 
+	/*
+	 * Add VLAN rule to reply_cm
+	 */
+	if (msg->valid_flags & SFE_RULE_CREATE_VLAN_VALID) {
+		struct sfe_vlan_rule *vlan_primary_rule = &msg->vlan_primary_rule;
+		struct sfe_vlan_rule *vlan_secondary_rule = &msg->vlan_secondary_rule;
+		sfe_ipv4_match_entry_set_vlan(reply_cm,
+					     vlan_primary_rule->egress_vlan_tag,
+					     vlan_primary_rule->ingress_vlan_tag,
+					     vlan_secondary_rule->egress_vlan_tag,
+					     vlan_secondary_rule->ingress_vlan_tag);
+
+		if ((msg->rule_flags & SFE_RULE_CREATE_FLAG_USE_FLOW_BOTTOM_INTERFACE) &&
+			reply_cm->egress_vlan_hdr_cnt > 0) {
+			reply_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_INSERT_EGRESS_VLAN_TAG;
+			reply_cm->l2_hdr_size += reply_cm->egress_vlan_hdr_cnt * VLAN_HLEN;
+		}
+	}
+
+	/*
+	 * the net_protocol handler will be used only in decap path
+	 * for non passthrough case.
+	 */
+	original_cm->proto = NULL;
+	reply_cm->proto = NULL;
+
+#ifdef SFE_GRE_TUN_ENABLE
+	if ((IPPROTO_GRE == tuple->protocol) && !(reply_cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_PASSTHROUGH)) {
+		rcu_read_lock();
+		reply_cm->proto = rcu_dereference(inet_protos[IPPROTO_GRE]);
+		rcu_read_unlock();
+
+		if (unlikely(!reply_cm->proto)) {
+			kfree(reply_cm);
+			kfree(original_cm);
+			kfree(c);
+			dev_put(src_dev);
+			dev_put(dest_dev);
+			DEBUG_WARN("sfe: GRE proto handler is not registered\n");
+			return -EPERM;
+		}
+	}
+#endif
+
 #ifdef CONFIG_NF_FLOW_COOKIE
 	reply_cm->flow_cookie = 0;
 #endif
@@ -1350,7 +1541,7 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	 * are used. In such cases, do not use HW csum offload. csum offload is used only when we
 	 * are sending directly to the destination interface that supports it.
 	 */
-	if (likely(src_dev->features & NETIF_F_HW_CSUM) && !(netif_is_vxlan(src_dev) || netif_is_vxlan(dest_dev))) {
+	if (likely(src_dev->features & NETIF_F_HW_CSUM) && sfe_dev_has_hw_csum(src_dev)) {
 		if ((msg->conn_rule.flow_top_interface_num == msg->conn_rule.flow_interface_num) ||
 			(msg->rule_flags & SFE_RULE_CREATE_FLAG_USE_FLOW_BOTTOM_INTERFACE)) {
 			 reply_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_CSUM_OFFLOAD;
@@ -1381,6 +1572,7 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 		ether_addr_copy((u8 *)reply_cm->xmit_dest_mac, (u8 *)msg->conn_rule.flow_mac);
 
 		reply_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_WRITE_L2_HDR;
+		reply_cm->l2_hdr_size += ETH_HLEN;
 
 		/*
 		 * If our dev writes Ethernet headers then we can write a really fast
@@ -1405,23 +1597,6 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 		reply_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_XLATE_DEST;
 	}
 
-	c->protocol = tuple->protocol;
-	c->src_ip = tuple->flow_ip;
-	c->src_ip_xlate =  msg->conn_rule.flow_ip_xlate;
-	c->src_port = tuple->flow_ident;
-	c->src_port_xlate = msg->conn_rule.flow_ident_xlate;
-	c->original_dev = src_dev;
-	c->original_match = original_cm;
-	c->dest_ip = tuple->return_ip;
-	c->dest_ip_xlate = msg->conn_rule.return_ip_xlate;
-	c->dest_port = tuple->return_ident;
-	c->dest_port_xlate = msg->conn_rule.return_ident_xlate;
-	c->reply_dev = dest_dev;
-	c->reply_match = reply_cm;
-	c->debug_read_seq = 0;
-	c->last_sync_jiffies = get_jiffies_64();
-	c->removed = false;
-
 	/*
 	 * Initialize the protocol-specific information that we track.
 	 */
@@ -1444,6 +1619,26 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 		break;
 	}
 
+	/*
+	 * Fill in the ipv4_connection object.
+	 */
+	c->protocol = tuple->protocol;
+	c->src_ip = tuple->flow_ip;
+	c->src_ip_xlate =  msg->conn_rule.flow_ip_xlate;
+	c->src_port = tuple->flow_ident;
+	c->src_port_xlate = msg->conn_rule.flow_ident_xlate;
+	c->original_dev = src_dev;
+	c->original_match = original_cm;
+	c->dest_ip = tuple->return_ip;
+	c->dest_ip_xlate = msg->conn_rule.return_ip_xlate;
+	c->dest_port = tuple->return_ident;
+	c->dest_port_xlate = msg->conn_rule.return_ident_xlate;
+	c->reply_dev = dest_dev;
+	c->reply_match = reply_cm;
+	c->debug_read_seq = 0;
+	c->last_sync_jiffies = get_jiffies_64();
+	c->removed = false;
+
 	sfe_ipv4_connection_match_compute_translations(original_cm);
 	sfe_ipv4_connection_match_compute_translations(reply_cm);
 	sfe_ipv4_insert_connection(si, c);
@@ -1453,14 +1648,38 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	/*
 	 * We have everything we need!
 	 */
-	DEBUG_INFO("new connection - p: %d\n"
-		   "  s: %s:%pxM(%pxM):%pI4(%pI4):%u(%u)\n"
-		   "  d: %s:%pxM(%pxM):%pI4(%pI4):%u(%u)\n",
+	DEBUG_INFO("NEW connection - p: %d\n"
+		   "original_cm: match_dev=src_dev: %s %d %pM\n"
+		   " xmit_dev=dest_dev: %s %d %pM\n"
+		   " xmit_src_mac: %pM\n"
+		   " xmit_dest_mac: %pM\n"
+		   " flags: %x l2_hdr: %u\n"
+		   "flow_ip: %pI4:%u\n"
+		   "flow_ip_xlate: %pI4:%u\n"
+		   "flow_mac: %pM\n"
+		   "reply_cm: match_dev=dest_dev: %s %d %pM\n"
+		   " xmit_dev=src_dev: %s %d %pM\n"
+		   " xmit_src_mac: %pM\n"
+		   " xmit_dest_mac: %pM\n"
+		   " flags: %x l2_hdr: %u\n"
+		   "return_ip: %pI4:%u\n"
+		   "return_ip_xlate: %pI4:%u\n"
+		   "return_mac: %pM\n"
+		   "flags: valid=%x src_mac_valid=%x\n",
 		   tuple->protocol,
-		   src_dev->name, msg->conn_rule.flow_mac, NULL,
-		   &tuple->flow_ip, &msg->conn_rule.flow_ip_xlate, ntohs(tuple->flow_ident), ntohs(msg->conn_rule.flow_ident_xlate),
-		   dest_dev->name, NULL, msg->conn_rule.return_mac,
-		   &tuple->return_ip, &msg->conn_rule.return_ip_xlate, ntohs(tuple->return_ident), ntohs(msg->conn_rule.return_ident_xlate));
+		   original_cm->match_dev->name, original_cm->match_dev->ifindex, original_cm->match_dev->dev_addr,
+		   original_cm->xmit_dev->name, original_cm->xmit_dev->ifindex, original_cm->xmit_dev->dev_addr,
+		   original_cm->xmit_src_mac, original_cm->xmit_dest_mac, original_cm->flags, original_cm->l2_hdr_size,
+		   &tuple->flow_ip, ntohs(tuple->flow_ident),
+		   &msg->conn_rule.flow_ip_xlate, ntohs(msg->conn_rule.flow_ident_xlate),
+		   msg->conn_rule.flow_mac,
+		   reply_cm->match_dev->name, reply_cm->match_dev->ifindex, reply_cm->match_dev->dev_addr,
+		   reply_cm->xmit_dev->name, reply_cm->xmit_dev->ifindex, reply_cm->xmit_dev->dev_addr,
+		   reply_cm->xmit_src_mac, reply_cm->xmit_dest_mac, reply_cm->flags, reply_cm->l2_hdr_size,
+		   &tuple->return_ip, ntohs(tuple->return_ident),
+		   &msg->conn_rule.return_ip_xlate, ntohs(msg->conn_rule.return_ident_xlate),
+		   msg->conn_rule.return_mac,
+		   msg->valid_flags, msg->src_mac_rule.mac_valid_flags);
 
 	return 0;
 }
@@ -1997,7 +2216,8 @@ static bool sfe_ipv4_debug_dev_read_stats(struct sfe_ipv4 *si, char *buffer, cha
 			      "flushes=\"%llu\" "
 			      "hash_hits=\"%llu\" hash_reorders=\"%llu\" "
 			      "pppoe_encap_pkts_fwded=\"%llu\" "
-			      "pppoe_decap_pkts_fwded=\"%llu\" />\n",
+			      "pppoe_decap_pkts_fwded=\"%llu\" "
+			      "pppoe_bridge_pkts_fwded=\"%llu\" />\n",
 				num_conn,
 				stats.packets_dropped64,
 				stats.packets_forwarded64,
@@ -2011,7 +2231,8 @@ static bool sfe_ipv4_debug_dev_read_stats(struct sfe_ipv4 *si, char *buffer, cha
 				stats.connection_match_hash_hits64,
 				stats.connection_match_hash_reorders64,
 				stats.pppoe_encap_packets_forwarded64,
-				stats.pppoe_decap_packets_forwarded64);
+				stats.pppoe_decap_packets_forwarded64,
+				stats.pppoe_bridge_packets_forwarded64);
 	if (copy_to_user(buffer + *total_read, msg, CHAR_DEV_MSG_SIZE)) {
 		return false;
 	}

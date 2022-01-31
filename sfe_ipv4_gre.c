@@ -1,0 +1,295 @@
+/*
+ * sfe_ipv4_gre.c
+ *	Shortcut forwarding engine file for IPv4 GRE
+ *
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ *
+ * Permission to use, copy, modify, and/or distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ */
+
+#include <linux/skbuff.h>
+#include <net/gre.h>
+#include <net/protocol.h>
+#include <net/pptp.h>
+#include <linux/etherdevice.h>
+#include <linux/lockdep.h>
+
+#include "sfe_debug.h"
+#include "sfe_api.h"
+#include "sfe.h"
+#include "sfe_flow_cookie.h"
+#include "sfe_ipv4.h"
+
+/*
+ * sfe_ipv4_recv_gre()
+ *	GRE tunnel packet receive and forwarding.
+ */
+int sfe_ipv4_recv_gre(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_device *dev,
+			     unsigned int len, struct iphdr *iph, unsigned int ihl, bool sync_on_find, bool tun_outer)
+{
+	struct sfe_ipv4_connection_match *cm;
+	struct pptp_gre_header *pptp_hdr;
+	struct gre_base_hdr *gre_hdr;
+	struct net_device *xmit_dev;
+	__be16 dest_port = 0;
+	bool passthrough;
+	bool bridge_flow;
+	__be32 dest_ip;
+	__be32 src_ip;
+	bool hw_csum;
+	bool ret;
+	u8 ttl;
+
+	/*
+	 * Is our packet too short to contain a valid GRE header?
+	 */
+	if (unlikely(!pskb_may_pull(skb, sizeof(*gre_hdr) + ihl))) {
+		sfe_ipv4_exception_stats_inc(si, SFE_IPV4_EXCEPTION_EVENT_GRE_HEADER_INCOMPLETE);
+		DEBUG_TRACE("packet too short for GRE header\n");
+		return 0;
+	}
+
+
+	/*
+	 * Read the source and destination IP address.
+	 */
+	src_ip = iph->saddr;
+	dest_ip = iph->daddr;
+
+	rcu_read_lock();
+
+	/*
+	 * Look for a connection match with 4 tuple if it is PPTP
+	 */
+	gre_hdr = (struct gre_base_hdr *)(skb->data + ihl);
+
+	if ((gre_hdr->protocol == GRE_PROTO_PPP) && likely(pskb_may_pull(skb, (sizeof(*pptp_hdr) - 8) + ihl))) {
+		pptp_hdr = (struct pptp_gre_header *)(skb->data + ihl);
+		dest_port = pptp_hdr->call_id;
+	}
+
+#ifdef CONFIG_NF_FLOW_COOKIE
+	cm = si->sfe_flow_cookie_table[skb->flow_cookie & SFE_FLOW_COOKIE_MASK].match;
+	if (unlikely(!cm)) {
+		cm = sfe_ipv4_find_connection_match_rcu(si, dev, IPPROTO_GRE, src_ip, 0, dest_ip, dest_port);
+	}
+#else
+	cm = sfe_ipv4_find_connection_match_rcu(si, dev, IPPROTO_GRE, src_ip, 0, dest_ip, dest_port);
+#endif
+
+	if (unlikely(!cm)) {
+		rcu_read_unlock();
+		sfe_ipv4_exception_stats_inc(si, SFE_IPV4_EXCEPTION_EVENT_GRE_NO_CONNECTION);
+		DEBUG_INFO("no GRE connection match found dev %s src ip %pI4 dest ip %pI4 port %d\n", dev->name, &src_ip, &dest_ip, ntohs(dest_port));
+		return 0;
+	}
+
+	/*
+	 * Source interface validate.
+	 */
+	if (unlikely((cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_SRC_INTERFACE_CHECK) && (cm->match_dev != dev))) {
+		struct sfe_ipv4_connection *c = cm->connection;
+		int ret;
+
+		spin_lock_bh(&si->lock);
+		ret = sfe_ipv4_remove_connection(si, c);
+		spin_unlock_bh(&si->lock);
+
+		if (ret) {
+			sfe_ipv4_flush_connection(si, c, SFE_SYNC_REASON_FLUSH);
+		}
+		rcu_read_unlock();
+		sfe_ipv4_exception_stats_inc(si, SFE_IPV4_EXCEPTION_EVENT_INVALID_SRC_IFACE);
+		DEBUG_TRACE("flush on wrong source interface check failure\n");
+		return 0;
+	}
+
+	passthrough = cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_PASSTHROUGH;
+
+	/*
+	 * If our packet has been marked as "sync on find" we can't actually
+	 * forward it in the fast path, but now that we've found an associated
+	 * connection we need sync its status before exception it to slow path unless
+	 * it is passthrough (packets not directed to DUT) packet.
+	 * TODO: revisit to ensure that pass through traffic is not bypassing firewall for fragmented cases
+	 */
+	if (unlikely(sync_on_find) && !passthrough) {
+		sfe_ipv4_sync_status(si, cm->connection, SFE_SYNC_REASON_STATS);
+		rcu_read_unlock();
+		sfe_ipv4_exception_stats_inc(si, SFE_IPV4_EXCEPTION_EVENT_GRE_IP_OPTIONS_OR_INITIAL_FRAGMENT);
+		DEBUG_TRACE("%px: sfe: sync on find\n", cm);
+		return 0;
+	}
+
+	bridge_flow = !!(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_BRIDGE_FLOW);
+
+	/*
+	 * Does our TTL allow forwarding?
+	 */
+	ttl = iph->ttl;
+	if (!bridge_flow && (ttl < 2) && passthrough) {
+		sfe_ipv4_sync_status(si, cm->connection, SFE_SYNC_REASON_STATS);
+		rcu_read_unlock();
+
+		DEBUG_TRACE("%px: sfe: TTL too low\n", skb);
+		sfe_ipv4_exception_stats_inc(si, SFE_IPV4_EXCEPTION_EVENT_GRE_SMALL_TTL);
+		return 0;
+	}
+
+	/*
+	 * From this point on we're good to modify the packet.
+	 */
+
+	/*
+	 * Check if skb was cloned. If it was, unshare it. Because
+	 * the data area is going to be written in this path and we don't want to
+	 * change the cloned skb's data section.
+	 */
+	if (unlikely(skb_cloned(skb))) {
+		DEBUG_TRACE("%px: skb is a cloned skb\n", skb);
+		skb = skb_unshare(skb, GFP_ATOMIC);
+		if (!skb) {
+			DEBUG_WARN("Failed to unshare the cloned skb\n");
+			rcu_read_unlock();
+			return 1;
+		}
+
+		/*
+		 * Update the iph and udph pointers with the unshared skb's data area.
+		 */
+		iph = (struct iphdr *)skb->data;
+	}
+
+	/*
+	 * Enable HW csum if rx checksum is verified and xmit interface is CSUM offload capable.
+	 */
+	hw_csum = !!(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_CSUM_OFFLOAD) && (skb->ip_summed == CHECKSUM_UNNECESSARY);
+
+	/*
+	 * protocol handler will be valid only in decap-path.
+	 */
+	if (cm->proto) {
+		struct net_protocol *ipprot = cm->proto;
+		skb_pull(skb, ihl);
+		skb_reset_transport_header(skb);
+		skb->fast_forwarded = 1;
+
+		ret = ipprot->handler(skb);
+		if (ret) {
+			this_cpu_inc(si->stats_pcpu->packets_not_forwarded64);
+			rcu_read_unlock();
+			DEBUG_TRACE("GRE handler returned error %u\n", ret);
+			return 1;
+		}
+
+		/*
+		 * Update traffic stats
+		 */
+		atomic_inc(&cm->rx_packet_count);
+		atomic_add(len, &cm->rx_byte_count);
+
+		this_cpu_inc(si->stats_pcpu->packets_forwarded64);
+		rcu_read_unlock();
+		return 1;
+	}
+
+	/*
+	 * If our packet is larger than the MTU of the transmit interface then
+	 * we can't forward it easily.
+	 */
+	if (unlikely(len > cm->xmit_dev_mtu)) {
+		sfe_ipv4_sync_status(si, cm->connection, SFE_SYNC_REASON_STATS);
+		rcu_read_unlock();
+		sfe_ipv4_exception_stats_inc(si, SFE_IPV4_EXCEPTION_EVENT_GRE_NEEDS_FRAGMENTATION);
+		DEBUG_TRACE("%px: sfe: larger than MTU\n", cm);
+		return 0;
+	}
+
+	/*
+	 * Decrement our TTL
+	 */
+	iph->ttl = (ttl - (u8)(!bridge_flow && !tun_outer));
+
+	/*
+	 * Update DSCP
+	 */
+	if (unlikely(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_DSCP_REMARK)) {
+		iph->tos = (iph->tos & SFE_IPV4_DSCP_MASK) | cm->dscp;
+	}
+
+	/*
+	 * Replace the IP checksum.
+	 */
+	if (likely(hw_csum)) {
+		skb->ip_summed = CHECKSUM_PARTIAL;
+	} else {
+		iph->check = sfe_ipv4_gen_ip_csum(iph);
+	}
+
+	/*
+	 * Update traffic stats
+	 */
+	atomic_inc(&cm->rx_packet_count);
+	atomic_add(len, &cm->rx_byte_count);
+
+	xmit_dev = cm->xmit_dev;
+	skb->dev = xmit_dev;
+
+	/*
+	 * For the simple case we write this really fast.
+	 */
+	if (cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_WRITE_FAST_ETH_HDR) {
+		struct ethhdr *eth = (struct ethhdr *)__skb_push(skb, ETH_HLEN);
+		eth->h_proto = htons(ETH_P_IP);
+		ether_addr_copy((u8 *)eth->h_dest, (u8 *)cm->xmit_dest_mac);
+		ether_addr_copy((u8 *)eth->h_source, (u8 *)cm->xmit_src_mac);
+	} else if (cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_WRITE_L2_HDR) {
+		dev_hard_header(skb, xmit_dev, ETH_P_IP, cm->xmit_dest_mac, cm->xmit_src_mac, len);
+	}
+
+	/*
+	 * Update priority of skb.
+	 */
+	if (unlikely(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_PRIORITY_REMARK)) {
+		skb->priority = cm->priority;
+	}
+
+	/*
+	 * Mark outgoing packet.
+	 */
+	if (unlikely(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_MARK)) {
+		skb->mark = cm->connection->mark;
+	}
+
+	this_cpu_inc(si->stats_pcpu->packets_forwarded64);
+
+	rcu_read_unlock();
+
+	/*
+	 * We're going to check for GSO flags when we transmit the packet so
+	 * start fetching the necessary cache line now.
+	 */
+	prefetch(skb_shinfo(skb));
+
+	/*
+	 * Mark that this packet has been fast forwarded.
+	 */
+	skb->fast_forwarded = 1;
+
+	/*
+	 * Send the packet on its way.
+	 */
+	dev_queue_xmit(skb);
+
+	return 1;
+}
