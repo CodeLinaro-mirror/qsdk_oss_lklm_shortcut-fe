@@ -253,6 +253,13 @@ bool sfe_dev_has_hw_csum(struct net_device *dev)
 		return false;
 	}
 #endif
+	/*
+	 * Tunnel MAP-E/DS-LITE and Tun6rd share the same Routing netlink operator
+	 * whose kind is "ip6tnl". The HW csum for these tunnel devices should be disabled.
+	*/
+	if (dev->rtnl_link_ops && !strcmp(dev->rtnl_link_ops->kind, "ip6tnl")) {
+		return false;
+	}
 
 	return true;
 }
