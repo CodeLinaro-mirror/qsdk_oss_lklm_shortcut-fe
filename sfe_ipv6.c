@@ -535,6 +535,12 @@ bool sfe_ipv6_remove_connection(struct sfe_ipv6 *si, struct sfe_ipv6_connection 
 	}
 
 	/*
+	 * dereference the decap direction top_interface_dev
+	 */
+	if (c->reply_match->top_interface_dev) {
+		dev_put(c->reply_match->top_interface_dev);
+	}
+	/*
 	 * Remove the connection match objects.
 	 */
 	sfe_ipv6_remove_connection_match(si, c->reply_match);
@@ -1440,6 +1446,7 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 #else
 		if (!refcount_inc_not_zero(&sk->sk_refcnt)) {
 #endif
+			this_cpu_inc(si->stats_pcpu->connection_create_failures64);
 			spin_unlock_bh(&si->lock);
 			kfree(reply_cm);
 			kfree(original_cm);
@@ -1507,6 +1514,8 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 	 */
 	original_cm->proto = NULL;
 	reply_cm->proto = NULL;
+	original_cm->top_interface_dev = NULL;
+	reply_cm->top_interface_dev = NULL;
 
 #ifdef SFE_GRE_TUN_ENABLE
 	if (!(reply_cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_PASSTHROUGH)) {
@@ -1515,6 +1524,8 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 		rcu_read_unlock();
 
 		if (unlikely(!reply_cm->proto)) {
+			this_cpu_inc(si->stats_pcpu->connection_create_failures64);
+			spin_unlock_bh(&si->lock);
 			kfree(reply_cm);
 			kfree(original_cm);
 			kfree(c);
@@ -1535,6 +1546,20 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 		rcu_read_lock();
 		reply_cm->proto = rcu_dereference(inet6_protos[tuple->protocol]);
 		rcu_read_unlock();
+		reply_cm->top_interface_dev = dev_get_by_index(&init_net, msg->conn_rule.return_top_interface_num);
+
+		if (unlikely(!reply_cm->top_interface_dev)) {
+			DEBUG_WARN("%px: Unable to find top_interface_dev corresponding to %d\n", msg,
+						msg->conn_rule.return_top_interface_num);
+			this_cpu_inc(si->stats_pcpu->connection_create_failures64);
+			spin_unlock_bh(&si->lock);
+			kfree(reply_cm);
+			kfree(original_cm);
+			kfree(c);
+			dev_put(src_dev);
+			dev_put(dest_dev);
+			return -EINVAL;
+		}
 	}
 	/*
 	 * If l2_features are disabled and flow uses l2 features such as macvlan/bridge/pppoe/vlan,
