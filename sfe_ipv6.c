@@ -2429,10 +2429,12 @@ static unsigned int sfe_ipv6_local_out(void *priv,
 				struct sk_buff *skb,
 				const struct nf_hook_state *nhs)
 {
+	struct sfe_l2_info l2_info = {0};
+
 	DEBUG_TRACE("sfe: sfe_ipv6_local_out hook called.\n");
 
 	if (likely(skb->skb_iif)) {
-		return sfe_ipv6_recv(skb->dev, skb, NULL, true) ? NF_STOLEN : NF_ACCEPT;
+		return sfe_ipv6_recv(skb->dev, skb, &l2_info, true) ? NF_STOLEN : NF_ACCEPT;
 	}
 
 	return NF_ACCEPT;

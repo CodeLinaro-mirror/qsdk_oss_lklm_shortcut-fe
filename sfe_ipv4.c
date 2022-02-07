@@ -2474,8 +2474,7 @@ static void sfe_ipv4_conn_match_hash_init(struct sfe_ipv4 *si, int len)
  */
 static unsigned int sfe_ipv4_local_out(void *priv, struct sk_buff *skb, const struct nf_hook_state *nhs)
 {
-	struct sfe_l2_info l2_info;
-	l2_info.parse_flags = 0;
+	struct sfe_l2_info l2_info = {0};
 
 	DEBUG_TRACE("%px: sfe: sfe_ipv4_local_out hook called.\n", skb);
 
