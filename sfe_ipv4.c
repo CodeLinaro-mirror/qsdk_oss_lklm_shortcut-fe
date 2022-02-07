@@ -1265,7 +1265,13 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	if (likely(dest_dev->features & NETIF_F_HW_CSUM) && sfe_dev_has_hw_csum(dest_dev)) {
 		if ((msg->conn_rule.return_top_interface_num == msg->conn_rule.return_interface_num) ||
 			(msg->rule_flags & SFE_RULE_CREATE_FLAG_USE_RETURN_BOTTOM_INTERFACE)) {
+
+			/*
+			 * Dont enable CSUM offload
+			 */
+#if 0
 			original_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_CSUM_OFFLOAD;
+#endif
 		}
 	}
 
@@ -1544,7 +1550,12 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	if (likely(src_dev->features & NETIF_F_HW_CSUM) && sfe_dev_has_hw_csum(src_dev)) {
 		if ((msg->conn_rule.flow_top_interface_num == msg->conn_rule.flow_interface_num) ||
 			(msg->rule_flags & SFE_RULE_CREATE_FLAG_USE_FLOW_BOTTOM_INTERFACE)) {
+			/*
+			 * Dont enable CSUM offload
+			 */
+#if 0
 			 reply_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_CSUM_OFFLOAD;
+#endif
 		}
 	}
 
