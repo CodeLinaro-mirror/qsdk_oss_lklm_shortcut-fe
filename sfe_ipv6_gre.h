@@ -18,4 +18,5 @@
  */
 
 int sfe_ipv6_recv_gre(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_device *dev,
-			     unsigned int len, struct ipv6hdr *iph, unsigned int ihl, bool sync_on_find, bool tun_outer);
+		      unsigned int len, struct ipv6hdr *iph, unsigned int ihl, bool sync_on_find,
+		      struct sfe_l2_info *l2_info, bool tun_outer);

@@ -871,7 +871,7 @@ int sfe_ipv4_recv(struct net_device *dev, struct sk_buff *skb, struct sfe_l2_inf
 
 #ifdef SFE_GRE_TUN_ENABLE
 	if (IPPROTO_GRE == protocol) {
-		return sfe_ipv4_recv_gre(si, skb, dev, len, iph, ihl, sync_on_find, tun_outer);
+		return sfe_ipv4_recv_gre(si, skb, dev, len, iph, ihl, sync_on_find, l2_info, tun_outer);
 	}
 #endif
 

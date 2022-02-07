@@ -18,24 +18,26 @@
  */
 
 #include <linux/skbuff.h>
-#include <net/gre.h>
 #include <net/protocol.h>
-#include <net/pptp.h>
 #include <linux/etherdevice.h>
 #include <linux/lockdep.h>
+#include <net/gre.h>
+#include <net/pptp.h>
 
 #include "sfe_debug.h"
 #include "sfe_api.h"
 #include "sfe.h"
 #include "sfe_flow_cookie.h"
 #include "sfe_ipv4.h"
+#include "sfe_vlan.h"
 
 /*
  * sfe_ipv4_recv_gre()
  *	GRE tunnel packet receive and forwarding.
  */
 int sfe_ipv4_recv_gre(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_device *dev,
-			     unsigned int len, struct iphdr *iph, unsigned int ihl, bool sync_on_find, bool tun_outer)
+		      unsigned int len, struct iphdr *iph, unsigned int ihl, bool sync_on_find,
+		      struct sfe_l2_info *l2_info, bool tun_outer)
 {
 	struct sfe_ipv4_connection_match *cm;
 	struct pptp_gre_header *pptp_hdr;
@@ -131,6 +133,16 @@ int sfe_ipv4_recv_gre(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 		return 0;
 	}
 
+	/*
+	 * Do we expect an ingress VLAN tag for this flow?
+	 */
+	if (unlikely(!sfe_vlan_validate_ingress_tag(skb, cm->ingress_vlan_hdr_cnt, cm->ingress_vlan_hdr, l2_info))) {
+		rcu_read_unlock();
+		sfe_ipv4_exception_stats_inc(si, SFE_IPV4_EXCEPTION_EVENT_INGRESS_VLAN_TAG_MISMATCH);
+		DEBUG_TRACE("VLAN tag mismatch. skb=%px\n", skb);
+		return 0;
+	}
+
 	bridge_flow = !!(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_BRIDGE_FLOW);
 
 	/*
@@ -171,6 +183,16 @@ int sfe_ipv4_recv_gre(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 	}
 
 	/*
+	 * Check if skb has enough headroom to write L2 headers
+	 */
+	if (unlikely(skb_headroom(skb) < cm->l2_hdr_size)) {
+		rcu_read_unlock();
+		DEBUG_WARN("%px: Not enough headroom: %u\n", skb, skb_headroom(skb));
+		sfe_ipv4_exception_stats_inc(si, SFE_IPV4_EXCEPTION_EVENT_NO_HEADROOM);
+		return 0;
+	}
+
+	/*
 	 * Enable HW csum if rx checksum is verified and xmit interface is CSUM offload capable.
 	 */
 	hw_csum = !!(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_CSUM_OFFLOAD) && (skb->ip_summed == CHECKSUM_UNNECESSARY);
@@ -180,6 +202,7 @@ int sfe_ipv4_recv_gre(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 	 */
 	if (cm->proto) {
 		struct net_protocol *ipprot = cm->proto;
+		skb_reset_network_header(skb);
 		skb_pull(skb, ihl);
 		skb_reset_transport_header(skb);
 		skb->fast_forwarded = 1;
@@ -244,6 +267,13 @@ int sfe_ipv4_recv_gre(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 
 	xmit_dev = cm->xmit_dev;
 	skb->dev = xmit_dev;
+
+	/*
+	 * Check to see if we need to add VLAN tags
+	 */
+	if (unlikely(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_INSERT_EGRESS_VLAN_TAG)) {
+		sfe_vlan_add_tag(skb, cm->egress_vlan_hdr_cnt, cm->egress_vlan_hdr);
+	}
 
 	/*
 	 * For the simple case we write this really fast.

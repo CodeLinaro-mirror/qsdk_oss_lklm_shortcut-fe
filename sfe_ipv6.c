@@ -861,7 +861,7 @@ int sfe_ipv6_recv(struct net_device *dev, struct sk_buff *skb, struct sfe_l2_inf
 
 #ifdef SFE_GRE_TUN_ENABLE
 	if (IPPROTO_GRE == next_hdr) {
-		return sfe_ipv6_recv_gre(si, skb, dev, len, iph, ihl, sync_on_find, tun_outer);
+		return sfe_ipv6_recv_gre(si, skb, dev, len, iph, ihl, sync_on_find, l2_info, tun_outer);
 	}
 #endif
 
