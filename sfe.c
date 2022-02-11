@@ -562,12 +562,6 @@ static void sfe_ipv4_stats_sync_callback(struct sfe_connection_sync *sis)
 static bool sfe_recv_parse_l2(struct net_device *dev, struct sk_buff *skb, struct sfe_l2_info *l2_info)
 {
 	/*
-	 * l2_hdr_offset will not change as we parse more L2.5 headers
-	 * TODO: Move from storing offsets to storing pointers
-	 */
-	sfe_l2_hdr_offset_set(l2_info, ((skb->data - ETH_HLEN) - skb->head));
-
-	/*
 	 * VLAN parsing
 	 */
 	if (unlikely(!sfe_vlan_check_and_parse_tag(skb, l2_info))) {
@@ -575,13 +569,9 @@ static bool sfe_recv_parse_l2(struct net_device *dev, struct sk_buff *skb, struc
 	}
 
 	/*
-	 * PPPoE parsing
+	 * Parse only PPPoE session packets
 	 */
 	if (htons(ETH_P_PPP_SES) == skb->protocol) {
-		/*
-		 * Parse only PPPoE session packets
-		 * skb->data is pointing to PPPoE hdr
-		 */
 		if (!sfe_pppoe_parse_hdr(skb, l2_info)) {
 
 			/*
@@ -590,11 +580,6 @@ static bool sfe_recv_parse_l2(struct net_device *dev, struct sk_buff *skb, struc
 			 */
 			return false;
 		}
-
-		/*
-		 * Pull by L2 header size
-		 */
-		__skb_pull(skb, sfe_l2_hdr_size_get(l2_info));
 	}
 	return true;
 }
@@ -607,12 +592,17 @@ static void sfe_recv_undo_parse_l2(struct net_device *dev, struct sk_buff *skb, 
 	/*
 	 * PPPoE undo
 	 */
-	__skb_push(skb, sfe_l2_hdr_size_get(l2_info));
+	sfe_pppoe_undo_parse(skb, l2_info);
 
 	/*
 	 * VLAN undo
 	 */
 	sfe_vlan_undo_parse(skb, l2_info);
+
+	/*
+	 * packet is not handled by SFE, so reset the network header
+	 */
+	skb_reset_network_header(skb);
 }
 
 /*
@@ -1278,7 +1268,6 @@ int sfe_recv(struct sk_buff *skb)
 	 * Setting parse flags to 0 since l2_info is passed for non L2.5 header case as well
 	 */
 	l2_info.parse_flags = 0;
-	l2_info.l2_hdr_size = 0;
 	l2_info.vlan_hdr_cnt = 0;
 
 #ifdef CONFIG_NET_CLS_ACT

@@ -65,9 +65,7 @@ struct sfe_vlan_hdr {
  */
 struct sfe_l2_info {
 	u16 parse_flags;	/* Flags indicating L2.5 headers presence */
-	u16 l2_hdr_offset;	/* Offset of L2 header */
-	u16 l2_hdr_size;	/* L2 header size */
-	u16 pppoe_hdr_offset;	/* PPPOE header offset */
+	u16 pppoe_session_id;	/* PPPOE header offset */
 	u16 protocol;		/* L3 Protocol */
 	struct sfe_vlan_hdr vlan_hdr[SFE_MAX_VLAN_DEPTH];
 				/* VLAN tag(s) of ingress packet */
@@ -265,57 +263,21 @@ static inline bool sfe_l2_parse_flag_check(struct sfe_l2_info *l2_info, u16 flag
 }
 
 /*
- * sfe_l2_hdr_offset_get()
- *	Get L2 header offset
+ * sfe_l2_pppoe_session_id_get()
+ *	Get PPPPoE session ID from l2_info
  */
-static inline u16 sfe_l2_hdr_offset_get(struct sfe_l2_info *l2_info)
+static inline u16 sfe_l2_pppoe_session_id_get(struct sfe_l2_info *l2_info)
 {
-	return l2_info->l2_hdr_offset;
+	return l2_info->pppoe_session_id;
 }
 
 /*
- * sfe_l2_hdr_offset_set()
- *	Set L2 header offset
+ * sfe_l2_pppoe_session_id_set()
+ *	Set PPPoE session ID to l2_info
  */
-static inline void sfe_l2_hdr_offset_set(struct sfe_l2_info *l2_info, u16 offset)
+static inline void sfe_l2_pppoe_session_id_set(struct sfe_l2_info *l2_info, u16 session_id)
 {
-	l2_info->l2_hdr_offset = offset;
-}
-
-/*
- * sfe_l2_pppoe_hdr_offset_get()
- *	Get L2 PPPoE header offset
- */
-static inline u16 sfe_l2_pppoe_hdr_offset_get(struct sfe_l2_info *l2_info)
-{
-	return l2_info->pppoe_hdr_offset;
-}
-
-/*
- * sfe_l2_pppoe_hdr_offset_set()
- *	Set L2 PPPoE header offset
- */
-static inline void sfe_l2_pppoe_hdr_offset_set(struct sfe_l2_info *l2_info, u16 offset)
-{
-	l2_info->pppoe_hdr_offset = offset;
-}
-
-/*
- * sfe_l2_hdr_size_get()
- *	Get L2 header size
- */
-static inline u16 sfe_l2_hdr_size_get(struct sfe_l2_info *l2_info)
-{
-	return l2_info->l2_hdr_size;
-}
-
-/*
- * sfe_l2_hdr_size_set()
- *	Set L2 header size
- */
-static inline void sfe_l2_hdr_size_set(struct sfe_l2_info *l2_info, u16 size)
-{
-	l2_info->l2_hdr_size = size;
+	l2_info->pppoe_session_id = session_id;
 }
 
 /*

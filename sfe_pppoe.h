@@ -34,5 +34,6 @@ struct sfe_ppp_hdr {
 
 void sfe_pppoe_add_header(struct sk_buff *skb, u16 pppoe_session_id, u16 ppp_protocol);
 bool sfe_pppoe_parse_hdr(struct sk_buff *skb, struct sfe_l2_info *l2_info);
+void sfe_pppoe_undo_parse(struct sk_buff *skb, struct sfe_l2_info *l2_info);
 
 #endif /* __SFE_PPPOE_H */

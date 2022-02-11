@@ -300,8 +300,8 @@ int sfe_ipv6_recv_udp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 	 * For PPPoE packets, match server MAC and session id
 	 */
 	if (unlikely(cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_PPPOE_DECAP)) {
-		struct pppoe_hdr *ph;
 		struct ethhdr *eth;
+		bool pppoe_match;
 
 		if (unlikely(!sfe_l2_parse_flag_check(l2_info, SFE_L2_PARSE_FLAGS_PPPOE_INGRESS))) {
 			rcu_read_unlock();
@@ -310,38 +310,40 @@ int sfe_ipv6_recv_udp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 			return 0;
 		}
 
-		ph = (struct pppoe_hdr *)(skb->head + sfe_l2_pppoe_hdr_offset_get(l2_info));
-		eth = (struct ethhdr *)(skb->head + sfe_l2_hdr_offset_get(l2_info));
-		if (unlikely(cm->pppoe_session_id != ntohs(ph->sid)) || unlikely(!(ether_addr_equal((u8*)cm->pppoe_remote_mac, (u8 *)eth->h_source)))) {
-			DEBUG_TRACE("%px: PPPoE sessions with session IDs %d and %d or server MACs %pM and %pM did not match\n",
-							skb, cm->pppoe_session_id, htons(ph->sid), cm->pppoe_remote_mac, eth->h_source);
+		eth = eth_hdr(skb);
+
+		pppoe_match = (cm->pppoe_session_id == sfe_l2_pppoe_session_id_get(l2_info)) &&
+				ether_addr_equal((u8*)cm->pppoe_remote_mac, (u8 *)eth->h_source);
+
+		if (unlikely(!pppoe_match)) {
+			DEBUG_TRACE("%px: PPPoE sessions ID %d and %d or MAC %pM and %pM did not match\n",
+					skb, cm->pppoe_session_id, sfe_l2_pppoe_session_id_get(l2_info),
+					cm->pppoe_remote_mac, eth->h_source);
 			rcu_read_unlock();
 			sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_INVALID_PPPOE_SESSION);
 			return 0;
 		}
+
 		skb->protocol = htons(l2_info->protocol);
 		this_cpu_inc(si->stats_pcpu->pppoe_decap_packets_forwarded64);
-
 	} else if (unlikely(sfe_l2_parse_flag_check(l2_info, SFE_L2_PARSE_FLAGS_PPPOE_INGRESS))) {
 
 		/*
 		 * If packet contains PPPoE header but CME doesn't contain PPPoE flag yet we are exceptioning the packet to linux
 		 */
-
 		if (unlikely(!(cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_BRIDGE_FLOW))) {
 			rcu_read_unlock();
 			DEBUG_TRACE("%px: CME doesn't contain PPPoE flag but packet has PPPoE header\n", skb);
-			sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_INCORRECT_PPPOE_PARSING);
+			sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_PPPOE_NOT_SET_IN_CME);
 			return 0;
+
 		}
 
 		/*
 		 * For bridged flows when packet contains PPPoE header, restore the header back and forward to xmit interface
 		 */
 		__skb_push(skb, (sizeof(struct pppoe_hdr) + sizeof(struct sfe_ppp_hdr)));
-		l2_info->l2_hdr_size -= (sizeof(struct pppoe_hdr) + sizeof(struct sfe_ppp_hdr));
 		this_cpu_inc(si->stats_pcpu->pppoe_bridge_packets_forwarded64);
-
 	}
 
 	/*

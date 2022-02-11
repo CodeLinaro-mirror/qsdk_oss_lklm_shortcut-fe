@@ -20,6 +20,7 @@
 #include <linux/skbuff.h>
 #include <linux/if_pppox.h>
 #include <linux/ppp_defs.h>
+#include <asm/unaligned.h>
 
 #include "sfe_debug.h"
 #include "sfe_api.h"
@@ -34,17 +35,20 @@
  */
 void sfe_pppoe_add_header(struct sk_buff *skb, u16 pppoe_session_id, u16 ppp_protocol)
 {
-	u16 *l2_header;
 	struct pppoe_hdr *ph;
-	struct sfe_ppp_hdr *ppp;
-	u16 *l3_header = (u16 *)skb->data;
+	unsigned char *pp;
+	unsigned int data_len;
 
 	/*
-	 * PPPoE header (6 bytes) + PPP header (2 bytes)
-	 *
-	 * Hence move by 8 bytes to accomodate PPPoE header
+	 * Insert the PPP header protocol
 	 */
-	l2_header = l3_header - ((sizeof(struct pppoe_hdr) + sizeof(struct sfe_ppp_hdr)) / 2);
+	pp = __skb_push(skb, 2);
+	put_unaligned_be16(ppp_protocol, pp);
+
+	data_len = skb->len;
+
+	ph = (struct pppoe_hdr *)__skb_push(skb, sizeof(*ph));
+	skb_reset_network_header(skb);
 
 	/*
 	 * Headers in skb will look like in below sequence
@@ -53,24 +57,12 @@ void sfe_pppoe_add_header(struct sk_buff *skb, u16 pppoe_session_id, u16 ppp_pro
 	 *	The length field in the PPPoE header indicates the length of the PPPoE payload which
 	 *	consists of a 2-byte PPP header plus a skb->len.
 	 */
-	ph = (struct pppoe_hdr *)l2_header;
 	ph->ver = 1;
 	ph->type = 1;
 	ph->code = 0;
 	ph->sid = htons(pppoe_session_id);
-	ph->length = htons(skb->len + sizeof(struct sfe_ppp_hdr));
+	ph->length = htons(data_len);
 	skb->protocol = htons(ETH_P_PPP_SES);
-
-	/*
-	 * Insert the PPP header protocol
-	 */
-	ppp = (struct sfe_ppp_hdr *)(l2_header + (sizeof(struct pppoe_hdr) / 2));
-	ppp->protocol = htons(ppp_protocol);
-
-	/*
-	 * L2 header offset will point to PPPoE header,
-	 */
-	__skb_push(skb, (sizeof(struct pppoe_hdr) + sizeof(struct sfe_ppp_hdr)));
 }
 
 /*
@@ -84,7 +76,7 @@ bool sfe_pppoe_parse_hdr(struct sk_buff *skb, struct sfe_l2_info *l2_info)
 	unsigned int len;
 	int pppoe_len;
 	struct sfe_ppp_hdr *ppp;
-	struct pppoe_hdr *ph = (struct pppoe_hdr *)skb->data;
+	struct pppoe_hdr *ph = pppoe_hdr(skb);
 
 	/*
 	 * Check that we have space for PPPoE header here.
@@ -125,8 +117,24 @@ bool sfe_pppoe_parse_hdr(struct sk_buff *skb, struct sfe_l2_info *l2_info)
 	}
 
 	sfe_l2_parse_flag_set(l2_info, SFE_L2_PARSE_FLAGS_PPPOE_INGRESS);
-	sfe_l2_pppoe_hdr_offset_set(l2_info, (skb->data - skb->head));
-	sfe_l2_hdr_size_set(l2_info, (sizeof(struct pppoe_hdr) + sizeof(struct sfe_ppp_hdr)));
+	sfe_l2_pppoe_session_id_set(l2_info, ntohs(ph->sid));
+
+	/*
+	 * strip PPPoE header
+	 */
+	__skb_pull(skb, (sizeof(struct pppoe_hdr) + sizeof(struct sfe_ppp_hdr)));
+	skb_reset_network_header(skb);
 
 	return true;
+}
+
+/*
+ * sfe_pppoe_undo_parse()
+ *	undo changes done to skb during PPPoE parsing
+ */
+void sfe_pppoe_undo_parse(struct sk_buff *skb, struct sfe_l2_info *l2_info)
+{
+	if (sfe_l2_parse_flag_check(l2_info, SFE_L2_PARSE_FLAGS_PPPOE_INGRESS)) {
+		__skb_push(skb, (sizeof(struct pppoe_hdr) + sizeof(struct sfe_ppp_hdr)));
+	}
 }

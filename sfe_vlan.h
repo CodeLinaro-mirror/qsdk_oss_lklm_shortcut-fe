@@ -101,8 +101,6 @@ static inline bool sfe_vlan_check_and_parse_tag(struct sk_buff *skb, struct sfe_
 {
 	struct vlan_hdr *vhdr;
 
-	l2_info->vlan_hdr_cnt = 0;
-
 	while ((skb->protocol == htons(ETH_P_8021AD) || skb->protocol == htons(ETH_P_8021Q)) &&
 			l2_info->vlan_hdr_cnt < SFE_MAX_VLAN_DEPTH) {
 		if (unlikely(!pskb_may_pull(skb, VLAN_HLEN))) {
@@ -113,7 +111,11 @@ static inline bool sfe_vlan_check_and_parse_tag(struct sk_buff *skb, struct sfe_
 		l2_info->vlan_hdr[l2_info->vlan_hdr_cnt].tci = ntohs(vhdr->h_vlan_TCI);
 		skb->protocol = vhdr->h_vlan_encapsulated_proto;
 		l2_info->vlan_hdr_cnt++;
+		/*
+		 * strip VLAN header
+		 */
 		__skb_pull(skb, VLAN_HLEN);
+		skb_reset_network_header(skb);
 	}
 
 	l2_info->protocol = htons(skb->protocol);
@@ -205,8 +207,7 @@ static inline void sfe_vlan_add_tag(struct sk_buff *skb, int count, struct sfe_v
 	vlan += (count - 1);
 
 	for (i = 0; i < count; i++) {
-		skb_push(skb, VLAN_HLEN);
-		vhdr = (struct vlan_hdr *)skb->data;
+		vhdr = (struct vlan_hdr *)skb_push(skb, VLAN_HLEN);
 		vhdr->h_vlan_TCI = htons(vlan->tci);
 		vhdr->h_vlan_encapsulated_proto = skb->protocol;
 		skb->protocol = vlan->tpid;
