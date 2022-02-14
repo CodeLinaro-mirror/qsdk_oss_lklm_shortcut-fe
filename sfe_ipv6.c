@@ -752,6 +752,49 @@ void sfe_ipv6_flush_connection(struct sfe_ipv6 *si,
 }
 
 /*
+ * sfe_ipv4_service_class_stats_pcpu_get()
+ *	Gets one CPU's service class statistics.
+ */
+static inline bool sfe_ipv6_service_class_stats_pcpu_get(struct sfe_ipv6_per_service_class_stats *sc_stats, uint64_t *bytes, uint64_t *packets)
+{
+	uint32_t retries = 0;
+	uint32_t seq;
+	uint64_t bytes_tmp, packets_tmp;
+
+	do {
+		seq = read_seqcount_begin(&sc_stats->seq);
+		bytes_tmp = sc_stats->tx_bytes;
+		packets_tmp = sc_stats->tx_packets;
+	} while (read_seqcount_retry(&sc_stats->seq, seq) && ++retries < SFE_SERVICE_CLASS_STATS_MAX_RETRY);
+
+	*bytes += bytes_tmp;
+	*packets += packets_tmp;
+
+	return retries < SFE_SERVICE_CLASS_STATS_MAX_RETRY;
+}
+
+/*
+ * sfe_ipv4_service_class_stats_get()
+ *	Copy the ipv4 statistics for the given service class.
+ */
+bool sfe_ipv6_service_class_stats_get(uint8_t sid, uint64_t *bytes, uint64_t *packets)
+{
+	struct sfe_ipv6 *si = &__si6;
+	uint32_t cpu = 0;
+
+	for_each_possible_cpu(cpu) {
+		struct sfe_ipv6_service_class_stats_db *stats_db = per_cpu_ptr(si->stats_pcpu_psc, cpu);
+		struct sfe_ipv6_per_service_class_stats *sc_stats = &stats_db->psc_stats[sid];
+
+		if (!sfe_ipv6_service_class_stats_pcpu_get(sc_stats, bytes, packets)) {
+			return false;
+		}
+	}
+
+	return true;
+}
+
+/*
  * sfe_ipv6_service_class_stats_inc()
  *	Increment per cpu per service class stats.
  */

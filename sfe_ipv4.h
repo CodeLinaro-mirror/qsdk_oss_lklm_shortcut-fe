@@ -419,6 +419,7 @@ typedef bool (*sfe_ipv4_debug_xml_write_method_t)(struct sfe_ipv4 *si, char *buf
 						  int *total_read, struct sfe_ipv4_debug_xml_write_state *ws);
 
 u16 sfe_ipv4_gen_ip_csum(struct iphdr *iph);
+bool sfe_ipv4_service_class_stats_get(uint8_t sid, uint64_t *bytes, uint64_t *packets);
 void sfe_ipv4_service_class_stats_inc(struct sfe_ipv4 *si, uint8_t sid, uint64_t bytes);
 void sfe_ipv4_exception_stats_inc(struct sfe_ipv4 *si, enum sfe_ipv4_exception_events reason);
 bool sfe_ipv4_remove_connection(struct sfe_ipv4 *si, struct sfe_ipv4_connection *c);

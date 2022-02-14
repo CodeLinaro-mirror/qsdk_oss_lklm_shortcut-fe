@@ -33,6 +33,8 @@
 #include "sfe.h"
 #include "sfe_pppoe.h"
 #include "sfe_vlan.h"
+#include "sfe_ipv4.h"
+#include "sfe_ipv6.h"
 
 extern int max_ipv4_conn;
 extern int max_ipv6_conn;
@@ -1389,6 +1391,28 @@ static ssize_t sfe_get_exceptions(struct device *dev,
  */
 static const struct device_attribute sfe_exceptions_attr =
 	__ATTR(exceptions, S_IRUGO, sfe_get_exceptions, NULL);
+
+
+/*
+ * sfe_service_class_stats_get()
+ *	Collects ipv4 and ipv6 service class statistics and aggregates them.
+ */
+bool sfe_service_class_stats_get(uint8_t sid, uint64_t *bytes, uint64_t *packets)
+{
+	*bytes = 0;
+	*packets = 0;
+
+	if (!sfe_ipv4_service_class_stats_get(sid, bytes, packets)) {
+		return false;
+	}
+
+	if (!sfe_ipv6_service_class_stats_get(sid, bytes, packets)) {
+		return false;
+	}
+
+	return true;
+}
+EXPORT_SYMBOL(sfe_service_class_stats_get);
 
 /*
  * sfe_is_l2_feature_enabled()

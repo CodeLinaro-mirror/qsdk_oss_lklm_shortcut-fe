@@ -36,6 +36,7 @@
 #define SFE_VLAN_ID_NOT_CONFIGURED 0xfff	/**< VLAN ID not configured. */
 #define SFE_MAX_SERVICE_CLASS_ID 0x80		/**< Maximum service class ID. */
 #define SFE_INVALID_SERVICE_CLASS_ID 0xff	/**< Service class ID not valid. */
+#define SFE_SERVICE_CLASS_STATS_MAX_RETRY 100	/**< Maximum retries for fetching service class statistics. */
 #define SFE_INVALID_MSDUQ 0xff			/**< Invalid MAC Service Data Unit Queue. */
 
 #define SFE_SPECIAL_INTERFACE_BASE 0x7f00	/**< Special interface base number. */
@@ -571,6 +572,18 @@ struct sfe_ctx_instance {
  * @addtogroup nss_sfe_functions
  * @{
  */
+
+/**
+ * Copy the IPv4 statistics for the given service class.
+ *
+ * @param	sid	Service class ID
+ * @param	bytes	Pointer to where byte count should be written.
+ * @param	packets	Pointer to where packet count should be written.
+ *
+ * @return
+ * True if successful, false if maximum retries exceeded; bool.
+ */
+extern bool sfe_service_class_stats_get(uint8_t sid, uint64_t *bytes, uint64_t *packets);
 
 /**
  * Gets the maximum number of IPv4 connections supported by the SFE acceleration engine.

@@ -462,6 +462,7 @@ static inline void sfe_ipv6_change_dsfield(struct ipv6hdr *iph, u8 dscp)
 	*p = ((*p & htons(SFE_IPV6_DSCP_MASK)) | htons((u16)dscp << 4));
 }
 
+bool sfe_ipv6_service_class_stats_get(uint8_t sid, uint64_t *bytes, uint64_t *packets);
 void sfe_ipv6_exception_stats_inc(struct sfe_ipv6 *si, enum sfe_ipv6_exception_events reason);
 void sfe_ipv6_service_class_stats_inc(struct sfe_ipv6 *si, uint8_t sid, uint64_t bytes);
 struct sfe_ipv6_connection_match *
