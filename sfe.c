@@ -196,6 +196,10 @@ inline bool sfe_dev_is_layer_3_interface(struct net_device *dev, bool check_v4)
 		return true;
 	}
 
+        if (dev->rtnl_link_ops && !strcmp(dev->rtnl_link_ops->kind, "ip6tnl")) {
+                return true;
+        }
+
 	return false;
 }
 
