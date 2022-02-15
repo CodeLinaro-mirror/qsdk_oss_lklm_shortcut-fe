@@ -229,12 +229,7 @@ int sfe_ipv6_recv_gre(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 		sfe_ipv6_change_dsfield(iph, cm->dscp);
 	}
 
-	/*
-	 * Decrement our hop_limit.
-	 */
-	if (!bridge_flow & !tun_outer) {
-		iph->hop_limit -= iph->hop_limit - (u8)(!bridge_flow & !tun_outer);
-	}
+	iph->hop_limit -= (u8)(!bridge_flow & !tun_outer);
 
 	/*
 	 * Update traffic stats.
