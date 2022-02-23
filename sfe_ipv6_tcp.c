@@ -3,7 +3,7 @@
  *	Shortcut forwarding engine file for IPv6 TCP
  *
  * Copyright (c) 2015-2016, 2019-2020, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -28,6 +28,8 @@
 #include "sfe.h"
 #include "sfe_flow_cookie.h"
 #include "sfe_ipv6.h"
+#include "sfe_pppoe.h"
+#include "sfe_vlan.h"
 
 /*
  * sfe_ipv6_process_tcp_option_sack()
@@ -114,7 +116,7 @@ static bool sfe_ipv6_process_tcp_option_sack(const struct tcphdr *th, const u32 
  *	Handle TCP packet receives and forwarding.
  */
 int sfe_ipv6_recv_tcp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_device *dev,
-			     unsigned int len, struct ipv6hdr *iph, unsigned int ihl, bool flush_on_find)
+			     unsigned int len, struct ipv6hdr *iph, unsigned int ihl, bool sync_on_find, struct sfe_l2_info *l2_info)
 {
 	struct tcphdr *tcph;
 	struct sfe_ipv6_addr *src_ip;
@@ -126,9 +128,13 @@ int sfe_ipv6_recv_tcp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 	u32 flags;
 	struct net_device *xmit_dev;
 	bool ret;
+	bool hw_csum;
+	bool bridge_flow;
+	bool fast_xmit;
+	netdev_features_t features;
 
 	/*
-	 * Is our packet too short to contain a valid UDP header?
+	 * Is our packet too short to contain a valid TCP header?
 	 */
 	if (!pskb_may_pull(skb, (sizeof(struct tcphdr) + ihl))) {
 
@@ -187,23 +193,34 @@ int sfe_ipv6_recv_tcp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 	}
 
 	/*
-	 * If our packet has beern marked as "flush on find" we can't actually
-	 * forward it in the fast path, but now that we've found an associated
-	 * connection we can flush that out before we process the packet.
+	 * Source interface validate.
 	 */
-	if (unlikely(flush_on_find)) {
+	if (unlikely((cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_SRC_INTERFACE_CHECK) && (cm->match_dev != dev))) {
 		struct sfe_ipv6_connection *c = cm->connection;
 		spin_lock_bh(&si->lock);
 		ret = sfe_ipv6_remove_connection(si, c);
 		spin_unlock_bh(&si->lock);
 
-		DEBUG_TRACE("flush on find\n");
 		if (ret) {
 			sfe_ipv6_flush_connection(si, c, SFE_SYNC_REASON_FLUSH);
 		}
 		rcu_read_unlock();
+		sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_INVALID_SRC_IFACE);
+		DEBUG_TRACE("flush on wrong source interface check failure\n");
+		return 0;
+	}
+
+	/*
+	 * If our packet has beern marked as "flush on find" we can't actually
+	 * forward it in the fast path, but now that we've found an associated
+	 * connection we need sync its status before throw it slow path.
+	 */
+	if (unlikely(sync_on_find)) {
+		sfe_ipv6_sync_status(si, cm->connection, SFE_SYNC_REASON_STATS);
+		rcu_read_unlock();
 
 		sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_TCP_IP_OPTIONS_OR_INITIAL_FRAGMENT);
+		DEBUG_TRACE("Sync on find\n");
 		return 0;
 	}
 
@@ -220,22 +237,29 @@ int sfe_ipv6_recv_tcp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 #endif
 
 	/*
+	 * Do we expect an ingress VLAN tag for this flow?
+	 */
+	if (unlikely(!sfe_vlan_validate_ingress_tag(skb, cm->ingress_vlan_hdr_cnt, cm->ingress_vlan_hdr, l2_info))) {
+		rcu_read_unlock();
+		sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_INGRESS_VLAN_TAG_MISMATCH);
+		DEBUG_TRACE("VLAN tag mismatch. skb=%px\n", skb);
+		return 0;
+	}
+
+	bridge_flow = !!(cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_BRIDGE_FLOW);
+
+	/*
 	 * Does our hop_limit allow forwarding?
 	 */
-	if (unlikely(iph->hop_limit < 2)) {
-		struct sfe_ipv6_connection *c = cm->connection;
-		spin_lock_bh(&si->lock);
-		ret = sfe_ipv6_remove_connection(si, c);
-		spin_unlock_bh(&si->lock);
+	if (likely(!bridge_flow)) {
+		if (unlikely(iph->hop_limit < 2)) {
+			sfe_ipv6_sync_status(si, cm->connection, SFE_SYNC_REASON_STATS);
+			rcu_read_unlock();
 
-		DEBUG_TRACE("hop_limit too low\n");
-		if (ret) {
-			sfe_ipv6_flush_connection(si, c, SFE_SYNC_REASON_FLUSH);
+			sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_TCP_SMALL_TTL);
+			DEBUG_TRACE("hop_limit too low\n");
+			return 0;
 		}
-		rcu_read_unlock();
-
-		sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_TCP_SMALL_TTL);
-		return 0;
 	}
 
 	/*
@@ -243,18 +267,11 @@ int sfe_ipv6_recv_tcp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 	 * we can't forward it easily.
 	 */
 	if (unlikely((len > cm->xmit_dev_mtu) && !skb_is_gso(skb))) {
-		struct sfe_ipv6_connection *c = cm->connection;
-		spin_lock_bh(&si->lock);
-		ret = sfe_ipv6_remove_connection(si, c);
-		spin_unlock_bh(&si->lock);
-
-		DEBUG_TRACE("larger than mtu\n");
-		if (ret) {
-			sfe_ipv6_flush_connection(si, c, SFE_SYNC_REASON_FLUSH);
-		}
+		sfe_ipv6_sync_status(si, cm->connection, SFE_SYNC_REASON_STATS);
 		rcu_read_unlock();
 
 		sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_TCP_NEEDS_FRAGMENTATION);
+		DEBUG_TRACE("Larger than MTU\n");
 		return 0;
 	}
 
@@ -467,10 +484,6 @@ int sfe_ipv6_recv_tcp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 	}
 
 	/*
-	 * From this point on we're good to modify the packet.
-	 */
-
-	/*
 	 * Check if skb was cloned. If it was, unshare it. Because
 	 * the data area is going to be written in this path and we don't want to
 	 * change the cloned skb's data section.
@@ -492,6 +505,76 @@ int sfe_ipv6_recv_tcp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 	}
 
 	/*
+	 * For PPPoE packets, match server MAC and session id
+	 */
+	if (unlikely(cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_PPPOE_DECAP)) {
+		struct pppoe_hdr *ph;
+		struct ethhdr *eth;
+
+		if (unlikely(!sfe_l2_parse_flag_check(l2_info, SFE_L2_PARSE_FLAGS_PPPOE_INGRESS))) {
+			rcu_read_unlock();
+			DEBUG_TRACE("%px: PPPoE header not present in packet for PPPoE rule\n", skb);
+			sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_INVALID_PPPOE_SESSION);
+			return 0;
+		}
+
+		ph = (struct pppoe_hdr *)(skb->head + sfe_l2_pppoe_hdr_offset_get(l2_info));
+		eth = (struct ethhdr *)(skb->head + sfe_l2_hdr_offset_get(l2_info));
+
+		if (unlikely(cm->pppoe_session_id != ntohs(ph->sid)) || unlikely(!(ether_addr_equal((u8*)cm->pppoe_remote_mac, (u8 *)eth->h_source)))) {
+			DEBUG_TRACE("%px: PPPoE sessions with session IDs %d and %d or server MACs %pM and %pM did not match \n",
+							skb, cm->pppoe_session_id, htons(ph->sid), cm->pppoe_remote_mac, eth->h_source);
+			rcu_read_unlock();
+			sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_INVALID_PPPOE_SESSION);
+			return 0;
+		}
+		skb->protocol = htons(l2_info->protocol);
+		this_cpu_inc(si->stats_pcpu->pppoe_decap_packets_forwarded64);
+
+	} else if (unlikely(sfe_l2_parse_flag_check(l2_info, SFE_L2_PARSE_FLAGS_PPPOE_INGRESS))) {
+
+		/*
+		 * If packet contains PPPoE header but CME doesn't contain PPPoE flag yet we are exceptioning the packet to linux
+		 */
+		if (unlikely(!(cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_BRIDGE_FLOW))) {
+			rcu_read_unlock();
+			DEBUG_TRACE("%px: CME doesn't contain PPPoE flag but packet has PPPoE header\n", skb);
+			sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_PPPOE_NOT_SET_IN_CME);
+			return 0;
+
+		}
+
+		/*
+		 * For bridged flows when packet contains PPPoE header, restore the header back and forward to xmit interface
+		 */
+		__skb_push(skb, (sizeof(struct pppoe_hdr) + sizeof(struct sfe_ppp_hdr)));
+		l2_info->l2_hdr_size -= (sizeof(struct pppoe_hdr) + sizeof(struct sfe_ppp_hdr));
+		this_cpu_inc(si->stats_pcpu->pppoe_bridge_packets_forwarded64);
+	}
+
+	/*
+	 * Check if skb has enough headroom to write L2 headers
+	 */
+	if (unlikely(skb_headroom(skb) < cm->l2_hdr_size)) {
+		rcu_read_unlock();
+		DEBUG_WARN("%px: Not enough headroom: %u\n", skb, skb_headroom(skb));
+		sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_NO_HEADROOM);
+		return 0;
+	}
+
+	/*
+	 * From this point on we're good to modify the packet.
+	 */
+
+	/*
+	 * For PPPoE flows, add PPPoE header before L2 header is added.
+	 */
+	if (unlikely(cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_PPPOE_ENCAP)) {
+		sfe_pppoe_add_header(skb, cm->pppoe_session_id, PPP_IPV6);
+		this_cpu_inc(si->stats_pcpu->pppoe_encap_packets_forwarded64);
+	}
+
+	/*
 	 * Update DSCP
 	 */
 	if (unlikely(cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_DSCP_REMARK)) {
@@ -501,7 +584,16 @@ int sfe_ipv6_recv_tcp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 	/*
 	 * Decrement our hop_limit.
 	 */
-	iph->hop_limit -= 1;
+	if (likely(!bridge_flow)) {
+		iph->hop_limit -= 1;
+	}
+
+	/*
+	 * Enable HW csum if rx checksum is verified and xmit interface is CSUM offload capable.
+	 * Note: If L4 csum at Rx was found to be incorrect, we (router) should use incremental L4 checksum here
+	 * so that HW does not re-calculate/replace the L4 csum
+	 */
+	hw_csum = !!(cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_CSUM_OFFLOAD) && (skb->ip_summed == CHECKSUM_UNNECESSARY);
 
 	/*
 	 * Do we have to perform translations of the source address/port?
@@ -516,14 +608,12 @@ int sfe_ipv6_recv_tcp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 		iph->saddr.s6_addr32[3] = cm->xlate_src_ip[0].addr[3];
 		tcph->source = cm->xlate_src_port;
 
-		/*
-		 * Do we have a non-zero UDP checksum?  If we do then we need
-		 * to update it.
-		 */
-		tcp_csum = tcph->check;
-		sum = tcp_csum + cm->xlate_src_csum_adjustment;
-		sum = (sum & 0xffff) + (sum >> 16);
-		tcph->check = (u16)sum;
+		if (unlikely(!hw_csum)) {
+			tcp_csum = tcph->check;
+			sum = tcp_csum + cm->xlate_src_csum_adjustment;
+			sum = (sum & 0xffff) + (sum >> 16);
+			tcph->check = (u16)sum;
+		}
 	}
 
 	/*
@@ -539,14 +629,23 @@ int sfe_ipv6_recv_tcp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 		iph->daddr.s6_addr32[3] = cm->xlate_dest_ip[0].addr[3];
 		tcph->dest = cm->xlate_dest_port;
 
-		/*
-		 * Do we have a non-zero UDP checksum?  If we do then we need
-		 * to update it.
-		 */
-		tcp_csum = tcph->check;
-		sum = tcp_csum + cm->xlate_dest_csum_adjustment;
-		sum = (sum & 0xffff) + (sum >> 16);
-		tcph->check = (u16)sum;
+		if (unlikely(!hw_csum)) {
+			tcp_csum = tcph->check;
+			sum = tcp_csum + cm->xlate_dest_csum_adjustment;
+			sum = (sum & 0xffff) + (sum >> 16);
+			tcph->check = (u16)sum;
+		}
+	}
+
+	/*
+	 * If HW checksum offload is not possible, incremental L4 checksum is used to update the packet.
+	 * Setting ip_summed to CHECKSUM_UNNECESSARY ensures checksum is not recalculated further in packet
+	 * path.
+	 */
+	if (likely(hw_csum)) {
+		skb->ip_summed = CHECKSUM_PARTIAL;
+	} else {
+		skb->ip_summed = CHECKSUM_UNNECESSARY;
 	}
 
 	/*
@@ -559,18 +658,26 @@ int sfe_ipv6_recv_tcp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 	skb->dev = xmit_dev;
 
 	/*
-	 * Check to see if we need to write a header.
+	 * Check to see if we need to add VLAN tags
+	 */
+	if (unlikely(cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_INSERT_EGRESS_VLAN_TAG)) {
+		sfe_vlan_add_tag(skb, cm->egress_vlan_hdr_cnt, cm->egress_vlan_hdr);
+	}
+
+	/*
+	 * Check to see if we need to write an Ethernet header.
 	 */
 	if (likely(cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_WRITE_L2_HDR)) {
 		if (unlikely(!(cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_WRITE_FAST_ETH_HDR))) {
-			dev_hard_header(skb, xmit_dev, ETH_P_IPV6,
+			dev_hard_header(skb, xmit_dev, ntohs(skb->protocol),
 					cm->xmit_dest_mac, cm->xmit_src_mac, len);
 		} else {
 			/*
 			 * For the simple case we write this really fast.
 			 */
 			struct ethhdr *eth = (struct ethhdr *)__skb_push(skb, ETH_HLEN);
-			eth->h_proto = htons(ETH_P_IPV6);
+
+			eth->h_proto = skb->protocol;
 			ether_addr_copy((u8 *)eth->h_dest, (u8 *)cm->xmit_dest_mac);
 			ether_addr_copy((u8 *)eth->h_source, (u8 *)cm->xmit_src_mac);
 		}
@@ -586,10 +693,24 @@ int sfe_ipv6_recv_tcp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 	/*
 	 * Mark outgoing packet
 	 */
-	skb->mark = cm->connection->mark;
-	if (skb->mark) {
-		DEBUG_TRACE("SKB MARK is NON ZERO %x\n", skb->mark);
+	if (unlikely(cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_MARK)) {
+		skb->mark = cm->mark;
 	}
+
+	/*
+	 * For the first packets, check if it could got fast xmit.
+	 */
+	if (unlikely(!(cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_FAST_XMIT_FLOW_CHECKED)
+				&& (cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_FAST_XMIT_DEV_ADMISSION))){
+		cm->features = netif_skb_features(skb);
+		if (likely(sfe_fast_xmit_check(skb, cm->features))) {
+			cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_FAST_XMIT;
+		}
+		cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_FAST_XMIT_FLOW_CHECKED;
+	}
+	features = cm->features;
+
+	fast_xmit = !!(cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_FAST_XMIT);
 
 	rcu_read_unlock();
 
@@ -600,6 +721,15 @@ int sfe_ipv6_recv_tcp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 	 * start fetching the necessary cache line now.
 	 */
 	prefetch(skb_shinfo(skb));
+
+	/*
+	 * We do per packet condition check before we could fast xmit the
+	 * packet.
+	 */
+	if (likely(fast_xmit && dev_fast_xmit(skb, xmit_dev, features))) {
+		this_cpu_inc(si->stats_pcpu->packets_fast_xmited64);
+		return 1;
+	}
 
 	/*
 	 * Mark that this packet has been fast forwarded.

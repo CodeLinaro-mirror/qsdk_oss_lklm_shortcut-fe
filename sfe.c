@@ -3,7 +3,7 @@
  *     API for shortcut forwarding engine.
  *
  * Copyright (c) 2015,2016, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -25,10 +25,14 @@
 #include <net/addrconf.h>
 #include <linux/inetdevice.h>
 #include <net/pkt_sched.h>
+#include <net/vxlan.h>
+#include <net/gre.h>
 
 #include "sfe_debug.h"
 #include "sfe_api.h"
 #include "sfe.h"
+#include "sfe_pppoe.h"
+#include "sfe_vlan.h"
 
 extern int max_ipv4_conn;
 extern int max_ipv6_conn;
@@ -47,6 +51,7 @@ typedef enum sfe_exception {
 	SFE_EXCEPTION_PROTOCOL_NOT_SUPPORT,
 	SFE_EXCEPTION_SRC_DEV_NOT_L3,
 	SFE_EXCEPTION_DEST_DEV_NOT_L3,
+	SFE_EXCEPTION_CFG_ERR,
 	SFE_EXCEPTION_CREATE_FAILED,
 	SFE_EXCEPTION_ENQUEUE_FAILED,
 	SFE_EXCEPTION_NOT_SUPPORT_6RD,
@@ -63,6 +68,7 @@ static char *sfe_exception_events_string[SFE_EXCEPTION_MAX] = {
 	"PROTOCOL_NOT_SUPPORT",
 	"SRC_DEV_NOT_L3",
 	"DEST_DEV_NOT_L3",
+	"CONFIG_ERROR",
 	"CREATE_FAILED",
 	"ENQUEUE_FAILED",
 	"NOT_SUPPORT_6RD",
@@ -110,6 +116,9 @@ struct sfe_ctx_instance_internal {
 	void *ipv6_stats_sync_data;	/* Argument for above callback: ipv6_stats_sync_cb */
 
 	u32 exceptions[SFE_EXCEPTION_MAX];		/* Statistics for exception */
+
+	int32_t l2_feature_support;		/* L2 feature support */
+
 };
 
 static struct sfe_ctx_instance_internal __sfe_ctx;
@@ -162,14 +171,13 @@ inline bool sfe_dev_is_layer_3_interface(struct net_device *dev, bool check_v4)
 		}
 
 		/*
-		 * Does it have an IPv4 address?  If it doesn't then we can't do anything
-		 * interesting here!
+		 * Does it have an IPv4 address?  If it doesn't then it could be MAP-T interface,
+		 * else we can't do anything interesting here!
 		 */
-		if (unlikely(!in4_dev->ifa_list)) {
-			return false;
+		if (likely(in4_dev->ifa_list || (dev->priv_flags_ext & IFF_EXT_MAPT))) {
+			return true;
 		}
-
-		return true;
+		return false;
 	}
 
 	/*
@@ -181,10 +189,79 @@ inline bool sfe_dev_is_layer_3_interface(struct net_device *dev, bool check_v4)
 	}
 
 	/*
-	 * Does it have an IPv6 address?  If it doesn't then we can't do anything
-	 * interesting here!
+	 * Does it have an IPv6 address?  If it doesn't then it could be MAP-T interface,
+	 * else we can't do anything interesting here!
 	 */
-	if (unlikely(list_empty(&in6_dev->addr_list))) {
+	if (likely(!list_empty(&in6_dev->addr_list) || (dev->priv_flags_ext & IFF_EXT_MAPT))) {
+		return true;
+	}
+
+        if (dev->rtnl_link_ops && !strcmp(dev->rtnl_link_ops->kind, "ip6tnl")) {
+                return true;
+        }
+
+	return false;
+}
+
+/*
+ * sfe_routed_dev_allow()
+ *	check whether routed acceleration allowed
+ */
+static bool sfe_routed_dev_allow(struct net_device *dev, bool is_routed,  bool check_v4)
+{
+	if (!is_routed) {
+		return true;
+	}
+
+	if (sfe_dev_is_layer_3_interface(dev, check_v4)) {
+		return true;
+	}
+
+	/*
+	 * in case of GRE / vxlan, these dev does not have IP address
+	 * so l3 interface check will fail. allow rule creation between gre / vxlan
+	 * and wan dev for routed flow.
+	 */
+	if (netif_is_vxlan(dev)) {
+		return true;
+	}
+
+#ifdef SFE_GRE_TUN_ENABLE
+	if (netif_is_gretap(dev) || netif_is_gre(dev)) {
+		return true;
+	}
+
+	if (netif_is_ip6gre(dev) || netif_is_ip6gretap(dev)) {
+		return true;
+	}
+#endif
+
+	return false;
+}
+
+/* sfe_dev_has_hw_csum()
+ *	check whether device supports hardware checksum offload
+ */
+bool sfe_dev_has_hw_csum(struct net_device *dev)
+{
+	if (netif_is_vxlan(dev)) {
+		return false;
+	}
+
+#ifdef SFE_GRE_TUN_ENABLE
+	if (netif_is_gre(dev) || netif_is_gretap(dev)) {
+		return false;
+	}
+
+	if (netif_is_ip6gre(dev) || netif_is_ip6gretap(dev)) {
+		return false;
+	}
+#endif
+	/*
+	 * Tunnel MAP-E/DS-LITE and Tun6rd share the same Routing netlink operator
+	 * whose kind is "ip6tnl". The HW csum for these tunnel devices should be disabled.
+	*/
+	if (dev->rtnl_link_ops && !strcmp(dev->rtnl_link_ops->kind, "ip6tnl")) {
 		return false;
 	}
 
@@ -304,6 +381,46 @@ sfe_alloc_response_msg(sfe_msg_types_t type, void *msg)
 	}
 
 	return response;
+}
+
+/*
+ * sfe_fast_xmit_check()
+ *	Check the fast transmit feasibility.
+ *
+ * This check the per direction's  attribute that could not go fast
+ * transmit
+ * xfrm packets, come from a local socket or need sk validation on the skb
+ */
+bool sfe_fast_xmit_check(struct sk_buff *skb, netdev_features_t features)
+{
+
+#ifdef CONFIG_SOCK_VALIDATE_XMIT
+	if (skb->sk && sk_fullsock(skb->sk) && skb->sk->sk_validate_xmit_skb) {
+		DEBUG_INFO("%px:need sk validation\n", skb);
+		return false;
+#ifdef CONFIG_TLS_DEVICE
+	} else if (skb->decrypted) {
+		DEBUG_INFO("%px:SK or decrypted\n", skb);
+		return false;
+#endif
+	}
+#endif
+	if (skb_vlan_tag_present(skb)) {
+		DEBUG_INFO("%px:Vlan is present\n", skb);
+		return false;
+	}
+
+	if (netif_needs_gso(skb, features)) {
+		DEBUG_INFO("%px:Need to be gso\n", skb);
+		return false;
+	}
+
+	if (skb_sec_path(skb)) {
+		DEBUG_INFO("%px:XFRM is present\n", skb);
+		return false;
+	}
+
+	return true;
 }
 
 /*
@@ -437,6 +554,68 @@ static void sfe_ipv4_stats_sync_callback(struct sfe_connection_sync *sis)
 }
 
 /*
+ * sfe_recv_parse_l2()
+ *	Parse L2 headers
+ *
+ * Returns true if the packet is parsed and false otherwise.
+ */
+static bool sfe_recv_parse_l2(struct net_device *dev, struct sk_buff *skb, struct sfe_l2_info *l2_info)
+{
+	/*
+	 * l2_hdr_offset will not change as we parse more L2.5 headers
+	 * TODO: Move from storing offsets to storing pointers
+	 */
+	sfe_l2_hdr_offset_set(l2_info, ((skb->data - ETH_HLEN) - skb->head));
+
+	/*
+	 * VLAN parsing
+	 */
+	if (unlikely(!sfe_vlan_check_and_parse_tag(skb, l2_info))) {
+		return false;
+	}
+
+	/*
+	 * PPPoE parsing
+	 */
+	if (htons(ETH_P_PPP_SES) == skb->protocol) {
+		/*
+		 * Parse only PPPoE session packets
+		 * skb->data is pointing to PPPoE hdr
+		 */
+		if (!sfe_pppoe_parse_hdr(skb, l2_info)) {
+
+			/*
+			 * For exception from PPPoE return from here without modifying the skb->data
+			 * This includes non-IPv4/v6 cases also
+			 */
+			return false;
+		}
+
+		/*
+		 * Pull by L2 header size
+		 */
+		__skb_pull(skb, sfe_l2_hdr_size_get(l2_info));
+	}
+	return true;
+}
+
+/*
+ * sfe_recv_undo_parse_l2()
+ */
+static void sfe_recv_undo_parse_l2(struct net_device *dev, struct sk_buff *skb, struct sfe_l2_info *l2_info)
+{
+	/*
+	 * PPPoE undo
+	 */
+	__skb_push(skb, sfe_l2_hdr_size_get(l2_info));
+
+	/*
+	 * VLAN undo
+	 */
+	sfe_vlan_undo_parse(skb, l2_info);
+}
+
+/*
  * sfe_create_ipv4_rule_msg()
  * 	Convert create message format from ecm to sfe
  *
@@ -451,6 +630,8 @@ sfe_tx_status_t sfe_create_ipv4_rule_msg(struct sfe_ctx_instance_internal *sfe_c
 	struct net_device *dest_dev = NULL;
 	struct sfe_response_msg *response;
 	enum sfe_cmn_response ret = SFE_TX_SUCCESS;
+	bool is_routed = true;
+	bool cfg_err;
 
 	response = sfe_alloc_response_msg(SFE_MSG_TYPE_IPV4, msg);
 	if (!response) {
@@ -475,6 +656,9 @@ sfe_tx_status_t sfe_create_ipv4_rule_msg(struct sfe_ctx_instance_internal *sfe_c
 	case IPPROTO_UDP:
 		break;
 
+	case IPPROTO_GRE:
+		break;
+
 	default:
 		ret = SFE_CMN_RESPONSE_EMSG;
 		sfe_incr_exceptions(SFE_EXCEPTION_PROTOCOL_NOT_SUPPORT);
@@ -482,21 +666,35 @@ sfe_tx_status_t sfe_create_ipv4_rule_msg(struct sfe_ctx_instance_internal *sfe_c
 	}
 
 	/*
-	 * Not supporting bridged flows now
+	 * Bridge flows are accelerated if L2 feature is enabled.
 	 */
 	if (msg->msg.rule_create.rule_flags & SFE_RULE_CREATE_FLAG_BRIDGE_FLOW) {
-		ret = SFE_CMN_RESPONSE_EINTERFACE;
-		sfe_incr_exceptions(SFE_EXCEPTION_NOT_SUPPORT_BRIDGE);
-		goto failed_ret;
+		if (!sfe_is_l2_feature_enabled()) {
+			ret = SFE_CMN_RESPONSE_EINTERFACE;
+			sfe_incr_exceptions(SFE_EXCEPTION_NOT_SUPPORT_BRIDGE);
+			goto failed_ret;
+		}
+
+		is_routed = false;
 	}
 
 	/*
 	 * Does our input device support IP processing?
 	 */
 	src_dev = dev_get_by_index(&init_net, msg->msg.rule_create.conn_rule.flow_top_interface_num);
-	if (!src_dev || !sfe_dev_is_layer_3_interface(src_dev, true)) {
+	if (!src_dev || !sfe_routed_dev_allow(src_dev, is_routed, true)) {
 		ret = SFE_CMN_RESPONSE_EINTERFACE;
 		sfe_incr_exceptions(SFE_EXCEPTION_SRC_DEV_NOT_L3);
+		goto failed_ret;
+	}
+
+	/*
+	 * Check whether L2 feature is disabled and rule flag is configured to use bottom interface
+	 */
+	cfg_err = (msg->msg.rule_create.rule_flags & SFE_RULE_CREATE_FLAG_USE_FLOW_BOTTOM_INTERFACE) && !sfe_is_l2_feature_enabled();
+	if (cfg_err) {
+		ret = SFE_CMN_RESPONSE_EMSG;
+		sfe_incr_exceptions(SFE_EXCEPTION_CFG_ERR);
 		goto failed_ret;
 	}
 
@@ -504,9 +702,19 @@ sfe_tx_status_t sfe_create_ipv4_rule_msg(struct sfe_ctx_instance_internal *sfe_c
 	 * Does our output device support IP processing?
 	 */
 	dest_dev = dev_get_by_index(&init_net, msg->msg.rule_create.conn_rule.return_top_interface_num);
-	if (!dest_dev || !sfe_dev_is_layer_3_interface(dest_dev, true)) {
+	if (!dest_dev || !sfe_routed_dev_allow(dest_dev, is_routed, true)) {
 		ret = SFE_CMN_RESPONSE_EINTERFACE;
 		sfe_incr_exceptions(SFE_EXCEPTION_DEST_DEV_NOT_L3);
+		goto failed_ret;
+	}
+
+	/*
+	 * Check whether L2 feature is disabled and rule flag is configured to use bottom interface
+	 */
+	cfg_err = (msg->msg.rule_create.rule_flags & SFE_RULE_CREATE_FLAG_USE_RETURN_BOTTOM_INTERFACE) && !sfe_is_l2_feature_enabled();
+	if (cfg_err) {
+		ret = SFE_CMN_RESPONSE_EMSG;
+		sfe_incr_exceptions(SFE_EXCEPTION_CFG_ERR);
 		goto failed_ret;
 	}
 
@@ -772,6 +980,8 @@ sfe_tx_status_t sfe_create_ipv6_rule_msg(struct sfe_ctx_instance_internal *sfe_c
 	struct net_device *dest_dev = NULL;
 	struct sfe_response_msg *response;
 	enum sfe_cmn_response ret = SFE_TX_SUCCESS;
+	bool is_routed = true;
+	bool cfg_err;
 
 	response = sfe_alloc_response_msg(SFE_MSG_TYPE_IPV6, msg);
 	if (!response) {
@@ -786,12 +996,15 @@ sfe_tx_status_t sfe_create_ipv6_rule_msg(struct sfe_ctx_instance_internal *sfe_c
 	}
 
 	/*
-	 * Not supporting bridged flows now
+	 * Bridge flows are accelerated if L2 feature is enabled.
 	 */
 	if (msg->msg.rule_create.rule_flags & SFE_RULE_CREATE_FLAG_BRIDGE_FLOW) {
-		ret = SFE_CMN_RESPONSE_EINTERFACE;
-		sfe_incr_exceptions(SFE_EXCEPTION_NOT_SUPPORT_BRIDGE);
-		goto failed_ret;
+		if (!sfe_is_l2_feature_enabled()) {
+			ret = SFE_CMN_RESPONSE_EINTERFACE;
+			sfe_incr_exceptions(SFE_EXCEPTION_NOT_SUPPORT_BRIDGE);
+			goto failed_ret;
+		}
+		is_routed = false;
 	}
 
 	switch(msg->msg.rule_create.tuple.protocol) {
@@ -808,6 +1021,12 @@ sfe_tx_status_t sfe_create_ipv6_rule_msg(struct sfe_ctx_instance_internal *sfe_c
 	case IPPROTO_UDP:
 		break;
 
+	case IPPROTO_IPIP:
+		break;
+
+	case IPPROTO_GRE:
+		break;
+
 	default:
 		ret = SFE_CMN_RESPONSE_EMSG;
 		sfe_incr_exceptions(SFE_EXCEPTION_PROTOCOL_NOT_SUPPORT);
@@ -818,9 +1037,19 @@ sfe_tx_status_t sfe_create_ipv6_rule_msg(struct sfe_ctx_instance_internal *sfe_c
 	 * Does our input device support IP processing?
 	 */
 	src_dev = dev_get_by_index(&init_net, msg->msg.rule_create.conn_rule.flow_top_interface_num);
-	if (!src_dev || !sfe_dev_is_layer_3_interface(src_dev, false)) {
+	if (!src_dev || !sfe_routed_dev_allow(src_dev, is_routed, false)) {
 		ret = SFE_CMN_RESPONSE_EINTERFACE;
 		sfe_incr_exceptions(SFE_EXCEPTION_SRC_DEV_NOT_L3);
+		goto failed_ret;
+	}
+
+	/*
+	 * Check whether L2 feature is disabled and rule flag is configured to use bottom interface
+	 */
+	cfg_err = (msg->msg.rule_create.rule_flags & SFE_RULE_CREATE_FLAG_USE_FLOW_BOTTOM_INTERFACE) && !sfe_is_l2_feature_enabled();
+	if (cfg_err) {
+		ret = SFE_CMN_RESPONSE_EMSG;
+		sfe_incr_exceptions(SFE_EXCEPTION_CFG_ERR);
 		goto failed_ret;
 	}
 
@@ -828,9 +1057,19 @@ sfe_tx_status_t sfe_create_ipv6_rule_msg(struct sfe_ctx_instance_internal *sfe_c
 	 * Does our output device support IP processing?
 	 */
 	dest_dev = dev_get_by_index(&init_net, msg->msg.rule_create.conn_rule.return_top_interface_num);
-	if (!dest_dev || !sfe_dev_is_layer_3_interface(dest_dev, false)) {
+	if (!dest_dev || !sfe_routed_dev_allow(dest_dev, is_routed, false)) {
 		ret = SFE_CMN_RESPONSE_EINTERFACE;
 		sfe_incr_exceptions(SFE_EXCEPTION_DEST_DEV_NOT_L3);
+		goto failed_ret;
+	}
+
+	/*
+	 * Check whether L2 feature is disabled and rule flag is configured to use bottom interface
+	 */
+	cfg_err = (msg->msg.rule_create.rule_flags & SFE_RULE_CREATE_FLAG_USE_RETURN_BOTTOM_INTERFACE) && !sfe_is_l2_feature_enabled();
+	if (cfg_err) {
+		ret = SFE_CMN_RESPONSE_EMSG;
+		sfe_incr_exceptions(SFE_EXCEPTION_CFG_ERR);
 		goto failed_ret;
 	}
 
@@ -1023,6 +1262,8 @@ EXPORT_SYMBOL(sfe_tun6rd_msg_init);
 int sfe_recv(struct sk_buff *skb)
 {
 	struct net_device *dev;
+	struct sfe_l2_info l2_info;
+	int ret;
 
 	/*
 	 * We know that for the vast majority of packets we need the transport
@@ -1032,6 +1273,13 @@ int sfe_recv(struct sk_buff *skb)
 	barrier();
 
 	dev = skb->dev;
+
+	/*
+	 * Setting parse flags to 0 since l2_info is passed for non L2.5 header case as well
+	 */
+	l2_info.parse_flags = 0;
+	l2_info.l2_hdr_size = 0;
+	l2_info.vlan_hdr_cnt = 0;
 
 #ifdef CONFIG_NET_CLS_ACT
 	/*
@@ -1050,33 +1298,86 @@ int sfe_recv(struct sk_buff *skb)
 #endif
 
 	/*
-	 * We're only interested in IPv4 and IPv6 packets.
+	 * If l2_feature is enabled, we need not check if src dev is L3 interface since bridge flow offload is supported.
+	 * If l2_feature is disabled, then we make sure src dev is L3 interface to avoid cost of rule lookup for L2 flows
 	 */
-	if (likely(htons(ETH_P_IP) == skb->protocol)) {
-		if (sfe_dev_is_layer_3_interface(dev, true)) {
-			return sfe_ipv4_recv(dev, skb);
-		} else {
-			DEBUG_TRACE("no IPv4 address for device: %s\n", dev->name);
-			return 0;
+	switch (ntohs(skb->protocol)) {
+	case ETH_P_IP:
+		if (likely(sfe_is_l2_feature_enabled()) || sfe_dev_is_layer_3_interface(dev, true)) {
+			return sfe_ipv4_recv(dev, skb, &l2_info, false);
 		}
+
+		DEBUG_TRACE("No IPv4 address for device: %s skb=%px\n", dev->name, skb);
+		return 0;
+
+	case ETH_P_IPV6:
+		if (likely(sfe_is_l2_feature_enabled()) || sfe_dev_is_layer_3_interface(dev, false)) {
+			return sfe_ipv6_recv(dev, skb, &l2_info, false);
+		}
+
+		DEBUG_TRACE("No IPv6 address for device: %s skb=%px\n", dev->name, skb);
+		return 0;
+
+	default:
+		break;
 	}
 
-	if (likely(htons(ETH_P_IPV6) == skb->protocol)) {
-		if (sfe_dev_is_layer_3_interface(dev, false)) {
-			return sfe_ipv6_recv(dev, skb);
-		} else {
-			DEBUG_TRACE("no IPv6 address for device: %s\n", dev->name);
-			return 0;
-		}
+	/*
+	 * Stop L2 processing if L2 feature is disabled.
+	 */
+	if (!sfe_is_l2_feature_enabled()) {
+		DEBUG_TRACE("Unsupported protocol %#x %s (L2 feature is disabled) skb=%px\n",
+				ntohs(skb->protocol), dev->name, skb);
+		return 0;
 	}
 
-	DEBUG_TRACE("not IP packet\n");
+	/*
+	 * Parse the L2 headers to find the L3 protocol and the L2 header offset
+	 */
+	if (unlikely(!sfe_recv_parse_l2(dev, skb, &l2_info))) {
+		DEBUG_TRACE("%px: Invalid L2.5 header format with protocol : %x\n", skb, ntohs(skb->protocol));
+		goto send_to_linux;
+	}
+
+	/*
+	 * Protocol in l2_info is expected to be in host byte order.
+	 * PPPoE is doing it in the sfe_pppoe_parse_hdr()
+	 */
+	if (likely(l2_info.protocol == ETH_P_IP)) {
+		ret = sfe_ipv4_recv(dev, skb, &l2_info, false);
+		if (unlikely(!ret)) {
+			goto send_to_linux;
+		}
+		return ret;
+	}
+
+	if (likely(l2_info.protocol == ETH_P_IPV6)) {
+		ret = sfe_ipv6_recv(dev, skb, &l2_info, false);
+		if (unlikely(!ret)) {
+			goto send_to_linux;
+		}
+		return ret;
+	}
+
+	DEBUG_TRACE("Non-IP(%x) %s skb=%px skb_vlan:%x/%x/%x skb_proto=%x\n",
+			l2_info.protocol, dev->name, skb,
+			ntohs(skb->vlan_proto), skb->vlan_tci, skb_vlan_tag_present(skb),
+		       	htons(skb->protocol));
+
+send_to_linux:
+	/*
+	 * Push the data back before sending to linux if -
+	 * a. There is any exception from IPV4/V6
+	 * b. If the next protocol is neither IPV4 nor IPV6
+	 */
+	sfe_recv_undo_parse_l2(dev, skb, &l2_info);
+
 	return 0;
 }
 
 /*
  * sfe_get_exceptions()
- * 	Dump exception counters
+ *	Dump exception counters
  */
 static ssize_t sfe_get_exceptions(struct device *dev,
 				     struct device_attribute *attr,
@@ -1103,12 +1404,92 @@ static const struct device_attribute sfe_exceptions_attr =
 	__ATTR(exceptions, S_IRUGO, sfe_get_exceptions, NULL);
 
 /*
+ * sfe_is_l2_feature_enabled()
+ *	Check if l2 features flag feature is enabled or not. (VLAN, PPPOE, BRIDGE and tunnels)
+ *
+ * 32bit read is atomic. No need of locks.
+ */
+bool sfe_is_l2_feature_enabled()
+{
+	struct sfe_ctx_instance_internal *sfe_ctx = &__sfe_ctx;
+	return (sfe_ctx->l2_feature_support == 1);
+}
+EXPORT_SYMBOL(sfe_is_l2_feature_enabled);
+
+/*
+ * sfe_get_l2_feature()
+ *	L2 feature is enabled/disabled
+ */
+ssize_t sfe_get_l2_feature(struct device *dev,
+				     struct device_attribute *attr,
+				     char *buf)
+{
+	struct sfe_ctx_instance_internal *sfe_ctx = &__sfe_ctx;
+	ssize_t len;
+
+	spin_lock_bh(&sfe_ctx->lock);
+	len = snprintf(buf, (ssize_t)(PAGE_SIZE), "L2 feature is %s\n", sfe_ctx->l2_feature_support ? "enabled" : "disabled");
+	spin_unlock_bh(&sfe_ctx->lock);
+	return len;
+}
+
+/*
+ * sfe_set_l2_feature()
+ *	Enable or disable l2 features flag.
+ */
+ssize_t sfe_set_l2_feature(struct device *dev, struct device_attribute *attr,
+                         const char *buf, size_t count)
+{
+        unsigned long val;
+	struct sfe_ctx_instance_internal *sfe_ctx = &__sfe_ctx;
+	int ret;
+        ret = sscanf(buf, "%lu", &val);
+
+	if (ret != 1) {
+		pr_err("Wrong input, %s\n", buf);
+		return -EINVAL;
+	}
+
+	if (val != 1 && val != 0) {
+		pr_err("Input should be either 1 or 0, (%s)\n", buf);
+		return -EINVAL;
+	}
+
+	spin_lock_bh(&sfe_ctx->lock);
+
+	if (sfe_ctx->l2_feature_support && val) {
+		spin_unlock_bh(&sfe_ctx->lock);
+		pr_err("L2 feature is already enabled\n");
+		return -EINVAL;
+	}
+
+	if (!sfe_ctx->l2_feature_support && !val) {
+		spin_unlock_bh(&sfe_ctx->lock);
+		pr_err("L2 feature is already disabled\n");
+		return -EINVAL;
+	}
+
+	sfe_ctx->l2_feature_support = val;
+	spin_unlock_bh(&sfe_ctx->lock);
+
+	return count;
+}
+
+static const struct device_attribute sfe_l2_feature_attr =
+	__ATTR(l2_feature,  0644, sfe_get_l2_feature, sfe_set_l2_feature);
+
+/*
  * sfe_init_if()
  */
 int sfe_init_if(void)
 {
 	struct sfe_ctx_instance_internal *sfe_ctx = &__sfe_ctx;
 	int result = -1;
+
+	/*
+	 * L2 feature is enabled by default
+	 */
+	sfe_ctx->l2_feature_support = 1;
 
 	/*
 	 * Create sys/sfe
@@ -1125,6 +1506,12 @@ int sfe_init_if(void)
 	result = sysfs_create_file(sfe_ctx->sys_sfe, &sfe_exceptions_attr.attr);
 	if (result) {
 		DEBUG_ERROR("failed to register exceptions file: %d\n", result);
+		goto exit2;
+	}
+
+	result = sysfs_create_file(sfe_ctx->sys_sfe, &sfe_l2_feature_attr.attr);
+	if (result) {
+		DEBUG_ERROR("failed to register L2 feature flag sysfs file: %d\n", result);
 		goto exit2;
 	}
 
