@@ -3,7 +3,7 @@
  *	Shortcut forwarding engine header file for IPv6.
  *
  * Copyright (c) 2015-2016, 2019-2020, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -17,6 +17,9 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
+
+#ifndef __SFE_IPV6_H
+#define __SFE_IPV6_H
 
 #define CHAR_DEV_MSG_SIZE 768
 
@@ -66,6 +69,28 @@ struct sfe_ipv6_tcp_connection_match {
 					/* remark priority of SKB */
 #define SFE_IPV6_CONNECTION_MATCH_FLAG_DSCP_REMARK (1<<6)
 					/* remark DSCP of packet */
+#define SFE_IPV6_CONNECTION_MATCH_FLAG_CSUM_OFFLOAD (1<<7)
+					/* checksum offload.*/
+#define SFE_IPV6_CONNECTION_MATCH_FLAG_PPPOE_DECAP (1<<8)
+					/* Indicates that PPPoE should be decapsulated */
+#define SFE_IPV6_CONNECTION_MATCH_FLAG_PPPOE_ENCAP (1<<9)
+					/* Indicates that PPPoE should be encapsulated */
+#define SFE_IPV6_CONNECTION_MATCH_FLAG_BRIDGE_FLOW (1<<10)
+					/* Bridge flow */
+#define SFE_IPV6_CONNECTION_MATCH_FLAG_MARK (1<<11)
+					/* set skb mark*/
+#define SFE_IPV6_CONNECTION_MATCH_FLAG_INSERT_EGRESS_VLAN_TAG (1<<12)
+					/* Insert VLAN tag */
+#define SFE_IPV6_CONNECTION_MATCH_FLAG_SRC_INTERFACE_CHECK (1<<13)
+					/* Source interface check.*/
+#define SFE_IPV6_CONNECTION_MATCH_FLAG_PASSTHROUGH (1<<14)
+					/* passthrough flow: encap/decap to be skipped for this flow */
+#define SFE_IPV6_CONNECTION_MATCH_FLAG_FAST_XMIT (1<<15)
+					/* go fast xmit*/
+#define SFE_IPV6_CONNECTION_MATCH_FLAG_FAST_XMIT_FLOW_CHECKED (1<<16)
+					/* fast xmit checked or not*/
+#define SFE_IPV6_CONNECTION_MATCH_FLAG_FAST_XMIT_DEV_ADMISSION (1<<17)
+					/* Fast xmit may be possible for this flow, if SFE check passes */
 
 /*
  * IPv6 connection matching structure.
@@ -88,6 +113,13 @@ struct sfe_ipv6_connection_match {
 	__be16 match_src_port;		/* Source port/connection ident */
 	__be16 match_dest_port;		/* Destination port/connection ident */
 
+	struct udp_sock *up;		/* Stores UDP sock information; valid only in decap path */
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 13, 0))
+	const struct inet6_protocol *proto;	/* stores protocol handler; valid only in decap path */
+#else
+	struct inet6_protocol *proto;	/* stores protocol handler; valid only in decap path */
+#endif
+
 	/*
 	 * Control the operations of the match.
 	 */
@@ -105,6 +137,13 @@ struct sfe_ipv6_connection_match {
 	union {				/* Protocol-specific state */
 		struct sfe_ipv6_tcp_connection_match tcp;
 	} protocol_state;
+
+	/*
+	 * VLAN headers
+	 */
+	struct sfe_vlan_hdr ingress_vlan_hdr[SFE_MAX_VLAN_DEPTH];
+	struct sfe_vlan_hdr egress_vlan_hdr[SFE_MAX_VLAN_DEPTH];
+
 	/*
 	 * Stats recorded in a sync period. These stats will be added to
 	 * rx_packet_count64/rx_byte_count64 after a sync period.
@@ -123,6 +162,7 @@ struct sfe_ipv6_connection_match {
 	__be16 xlate_dest_port;	/* Port/connection ident after destination translation */
 	u16 xlate_dest_csum_adjustment;
 					/* Transport layer checksum adjustment after destination translation */
+	u32 mark;			/* mark for outgoing packet */
 
 	/*
 	 * QoS information
@@ -141,11 +181,32 @@ struct sfe_ipv6_connection_match {
 	u16 xmit_src_mac[ETH_ALEN / 2];
 					/* Source MAC address to use when forwarding */
 
+	u8 ingress_vlan_hdr_cnt;        /* Ingress active vlan headers count */
+	u8 egress_vlan_hdr_cnt;         /* Egress active vlan headers count */
+
 	/*
 	 * Summary stats.
 	 */
 	u64 rx_packet_count64;
 	u64 rx_byte_count64;
+
+	/*
+	 * PPPoE information.
+	 */
+	u16 pppoe_session_id;
+	u8 pppoe_remote_mac[ETH_ALEN];
+
+	struct net_device *top_interface_dev;	/* Used by tunipip6 to store decap VLAN netdevice.*/
+
+	/*
+	 * Size of all needed L2 headers
+	 */
+	u16 l2_hdr_size;
+
+	/*
+	* xmit device's feature
+	 */
+	netdev_features_t features;
 };
 
 /*
@@ -179,7 +240,6 @@ struct sfe_ipv6_connection {
 					/* Pointer to the previous entry in the list of all connections */
 	bool removed;			/* Indicates the connection is removed */
 	struct rcu_head rcu;		/* delay rcu free */
-	u32 mark;			/* mark for outgoing packet */
 	u32 debug_read_seq;		/* sequence number for debug dump */
 };
 
@@ -228,6 +288,23 @@ enum sfe_ipv6_exception_events {
 	SFE_IPV6_EXCEPTION_EVENT_IP_OPTIONS_INCOMPLETE,
 	SFE_IPV6_EXCEPTION_EVENT_UNHANDLED_PROTOCOL,
 	SFE_IPV6_EXCEPTION_EVENT_FLOW_COOKIE_ADD_FAIL,
+	SFE_IPV6_EXCEPTION_EVENT_NO_HEADROOM,
+	SFE_IPV6_EXCEPTION_EVENT_INVALID_PPPOE_SESSION,
+	SFE_IPV6_EXCEPTION_EVENT_INCORRECT_PPPOE_PARSING,
+	SFE_IPV6_EXCEPTION_EVENT_PPPOE_NOT_SET_IN_CME,
+	SFE_IPV6_EXCEPTION_EVENT_INGRESS_VLAN_TAG_MISMATCH,
+	SFE_IPV6_EXCEPTION_EVENT_INVALID_SRC_IFACE,
+	SFE_IPV6_EXCEPTION_EVENT_TUNIPIP6_HEADER_INCOMPLETE,
+	SFE_IPV6_EXCEPTION_EVENT_TUNIPIP6_NO_CONNECTION,
+	SFE_IPV6_EXCEPTION_EVENT_TUNIPIP6_IP_OPTIONS_OR_INITIAL_FRAGMENT,
+	SFE_IPV6_EXCEPTION_EVENT_TUNIPIP6_SMALL_TTL,
+	SFE_IPV6_EXCEPTION_EVENT_TUNIPIP6_NEEDS_FRAGMENTATION,
+	SFE_IPV6_EXCEPTION_EVENT_TUNIPIP6_SYNC_ON_FIND,
+	SFE_IPV6_EXCEPTION_EVENT_GRE_HEADER_INCOMPLETE,
+	SFE_IPV6_EXCEPTION_EVENT_GRE_NO_CONNECTION,
+	SFE_IPV6_EXCEPTION_EVENT_GRE_IP_OPTIONS_OR_INITIAL_FRAGMENT,
+	SFE_IPV6_EXCEPTION_EVENT_GRE_SMALL_TTL,
+	SFE_IPV6_EXCEPTION_EVENT_GRE_NEEDS_FRAGMENTATION,
 	SFE_IPV6_EXCEPTION_EVENT_LAST
 };
 
@@ -255,9 +332,14 @@ struct sfe_ipv6_stats {
 	u64 connection_match_hash_reorders64;
 					/* Number of IPv6 connection match hash reorders */
 	u64 connection_flushes64;		/* Number of IPv6 connection flushes */
+	u64 packets_dropped64;			/* Number of IPv4 packets dropped */
 	u64 packets_forwarded64;		/* Number of IPv6 packets forwarded */
+	u64 packets_fast_xmited64;           /* Number of IPv6 packets fast transmited */
 	u64 packets_not_forwarded64;	/* Number of IPv6 packets not forwarded */
 	u64 exception_events64[SFE_IPV6_EXCEPTION_EVENT_LAST];
+	u64 pppoe_encap_packets_forwarded64;	/* Number of IPv6 PPPoE encap packets forwarded */
+	u64 pppoe_decap_packets_forwarded64;	/* Number of IPv6 PPPoE decap packets forwarded */
+	u64 pppoe_bridge_packets_forwarded64;	/* Number of IPv6 PPPoE decap packets forwarded */
 };
 
 /*
@@ -367,5 +449,11 @@ void sfe_ipv6_flush_connection(struct sfe_ipv6 *si,
 				      struct sfe_ipv6_connection *c,
 				      sfe_sync_reason_t reason);
 
+void sfe_ipv6_sync_status(struct sfe_ipv6 *si,
+				      struct sfe_ipv6_connection *c,
+				      sfe_sync_reason_t reason);
+
 void sfe_ipv6_exit(void);
 int sfe_ipv6_init(void);
+
+#endif /* __SFE_IPV6_H */
