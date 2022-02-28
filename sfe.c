@@ -171,10 +171,12 @@ inline bool sfe_dev_is_layer_3_interface(struct net_device *dev, bool check_v4)
 		}
 
 		/*
-		 * Does it have an IPv4 address?  If it doesn't then it could be MAP-T interface,
-		 * else we can't do anything interesting here!
+		 * Does it have an IPv4 address?  If it doesn't then it could be MAP-T
+		 * (or dslite) interface, else we can't do anything interesting here!
 		 */
-		if (likely(in4_dev->ifa_list || (dev->priv_flags_ext & IFF_EXT_MAPT))) {
+		if (likely(in4_dev->ifa_list || (dev->priv_flags_ext & IFF_EXT_MAPT)
+					     || (dev->rtnl_link_ops
+					     && !strcmp(dev->rtnl_link_ops->kind, "ip6tnl")))) {
 			return true;
 		}
 		return false;
@@ -195,10 +197,6 @@ inline bool sfe_dev_is_layer_3_interface(struct net_device *dev, bool check_v4)
 	if (likely(!list_empty(&in6_dev->addr_list) || (dev->priv_flags_ext & IFF_EXT_MAPT))) {
 		return true;
 	}
-
-        if (dev->rtnl_link_ops && !strcmp(dev->rtnl_link_ops->kind, "ip6tnl")) {
-                return true;
-        }
 
 	return false;
 }
