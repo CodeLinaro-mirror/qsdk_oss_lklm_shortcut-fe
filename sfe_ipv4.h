@@ -194,6 +194,7 @@ struct sfe_ipv4_connection_match {
 	 * xmit device's feature
 	 */
 	netdev_features_t features;
+	bool sawf_valid;		/* Indicates mark has valid SAWF information */
 };
 
 /*
@@ -323,6 +324,28 @@ struct sfe_ipv4_stats {
 };
 
 /*
+ * sfe_ipv4_per_service_class_stats
+ *	Per service class stats
+ */
+struct sfe_ipv4_per_service_class_stats {
+	u64 tx_bytes;		/* Byte count */
+	u64 tx_packets;		/* Packet count */
+	seqcount_t seq;		/* seq lock for read/write protection */
+	/*
+	 * TODO : add entries to be collected later.
+	 */
+};
+
+/*
+ * sfe_ipv4_service_class_stats_db
+ *	stat entries for each service class.
+ */
+struct sfe_ipv4_service_class_stats_db {
+	struct sfe_ipv4_per_service_class_stats psc_stats[SFE_MAX_SERVICE_CLASS_ID];
+				/*  Per service class stats */
+};
+
+/*
  * Per-module structure.
  */
 struct sfe_ipv4 {
@@ -351,6 +374,8 @@ struct sfe_ipv4 {
 	int flow_cookie_enable;
 					/* Enable/disable flow cookie at runtime */
 #endif
+	struct sfe_ipv4_service_class_stats_db __percpu *stats_pcpu_psc;
+					/* Database to maintain per cpu per service class statistics */
 
 	struct sfe_ipv4_stats __percpu *stats_pcpu;
 					/* Per CPU statistics. */
@@ -394,6 +419,7 @@ typedef bool (*sfe_ipv4_debug_xml_write_method_t)(struct sfe_ipv4 *si, char *buf
 						  int *total_read, struct sfe_ipv4_debug_xml_write_state *ws);
 
 u16 sfe_ipv4_gen_ip_csum(struct iphdr *iph);
+void sfe_ipv4_service_class_stats_inc(struct sfe_ipv4 *si, uint8_t sid, uint64_t bytes);
 void sfe_ipv4_exception_stats_inc(struct sfe_ipv4 *si, enum sfe_ipv4_exception_events reason);
 bool sfe_ipv4_remove_connection(struct sfe_ipv4 *si, struct sfe_ipv4_connection *c);
 void sfe_ipv4_flush_connection(struct sfe_ipv4 *si, struct sfe_ipv4_connection *c, sfe_sync_reason_t reason);

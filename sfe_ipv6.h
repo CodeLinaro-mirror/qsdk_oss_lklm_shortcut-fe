@@ -204,9 +204,11 @@ struct sfe_ipv6_connection_match {
 	u16 l2_hdr_size;
 
 	/*
-	* xmit device's feature
+	 * xmit device's feature
 	 */
 	netdev_features_t features;
+
+	bool sawf_valid;		/* Indicates mark has valid SAWF information. */
 };
 
 /*
@@ -343,6 +345,28 @@ struct sfe_ipv6_stats {
 };
 
 /*
+ * sfe_ipv6_per_service_class_stats
+ *      Per service class stats
+ */
+struct sfe_ipv6_per_service_class_stats {
+	u64 tx_bytes;		/* Byte count */
+	u64 tx_packets;		/* Packet count */
+	seqcount_t seq;		/* seq lock for read/write protection */
+	/*
+	 * TODO : Add the entries to be maintained later.
+	 */
+};
+
+/*
+ * sfe_ipv6_service_class_stats_db
+ *      Stat entries for each service class.
+ */
+struct sfe_ipv6_service_class_stats_db{
+	struct sfe_ipv6_per_service_class_stats psc_stats[SFE_MAX_SERVICE_CLASS_ID];
+					/* Per service class stats */
+};
+
+/*
  * Per-module structure.
  */
 struct sfe_ipv6 {
@@ -368,6 +392,8 @@ struct sfe_ipv6 {
 	int flow_cookie_enable;
 					/* Enable/disable flow cookie at runtime */
 #endif
+	struct sfe_ipv6_service_class_stats_db __percpu *stats_pcpu_psc;
+					/* Database to maintain per cpu per service class statistics */
 
 	struct sfe_ipv6_stats __percpu *stats_pcpu;
 					/* Common SFE counters. */
@@ -437,7 +463,7 @@ static inline void sfe_ipv6_change_dsfield(struct ipv6hdr *iph, u8 dscp)
 }
 
 void sfe_ipv6_exception_stats_inc(struct sfe_ipv6 *si, enum sfe_ipv6_exception_events reason);
-
+void sfe_ipv6_service_class_stats_inc(struct sfe_ipv6 *si, uint8_t sid, uint64_t bytes);
 struct sfe_ipv6_connection_match *
 sfe_ipv6_find_connection_match_rcu(struct sfe_ipv6 *si, struct net_device *dev, u8 protocol,
 					struct sfe_ipv6_addr *src_ip, __be16 src_port,
