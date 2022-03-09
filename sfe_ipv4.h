@@ -23,6 +23,7 @@
 
 #define SFE_IPV4_DSCP_MASK 0x3
 #define SFE_IPV4_DSCP_SHIFT 2
+#include <linux/version.h>
 
 /*
  * Specifies the lower bound on ACK numbers carried in the TCP header
@@ -102,7 +103,11 @@ struct sfe_ipv4_connection_match {
 	__be16 match_dest_port;		/* Destination port/connection ident */
 
 	struct udp_sock *up;		/* Stores UDP sock information; valid only in decap path */
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 13, 0))
+	const struct net_protocol *proto;	/* stores protocol handler; valid only in decap path */
+#else
 	struct net_protocol *proto;	/* stores protocol handler; valid only in decap path */
+#endif
 
 	/*
 	 * Control the operations of the match.
@@ -282,6 +287,9 @@ enum sfe_ipv4_exception_events {
 	SFE_IPV4_EXCEPTION_EVENT_PPPOE_NOT_SET_IN_CME,
 	SFE_IPV4_EXCEPTION_EVENT_INGRESS_VLAN_TAG_MISMATCH,
 	SFE_IPV4_EXCEPTION_EVENT_INVALID_SRC_IFACE,
+	SFE_IPV4_EXCEPTION_EVENT_TUN6RD_NO_CONNECTION,
+	SFE_IPV4_EXCEPTION_EVENT_TUN6RD_NEEDS_FRAGMENTATION,
+	SFE_IPV4_EXCEPTION_EVENT_TUN6RD_SYNC_ON_FIND,
 	SFE_IPV4_EXCEPTION_EVENT_GRE_HEADER_INCOMPLETE,
 	SFE_IPV4_EXCEPTION_EVENT_GRE_NO_CONNECTION,
 	SFE_IPV4_EXCEPTION_EVENT_GRE_IP_OPTIONS_OR_INITIAL_FRAGMENT,

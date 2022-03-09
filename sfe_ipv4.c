@@ -46,6 +46,7 @@
 #include "sfe_ipv4_icmp.h"
 #include "sfe_pppoe.h"
 #include "sfe_ipv4_gre.h"
+#include "sfe_ipv4_tun6rd.h"
 
 static char *sfe_ipv4_exception_events_string[SFE_IPV4_EXCEPTION_EVENT_LAST] = {
 	"UDP_HEADER_INCOMPLETE",
@@ -91,6 +92,9 @@ static char *sfe_ipv4_exception_events_string[SFE_IPV4_EXCEPTION_EVENT_LAST] = {
 	"PPPOE_NOT_SET_IN_CME",
 	"INGRESS_VLAN_TAG_MISMATCH",
 	"INVALID_SOURCE_INTERFACE",
+	"TUN6RD_NO_CONNECTION",
+	"TUN6RD_NEEDS_FRAGMENTATION",
+	"TUN6RD_SYNC_ON_FIND",
 	"GRE_HEADER_INCOMPLETE",
 	"GRE_NO_CONNECTION",
 	"GRE_IP_OPTIONS_OR_INITIAL_FRAGMENT",
@@ -896,6 +900,9 @@ int sfe_ipv4_recv(struct net_device *dev, struct sk_buff *skb, struct sfe_l2_inf
 		return sfe_ipv4_recv_gre(si, skb, dev, len, iph, ihl, sync_on_find, l2_info, tun_outer);
 	}
 #endif
+	if (IPPROTO_IPV6 == protocol) {
+		return sfe_ipv4_recv_tun6rd(si, skb, dev, len, iph, ihl, sync_on_find, l2_info, true);
+	}
 
 	sfe_ipv4_exception_stats_inc(si, SFE_IPV4_EXCEPTION_EVENT_UNHANDLED_PROTOCOL);
 
@@ -1336,6 +1343,7 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 		original_cm->flow_accel = 1;
 	}
 #endif
+
 	/*
 	 * If l2_features are disabled and flow uses l2 features such as macvlan/bridge/pppoe/vlan,
 	 * bottom interfaces are expected to be disabled in the flow rule and always top interfaces
@@ -1622,6 +1630,13 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 		}
 	}
 #endif
+
+	if (IPPROTO_IPV6 == tuple->protocol) {
+		original_cm->proto = NULL;
+		rcu_read_lock();
+		reply_cm->proto = rcu_dereference(inet_protos[IPPROTO_IPV6]);
+		rcu_read_unlock();
+	}
 
 #ifdef CONFIG_NF_FLOW_COOKIE
 	reply_cm->flow_cookie = 0;
