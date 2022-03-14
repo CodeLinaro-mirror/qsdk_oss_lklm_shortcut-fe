@@ -2152,12 +2152,12 @@ static bool sfe_ipv4_debug_dev_read_connections_connection(struct sfe_ipv4 *si, 
 	}
 
 	if (original_cm_sawf_valid) {
-		bytes_read += snprintf(msg + bytes_read, CHAR_DEV_MSG_SIZE, "flow_service_class=\"%d\" flow_msduq=\"%d\" ",
+		bytes_read += snprintf(msg + bytes_read, CHAR_DEV_MSG_SIZE, "flow_service_class=\"%d\" flow_msduq = \"0x%x\" ",
 				flow_service_class, flow_msduq);
 	}
 
 	if (reply_cm_sawf_valid) {
-		bytes_read += snprintf(msg + bytes_read, CHAR_DEV_MSG_SIZE, "return_service_class=\"%d\" return_msduq=\"%d\" ",
+		bytes_read += snprintf(msg + bytes_read, CHAR_DEV_MSG_SIZE, "return_service_class=\"%d\" return_msduq = \"0x%x\" ",
 				return_service_class, return_msduq);
 	}
 
