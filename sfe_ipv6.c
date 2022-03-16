@@ -2639,13 +2639,12 @@ int sfe_ipv6_init(void)
 #else
 	result = nf_register_net_hooks(&init_net, sfe_ipv6_ops_local_out, ARRAY_SIZE(sfe_ipv6_ops_local_out));
 #endif
-#endif
 	if (result < 0) {
 		DEBUG_ERROR("can't register nf local out hook: %d\n", result);
 		goto exit6;
-	} else {
-		DEBUG_ERROR("Register nf local out hook success: %d\n", result);
 	}
+	DEBUG_INFO("Register nf local out hook success: %d\n", result);
+#endif
 
 	/*
 	 * Register our debug char device.
@@ -2677,9 +2676,8 @@ exit7:
 	DEBUG_TRACE("sfe: Unregister local out hook\n");
 	nf_unregister_net_hooks(&init_net, sfe_ipv6_ops_local_out, ARRAY_SIZE(sfe_ipv6_ops_local_out));
 #endif
-#endif
-
 exit6:
+#endif
 #ifdef CONFIG_NF_FLOW_COOKIE
 	sysfs_remove_file(si->sys_ipv6, &sfe_ipv6_flow_cookie_attr.attr);
 
