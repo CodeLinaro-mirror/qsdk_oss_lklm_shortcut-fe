@@ -112,9 +112,11 @@ struct sfe_ctx_instance_internal {
 	struct work_struct work;	/* Work to send response message back to caller*/
 
 	sfe_ipv4_msg_callback_t __rcu ipv4_stats_sync_cb;	/* Callback to call to sync ipv4 statistics */
+	sfe_ipv4_msg_callback_t __rcu ipv4_stats_sync_many_cb;	/* Callback to call to sync many ipv4 statistics */
 	void *ipv4_stats_sync_data;	/* Argument for above callback: ipv4_stats_sync_cb */
 
 	sfe_ipv6_msg_callback_t __rcu ipv6_stats_sync_cb;	/* Callback to call to sync ipv6 statistics */
+	sfe_ipv6_msg_callback_t __rcu ipv6_stats_sync_many_cb;	/* Callback to call to sync many ipv6 statistics */
 	void *ipv6_stats_sync_data;	/* Argument for above callback: ipv6_stats_sync_cb */
 
 	u32 exceptions[SFE_EXCEPTION_MAX];		/* Statistics for exception */
@@ -460,32 +462,35 @@ static void sfe_cmn_msg_init(struct sfe_cmn_msg *ncm, u16 if_num, u32 type,  u32
 }
 
 /*
- * sfe_ipv4_stats_sync_callback()
- *	Synchronize a connection's state.
+ * sfe_ipv4_stats_many_sync_callback()
+ *	Synchronize many connection's state.
  *
- * @param sis SFE statistics from SFE core engine
+ * @param SFE statistics from SFE core engine
  */
-static void sfe_ipv4_stats_sync_callback(struct sfe_connection_sync *sis)
+static void sfe_ipv4_stats_many_sync_callback(struct sfe_ipv4_msg *msg)
 {
 	struct sfe_ctx_instance_internal *sfe_ctx = &__sfe_ctx;
-	struct sfe_ipv4_msg msg;
-	struct sfe_ipv4_conn_sync *sync_msg;
 	sfe_ipv4_msg_callback_t sync_cb;
 
 	rcu_read_lock();
-	sync_cb = rcu_dereference(sfe_ctx->ipv4_stats_sync_cb);
+	sync_cb = rcu_dereference(sfe_ctx->ipv4_stats_sync_many_cb);
+	rcu_read_unlock();
 	if (!sync_cb) {
-		rcu_read_unlock();
 		sfe_incr_exceptions(SFE_EXCEPTION_NO_SYNC_CB);
 		return;
 	}
+	sync_cb(sfe_ctx->ipv4_stats_sync_data, msg);
+}
 
-	sync_msg = &msg.msg.conn_stats;
-
-	memset(&msg, 0, sizeof(msg));
-	sfe_cmn_msg_init(&msg.cm, 0, SFE_RX_CONN_STATS_SYNC_MSG,
-			sizeof(struct sfe_ipv4_conn_sync), NULL, NULL);
-
+/*
+ * sfe_ipv4_stats_convert()
+ *	Convert the internal message format to ecm format.
+ *
+ * @param sync_msg stat msg to ecm
+ * @param sis SFE statistics from SFE core engine
+ */
+void sfe_ipv4_stats_convert(struct sfe_ipv4_conn_sync *sync_msg, struct sfe_connection_sync *sis)
+{
 	/*
 	 * Fill connection specific information
 	 */
@@ -545,12 +550,42 @@ static void sfe_ipv4_stats_sync_callback(struct sfe_connection_sync *sis)
 		sync_msg->reason = SFE_RULE_SYNC_REASON_STATS;
 		break;
 	}
+	return;
+}
+
+/*
+ * sfe_ipv4_stats_one_sync_callback()
+ *	Synchronize a connection's state.
+ *
+ * @param sis SFE statistics from SFE core engine
+ */
+static void sfe_ipv4_stats_one_sync_callback(struct sfe_connection_sync *sis)
+{
+	struct sfe_ctx_instance_internal *sfe_ctx = &__sfe_ctx;
+	struct sfe_ipv4_msg msg;
+	struct sfe_ipv4_conn_sync *sync_msg;
+	sfe_ipv4_msg_callback_t sync_cb;
+
+	rcu_read_lock();
+	sync_cb = rcu_dereference(sfe_ctx->ipv4_stats_sync_cb);
+	rcu_read_unlock();
+	if (!sync_cb) {
+		sfe_incr_exceptions(SFE_EXCEPTION_NO_SYNC_CB);
+		return;
+	}
+
+	sync_msg = &msg.msg.conn_stats;
+
+	memset(&msg, 0, sizeof(msg));
+	sfe_cmn_msg_init(&msg.cm, 0, SFE_RX_CONN_STATS_SYNC_MSG,
+			sizeof(struct sfe_ipv4_conn_sync), NULL, NULL);
+
+	sfe_ipv4_stats_convert(sync_msg, sis);
 
 	/*
 	 * SFE sync calling is excuted in a timer, so we can redirect it to ECM directly.
 	 */
 	sync_cb(sfe_ctx->ipv4_stats_sync_data, &msg);
-	rcu_read_unlock();
 }
 
 /*
@@ -769,6 +804,26 @@ sfe_tx_status_t sfe_destroy_ipv4_rule_msg(struct sfe_ctx_instance_internal *sfe_
 }
 
 /*
+ * sfe_sync_ipv4_stats_many_msg()
+ * 	sync con stats msg from the ecm
+ *
+ * @param sfe_ctx SFE context
+ * @param msg The IPv4 message
+ *
+ * @return sfe_tx_status_t The status of the Tx operation
+ */
+sfe_tx_status_t sfe_sync_ipv4_stats_many_msg(struct sfe_ctx_instance_internal *sfe_ctx, struct sfe_ipv4_msg *msg)
+{
+	struct sfe_ipv4_conn_sync_many_msg *nicsm;
+	nicsm = &(msg->msg.conn_stats_many);
+
+	if (sfe_ipv4_sync_invoke(nicsm->index)) {
+		return SFE_TX_SUCCESS;
+	}
+	return SFE_TX_FAILURE;
+}
+
+/*
  * sfe_ipv4_tx()
  * 	Transmit an IPv4 message to the sfe
  *
@@ -784,6 +839,8 @@ sfe_tx_status_t sfe_ipv4_tx(struct sfe_ctx_instance *sfe_ctx, struct sfe_ipv4_ms
 		return sfe_create_ipv4_rule_msg(SFE_CTX_TO_PRIVATE(sfe_ctx), msg);
 	case SFE_TX_DESTROY_RULE_MSG:
 		return sfe_destroy_ipv4_rule_msg(SFE_CTX_TO_PRIVATE(sfe_ctx), msg);
+	case SFE_TX_CONN_STATS_SYNC_MANY_MSG:
+		return sfe_sync_ipv4_stats_many_msg(SFE_CTX_TO_PRIVATE(sfe_ctx),msg);
 	default:
 		sfe_incr_exceptions(SFE_EXCEPTION_IPV4_MSG_UNKNOW);
 		return SFE_TX_FAILURE_NOT_ENABLED;
@@ -821,7 +878,8 @@ EXPORT_SYMBOL(sfe_ipv4_max_conn_count);
  *
  * @return struct sfe_ctx_instance * The SFE context
  */
-struct sfe_ctx_instance *sfe_ipv4_notify_register(sfe_ipv4_msg_callback_t cb, void *app_data)
+struct sfe_ctx_instance *sfe_ipv4_notify_register(sfe_ipv4_msg_callback_t one_rule_cb,
+		sfe_ipv4_msg_callback_t many_rules_cb,void *app_data)
 {
 	struct sfe_ctx_instance_internal *sfe_ctx = &__sfe_ctx;
 
@@ -829,11 +887,16 @@ struct sfe_ctx_instance *sfe_ipv4_notify_register(sfe_ipv4_msg_callback_t cb, vo
 	/*
 	 * Hook the shortcut sync callback.
 	 */
-	if (cb && !sfe_ctx->ipv4_stats_sync_cb) {
-		sfe_ipv4_register_sync_rule_callback(sfe_ipv4_stats_sync_callback);
+	if (one_rule_cb && !sfe_ctx->ipv4_stats_sync_cb) {
+		sfe_ipv4_register_sync_rule_callback(sfe_ipv4_stats_one_sync_callback);
 	}
+	rcu_assign_pointer(sfe_ctx->ipv4_stats_sync_cb, one_rule_cb);
 
-	rcu_assign_pointer(sfe_ctx->ipv4_stats_sync_cb, cb);
+	if (many_rules_cb && !sfe_ctx->ipv4_stats_sync_many_cb) {
+		sfe_ipv4_register_many_sync_callback(sfe_ipv4_stats_many_sync_callback);
+	}
+	rcu_assign_pointer(sfe_ctx->ipv4_stats_sync_many_cb, many_rules_cb);
+
 	sfe_ctx->ipv4_stats_sync_data = app_data;
 
 	spin_unlock_bh(&sfe_ctx->lock);
@@ -844,54 +907,68 @@ EXPORT_SYMBOL(sfe_ipv4_notify_register);
 
 /*
  * sfe_ipv4_notify_unregister()
- * 	Un-Register a notifier callback for IPv4 messages from SFE
+ * 	Un-Register the notifier callback for IPv4 messages from SFE
  */
 void sfe_ipv4_notify_unregister(void)
 {
 	struct sfe_ctx_instance_internal *sfe_ctx = &__sfe_ctx;
 
 	spin_lock_bh(&sfe_ctx->lock);
+
 	/*
-	 * Unregister our sync callback.
+	 * Unregister our single rule msg sync callback.
 	 */
 	if (sfe_ctx->ipv4_stats_sync_cb) {
 		sfe_ipv4_register_sync_rule_callback(NULL);
 		rcu_assign_pointer(sfe_ctx->ipv4_stats_sync_cb, NULL);
-		sfe_ctx->ipv4_stats_sync_data = NULL;
 	}
+
+	/*
+	 * Unregister our many rule msg sync callback.
+	 */
+	if (sfe_ctx->ipv4_stats_sync_many_cb) {
+		sfe_ipv4_register_many_sync_callback(NULL);
+		rcu_assign_pointer(sfe_ctx->ipv4_stats_sync_many_cb, NULL);
+	}
+
+	sfe_ctx->ipv4_stats_sync_data = NULL;
+
 	spin_unlock_bh(&sfe_ctx->lock);
 
 	sfe_clean_response_msg_by_type(sfe_ctx, SFE_MSG_TYPE_IPV4);
-
 	return;
 }
 EXPORT_SYMBOL(sfe_ipv4_notify_unregister);
 
 /*
- * sfe_ipv6_stats_sync_callback()
- *	Synchronize a connection's state.
+ * sfe_ipv6_many_stats_sync_callback()
+ *	Synchronize many connection's state.
  */
-static void sfe_ipv6_stats_sync_callback(struct sfe_connection_sync *sis)
+static void sfe_ipv6_many_stats_sync_callback(struct sfe_ipv6_msg *msg)
 {
 	struct sfe_ctx_instance_internal *sfe_ctx = &__sfe_ctx;
-	struct sfe_ipv6_msg msg;
-	struct sfe_ipv6_conn_sync *sync_msg;
 	sfe_ipv6_msg_callback_t sync_cb;
 
 	rcu_read_lock();
-	sync_cb = rcu_dereference(sfe_ctx->ipv6_stats_sync_cb);
+	sync_cb = rcu_dereference(sfe_ctx->ipv6_stats_sync_many_cb);
+	rcu_read_unlock();
 	if (!sync_cb) {
-		rcu_read_unlock();
 		sfe_incr_exceptions(SFE_EXCEPTION_NO_SYNC_CB);
 		return;
 	}
 
-	sync_msg = &msg.msg.conn_stats;
+	sync_cb(sfe_ctx->ipv6_stats_sync_data, msg);
+}
 
-	memset(&msg, 0, sizeof(msg));
-	sfe_cmn_msg_init(&msg.cm, 0, SFE_RX_CONN_STATS_SYNC_MSG,
-			sizeof(struct sfe_ipv6_conn_sync), NULL, NULL);
-
+/*
+ * sfe_ipv6_stats_convert()
+ *	Convert the internal message format to ecm format.
+ *
+ * @param sync_msg stat msg to ecm
+ * @param sis SFE statistics from SFE core engine
+ */
+void sfe_ipv6_stats_convert(struct sfe_ipv6_conn_sync *sync_msg, struct sfe_connection_sync *sis)
+{
 	/*
 	 * Fill connection specific information
 	 */
@@ -948,11 +1025,40 @@ static void sfe_ipv6_stats_sync_callback(struct sfe_connection_sync *sis)
 		break;
 	}
 
+	return;
+}
+
+/*
+ * sfe_ipv6_stats_sync_callback()
+ *	Synchronize a connection's state.
+ */
+static void sfe_ipv6_stats_sync_callback(struct sfe_connection_sync *sis)
+{
+	struct sfe_ctx_instance_internal *sfe_ctx = &__sfe_ctx;
+	struct sfe_ipv6_msg msg;
+	struct sfe_ipv6_conn_sync *sync_msg;
+	sfe_ipv6_msg_callback_t sync_cb;
+
+	rcu_read_lock();
+	sync_cb = rcu_dereference(sfe_ctx->ipv6_stats_sync_cb);
+	rcu_read_unlock();
+	if (!sync_cb) {
+		sfe_incr_exceptions(SFE_EXCEPTION_NO_SYNC_CB);
+		return;
+	}
+
+	sync_msg = &msg.msg.conn_stats;
+
+	memset(&msg, 0, sizeof(msg));
+	sfe_cmn_msg_init(&msg.cm, 0, SFE_RX_CONN_STATS_SYNC_MSG,
+			sizeof(struct sfe_ipv6_conn_sync), NULL, NULL);
+
+	sfe_ipv6_stats_convert(sync_msg, sis);
+
 	/*
 	 * SFE sync calling is excuted in a timer, so we can redirect it to ECM directly.
 	 */
 	sync_cb(sfe_ctx->ipv6_stats_sync_data, &msg);
-	rcu_read_unlock();
 }
 
 /*
@@ -1124,6 +1230,26 @@ sfe_tx_status_t sfe_destroy_ipv6_rule_msg(struct sfe_ctx_instance_internal *sfe_
 }
 
 /*
+ * sfe_sync_ipv6_stats_many_msg()
+ * 	sync con stats msg from the ecm
+ *
+ * @param sfe_ctx SFE context
+ * @param msg The IPv6 message
+ *
+ * @return sfe_tx_status_t The status of the Tx operation
+ */
+sfe_tx_status_t sfe_sync_ipv6_stats_many_msg(struct sfe_ctx_instance_internal *sfe_ctx, struct sfe_ipv6_msg *msg)
+{
+	struct sfe_ipv6_conn_sync_many_msg *nicsm;
+	nicsm = &(msg->msg.conn_stats_many);
+
+	if (sfe_ipv6_sync_invoke(nicsm->index)) {
+		return SFE_TX_SUCCESS;
+	}
+	return SFE_TX_FAILURE;
+}
+
+/*
  * sfe_ipv6_tx()
  * 	Transmit an IPv6 message to the sfe
  *
@@ -1139,6 +1265,8 @@ sfe_tx_status_t sfe_ipv6_tx(struct sfe_ctx_instance *sfe_ctx, struct sfe_ipv6_ms
 		return sfe_create_ipv6_rule_msg(SFE_CTX_TO_PRIVATE(sfe_ctx), msg);
 	case SFE_TX_DESTROY_RULE_MSG:
 		return sfe_destroy_ipv6_rule_msg(SFE_CTX_TO_PRIVATE(sfe_ctx), msg);
+	case SFE_TX_CONN_STATS_SYNC_MANY_MSG:
+		return sfe_sync_ipv6_stats_many_msg(SFE_CTX_TO_PRIVATE(sfe_ctx), msg);
 	default:
 		sfe_incr_exceptions(SFE_EXCEPTION_IPV6_MSG_UNKNOW);
 		return SFE_TX_FAILURE_NOT_ENABLED;
@@ -1171,12 +1299,14 @@ EXPORT_SYMBOL(sfe_ipv6_max_conn_count);
  * sfe_ipv6_notify_register()
  * 	Register a notifier callback for IPv6 messages from SFE
  *
- * @param cb The callback pointer
+ * @param one_rule_cb The callback pointer of one rule sync
+ * @param many_rule_cb The callback pointer of many rule sync
  * @param app_data The application context for this message
  *
  * @return struct sfe_ctx_instance * The SFE context
  */
-struct sfe_ctx_instance *sfe_ipv6_notify_register(sfe_ipv6_msg_callback_t cb, void *app_data)
+struct sfe_ctx_instance *sfe_ipv6_notify_register(sfe_ipv6_msg_callback_t one_rule_cb,
+		sfe_ipv6_msg_callback_t many_rule_cb, void *app_data)
 {
 	struct sfe_ctx_instance_internal *sfe_ctx = &__sfe_ctx;
 
@@ -1184,11 +1314,16 @@ struct sfe_ctx_instance *sfe_ipv6_notify_register(sfe_ipv6_msg_callback_t cb, vo
 	/*
 	 * Hook the shortcut sync callback.
 	 */
-	if (cb && !sfe_ctx->ipv6_stats_sync_cb) {
+	if (one_rule_cb && !sfe_ctx->ipv6_stats_sync_cb) {
 		sfe_ipv6_register_sync_rule_callback(sfe_ipv6_stats_sync_callback);
 	}
+	rcu_assign_pointer(sfe_ctx->ipv6_stats_sync_cb, one_rule_cb);
 
-	rcu_assign_pointer(sfe_ctx->ipv6_stats_sync_cb, cb);
+	if (many_rule_cb && !sfe_ctx->ipv6_stats_sync_many_cb) {
+		sfe_ipv6_register_many_sync_callback(sfe_ipv6_many_stats_sync_callback);
+	}
+	rcu_assign_pointer(sfe_ctx->ipv6_stats_sync_many_cb, many_rule_cb);
+
 	sfe_ctx->ipv6_stats_sync_data = app_data;
 
 	spin_unlock_bh(&sfe_ctx->lock);
@@ -1212,12 +1347,17 @@ void sfe_ipv6_notify_unregister(void)
 	if (sfe_ctx->ipv6_stats_sync_cb) {
 		sfe_ipv6_register_sync_rule_callback(NULL);
 		rcu_assign_pointer(sfe_ctx->ipv6_stats_sync_cb, NULL);
-		sfe_ctx->ipv6_stats_sync_data = NULL;
 	}
+
+	if (sfe_ctx->ipv6_stats_sync_many_cb) {
+		sfe_ipv6_register_many_sync_callback(NULL);
+		rcu_assign_pointer(sfe_ctx->ipv6_stats_sync_many_cb, NULL);
+	}
+
+	sfe_ctx->ipv6_stats_sync_data = NULL;
 	spin_unlock_bh(&sfe_ctx->lock);
 
 	sfe_clean_response_msg_by_type(sfe_ctx, SFE_MSG_TYPE_IPV6);
-
 	return;
 }
 EXPORT_SYMBOL(sfe_ipv6_notify_unregister);

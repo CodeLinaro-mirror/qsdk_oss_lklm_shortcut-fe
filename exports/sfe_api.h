@@ -156,15 +156,16 @@ enum sfe_cmn_response {
  * IPv4 bridge/route rule messages.
  */
 enum sfe_message_types {
-	SFE_TX_CREATE_RULE_MSG,		/**< IPv4/6 create rule message. */
-	SFE_TX_DESTROY_RULE_MSG,	/**< IPv4/6 destroy rule message. */
-	SFE_RX_CONN_STATS_SYNC_MSG,	/**< IPv4/6 connection statistics Synchronize message. */
+	SFE_TX_CREATE_RULE_MSG,		/**< IPv4/IPv6 create rule message. */
+	SFE_TX_DESTROY_RULE_MSG,	/**< IPv4/IPv6 destroy rule message. */
+	SFE_RX_CONN_STATS_SYNC_MSG,	/**< IPv4/IPv6 connection statistics synchronize message. */
+	SFE_TX_CONN_STATS_SYNC_MANY_MSG,/**< IPv4/IPv6 connection statistics synchronize many message. */
 	SFE_TUN6RD_ADD_UPDATE_PEER,	/**< Add/update peer for 6RD tunnel. */
-	SFE_MAX_MSG_TYPES,		/**< IPv4/6 message max type number. */
+	SFE_MAX_MSG_TYPES,		/**< IPv4/IPv6 message max type number. */
 };
 
 /**
- * Common message structure
+ * Common message structure.
  */
 struct sfe_cmn_msg {
 	u16 version;			/**< Version ID for the main message format. */
@@ -178,7 +179,7 @@ struct sfe_cmn_msg {
 };
 
 /**
- * Common 5 tuple structure
+ * Common 5-tuple structure.
  */
 struct sfe_ipv4_5tuple {
 	__be32 flow_ip;		/**< Flow IP address. */
@@ -288,8 +289,8 @@ struct sfe_acceleration_direction_rule {
  *	Service class rule information in both directions.
  */
 struct sfe_service_class_rule {
-	uint32_t flow_mark;		/**< Service class information in flow direction */
-	uint32_t return_mark;		/**< Service class information in return direction */
+	uint32_t flow_mark;		/**< Service class information in flow direction. */
+	uint32_t return_mark;		/**< Service class information in return direction. */
 };
 
 /**
@@ -369,6 +370,24 @@ struct sfe_ipv4_conn_sync {
 };
 
 /**
+ * Information for a multiple IPv4 connection statistics synchronization message.
+ */
+struct sfe_ipv4_conn_sync_many_msg {
+	/*
+	 * Request
+	 */
+	uint16_t index;		/**< Request connection statistics from the index. */
+	uint16_t size;		/**< Buffer size of this message. */
+
+	/*
+	 * Response
+	 */
+	uint16_t next;		/**< Firmware response for the next connection to be requested. */
+	uint16_t count;		/**< Number of synchronized connections included in this message. */
+	struct sfe_ipv4_conn_sync conn_sync[];	/**< Array for the statistics. */
+};
+
+/**
  * Message structure to send/receive IPv4 bridge/route commands
  */
 struct sfe_ipv4_msg {
@@ -376,7 +395,9 @@ struct sfe_ipv4_msg {
 	union {
 		struct sfe_ipv4_rule_create_msg rule_create;	/**< Rule create message. */
 		struct sfe_ipv4_rule_destroy_msg rule_destroy;	/**< Rule destroy message. */
-		struct sfe_ipv4_conn_sync conn_stats;		/**< Connection statistics sync message. */
+		struct sfe_ipv4_conn_sync conn_stats;		/**< Connection statistics synchronization message. */
+		struct sfe_ipv4_conn_sync_many_msg conn_stats_many;
+					/**< Many connections' statistics synchronization message. */
 	} msg;							/**< IPv4 message. */
 };
 
@@ -502,6 +523,24 @@ struct sfe_ipv6_conn_sync {
 };
 
 /**
+ * Information for a multiple IPv6 connection statistics synchronization message.
+ */
+struct sfe_ipv6_conn_sync_many_msg {
+	/*
+	 * Request:
+	 */
+	uint16_t index;		/**< Request connection statistics from the index. */
+	uint16_t size;		/**< Buffer size of this message. */
+
+	/*
+	 * Response:
+	 */
+	uint16_t next;		/**< Firmware response for the next connection to be requested. */
+	uint16_t count;		/**< Number of synchronized connections included in this message. */
+	struct sfe_ipv6_conn_sync conn_sync[];	/**< Array for the statistics. */
+};
+
+/**
  * Message structure to send/receive IPv6 bridge/route commands.
  */
 struct sfe_ipv6_msg {
@@ -512,7 +551,9 @@ struct sfe_ipv6_msg {
 		struct sfe_ipv6_rule_destroy_msg rule_destroy;
 					/**< Rule destroy message. */
 		struct sfe_ipv6_conn_sync conn_stats;
-					/**< Statistics sync message. */
+					/**< Statistics synchronization message. */
+		struct sfe_ipv6_conn_sync_many_msg conn_stats_many;
+					/**< Many Connections' statistics synchronizaion message. */
 	} msg;				/**< IPv6 message. */
 };
 
@@ -607,13 +648,15 @@ extern sfe_tx_status_t sfe_ipv4_tx(struct sfe_ctx_instance *sfe_ctx, struct sfe_
 /**
  * Registers a notifier callback for IPv4 messages from the SFE.
  *
- * @param	cb		The callback pointer.
+ * @param	one_rule_cb		The callback pointer for one rule.
+ * @param	many_rules_cb		The callback pointer for many rules.
  * @param	app_data	The application context for this message.
  *
  * @return
  * The SFE context (#sfe_ctx_instance).
  */
-extern struct sfe_ctx_instance *sfe_ipv4_notify_register(sfe_ipv4_msg_callback_t cb, void *app_data);
+extern struct sfe_ctx_instance *sfe_ipv4_notify_register(sfe_ipv4_msg_callback_t one_rule_cb,
+		sfe_ipv4_msg_callback_t many_rules_cb,void *app_data);
 
 /**
  * Unregisters a notifier callback for IPv4 messages from the SFE.
@@ -659,13 +702,14 @@ extern sfe_tx_status_t sfe_ipv6_tx(struct sfe_ctx_instance *sfe_ctx, struct sfe_
 /**
  * Registers a notifier callback for IPv6 messages from the SFE.
  *
- * @param	cb		The callback pointer.
- * @param	app_data	The application context for this message.
+ * @param	one_rule_cb		The callback pointer for one rule.
+ * @param	many_rules_cb		The callback pointer for many rules.
  *
  * @return
  * The SFE context (#sfe_ctx_instance).
  */
-extern struct sfe_ctx_instance *sfe_ipv6_notify_register(sfe_ipv6_msg_callback_t cb, void *app_data);
+extern struct sfe_ctx_instance *sfe_ipv6_notify_register(sfe_ipv6_msg_callback_t one_rule_cb,
+		sfe_ipv6_msg_callback_t many_rules_cb,void *app_data);
 
 /**
  * Unregisters a notifier callback for IPv6 messages from the SFE.

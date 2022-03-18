@@ -99,6 +99,8 @@ static char *sfe_ipv4_exception_events_string[SFE_IPV4_EXCEPTION_EVENT_LAST] = {
 };
 
 static struct sfe_ipv4 __si;
+struct sfe_ipv4_msg *sfe_ipv4_sync_many_msg;
+uint32_t sfe_ipv4_sync_max_number;
 
 /*
  * sfe_ipv4_gen_ip_csum()
@@ -693,8 +695,8 @@ void sfe_ipv4_sync_status(struct sfe_ipv4 *si,
 
 	rcu_read_lock();
 	sync_rule_callback = rcu_dereference(si->sync_rule_callback);
+	rcu_read_unlock();
 	if (!sync_rule_callback) {
-		rcu_read_unlock();
 		return;
 	}
 
@@ -704,8 +706,6 @@ void sfe_ipv4_sync_status(struct sfe_ipv4 *si,
 	now_jiffies = get_jiffies_64();
 	sfe_ipv4_gen_sync_connection(si, c, &sis, reason, now_jiffies);
 	sync_rule_callback(&sis);
-
-	rcu_read_unlock();
 }
 
 /*
@@ -1834,6 +1834,30 @@ void sfe_ipv4_destroy_rule(struct sfe_ipv4_rule_destroy_msg *msg)
 }
 
 /*
+ * sfe_ipv4_sync_invoke()
+ *	Schedule many sync stats.
+ */
+bool sfe_ipv4_sync_invoke(uint16_t index)
+{
+	struct sfe_ipv4 *si = &__si;
+	DEBUG_INFO("Request for a sync with index[%d]\n", index);
+	return schedule_delayed_work_on(si->work_cpu, &(si->sync_dwork), 0);
+}
+
+/*
+ * sfe_ipv4_register_sync_rule_callback()
+ *	Register a callback for many rule synchronization.
+ */
+void sfe_ipv4_register_many_sync_callback(sfe_ipv4_many_sync_callback_t cb)
+{
+	struct sfe_ipv4 *si = &__si;
+
+	spin_lock_bh(&si->lock);
+	rcu_assign_pointer(si->many_sync_callback, cb);
+	spin_unlock_bh(&si->lock);
+}
+
+/*
  * sfe_ipv4_register_sync_rule_callback()
  *	Register a callback for rule synchronization.
  */
@@ -1845,7 +1869,6 @@ void sfe_ipv4_register_sync_rule_callback(sfe_sync_rule_callback_t sync_rule_cal
 	rcu_assign_pointer(si->sync_rule_callback, sync_rule_callback);
 	spin_unlock_bh(&si->lock);
 }
-
 /*
  * sfe_ipv4_get_debug_dev()
  */
@@ -1918,17 +1941,18 @@ static void sfe_ipv4_periodic_sync(struct work_struct *work)
 {
 	struct sfe_ipv4 *si = container_of((struct delayed_work *)work, struct sfe_ipv4, sync_dwork);
 	u64 now_jiffies;
-	int quota;
-	sfe_sync_rule_callback_t sync_rule_callback;
+	int quota,count;
+	sfe_ipv4_many_sync_callback_t sync_rule_callback;
 	struct sfe_ipv4_connection *c;
+	struct sfe_ipv4_conn_sync *conn_sync;
 
 	now_jiffies = get_jiffies_64();
 
 	rcu_read_lock();
-	sync_rule_callback = rcu_dereference(si->sync_rule_callback);
+	sync_rule_callback = rcu_dereference(si->many_sync_callback);
+	rcu_read_unlock();
 	if (!sync_rule_callback) {
-		rcu_read_unlock();
-		goto done;
+		return;
 	}
 
 	spin_lock_bh(&si->lock);
@@ -1943,9 +1967,10 @@ static void sfe_ipv4_periodic_sync(struct work_struct *work)
 	}
 
 	/*
-	 * Get an estimate of the number of connections to parse in this sync.
+	 * Get the max number of connections to be put in this sync msg.
 	 */
-	quota = (si->num_connections + 63) / 64;
+	quota = sfe_ipv4_sync_max_number;
+	conn_sync = sfe_ipv4_sync_many_msg->msg.conn_stats_many.conn_sync;
 
 	/*
 	 * Walk the "all connection" list and sync the connection state.
@@ -1967,37 +1992,37 @@ static void sfe_ipv4_periodic_sync(struct work_struct *work)
 			continue;
 		}
 
-		quota--;
-
 		sfe_ipv4_gen_sync_connection(si, c, &sis, SFE_SYNC_REASON_STATS, now_jiffies);
+		sfe_ipv4_stats_convert(conn_sync, &sis);
 
-		si->wc_next = c->all_connections_next;
-
-		/*
-		 * We don't want to be holding the lock when we sync!
-		 */
-		spin_unlock_bh(&si->lock);
-		sync_rule_callback(&sis);
-		spin_lock_bh(&si->lock);
-
-		/*
-		 * c must be set and used in the same lock/unlock window;
-		 * because c could be removed when we don't hold the lock,
-		 * so delay grabbing until after the callback and relock.
-		 */
-		c = si->wc_next;
+		quota--;
+		conn_sync++;
+		c = c->all_connections_next;
 	}
 
 	/*
 	 * At the end of the sync, put the wc_next to the connection we left.
 	 */
 	si->wc_next = c;
-
 	spin_unlock_bh(&si->lock);
-	rcu_read_unlock();
 
-done:
-	schedule_delayed_work_on(si->work_cpu, (struct delayed_work *)work, ((HZ + 99) / 100));
+	count = sfe_ipv4_sync_max_number - quota;
+	/*
+	 * Tell ecm sync round done if at the end of all connection
+	 * otherwise tell the number in the msg.
+	 */
+	if (c == NULL) {
+		DEBUG_INFO("Synced all connections.\n");
+		sfe_ipv4_sync_many_msg->msg.conn_stats_many.next = 0;
+	} else {
+		DEBUG_INFO("Some connections left.\n");
+		sfe_ipv4_sync_many_msg->msg.conn_stats_many.next = count;
+	}
+	DEBUG_INFO("Sync %d connections\n", count);
+	sfe_ipv4_sync_many_msg->msg.conn_stats_many.count = count;
+	sfe_ipv4_sync_many_msg->cm.response = SFE_CMN_RESPONSE_ACK;
+
+	sync_rule_callback(sfe_ipv4_sync_many_msg);
 }
 
 #define CHAR_DEV_MSG_SIZE 768
@@ -2007,7 +2032,7 @@ done:
  *	Generate part of the XML output.
  */
 static bool sfe_ipv4_debug_dev_read_start(struct sfe_ipv4 *si, char *buffer, char *msg, size_t *length,
-					  int *total_read, struct sfe_ipv4_debug_xml_write_state *ws)
+		int *total_read, struct sfe_ipv4_debug_xml_write_state *ws)
 {
 	int bytes_read;
 
@@ -2720,13 +2745,29 @@ int sfe_ipv4_init(void)
 	si->work_cpu = WORK_CPU_UNBOUND;
 
 	/*
-	 * Create a work to handle periodic statistics.
+	 * Create a work to handle pull message from ecm.
 	 */
 	INIT_DELAYED_WORK(&(si->sync_dwork), sfe_ipv4_periodic_sync);
-	schedule_delayed_work_on(si->work_cpu, &(si->sync_dwork), ((HZ + 99) / 100));
+	/*
+	 * Allocate a message for stats sync many
+	 */
+	sfe_ipv4_sync_many_msg = kzalloc(PAGE_SIZE, GFP_KERNEL);
+	if(!sfe_ipv4_sync_many_msg) {
+		goto exit8;
+	}
+
+	sfe_ipv4_msg_init(sfe_ipv4_sync_many_msg, SFE_SPECIAL_INTERFACE_IPV4,
+			SFE_TX_CONN_STATS_SYNC_MANY_MSG,
+			sizeof(struct sfe_ipv4_conn_sync_many_msg),
+			NULL,
+			NULL);
+	sfe_ipv4_sync_max_number = (PAGE_SIZE - sizeof(struct sfe_ipv4_msg)) / sizeof(struct sfe_ipv4_conn_sync);
 
 	spin_lock_init(&si->lock);
 	return 0;
+
+exit8:
+	unregister_chrdev(si->debug_dev, "sfe_ipv4");
 
 exit7:
 #ifdef SFE_PROCESS_LOCAL_OUT

@@ -359,6 +359,7 @@ struct sfe_ipv4 {
 	unsigned int work_cpu;		/* The core to run stats sync on */
 
 	sfe_sync_rule_callback_t __rcu sync_rule_callback;
+	sfe_ipv4_many_sync_callback_t __rcu many_sync_callback;
 					/* Callback function registered by a connection manager for stats syncing */
 	struct sfe_ipv4_connection *conn_hash[SFE_IPV4_CONNECTION_HASH_SIZE];
 					/* Connection hash table */

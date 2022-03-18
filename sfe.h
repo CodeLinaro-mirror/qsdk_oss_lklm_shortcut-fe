@@ -162,6 +162,8 @@ bool sfe_fast_xmit_check(struct sk_buff *skb, netdev_features_t features);
  * from unregistering.
  */
 typedef void (*sfe_sync_rule_callback_t)(struct sfe_connection_sync *);
+typedef void (*sfe_ipv4_many_sync_callback_t)(struct sfe_ipv4_msg *msg);
+typedef void (*sfe_ipv6_many_sync_callback_t)(struct sfe_ipv6_msg *msg);
 
 /*
  * IPv4 APIs used by connection manager
@@ -174,6 +176,9 @@ void sfe_ipv4_register_sync_rule_callback(sfe_sync_rule_callback_t callback);
 void sfe_ipv4_update_rule(struct sfe_ipv4_rule_create_msg *msg);
 bool sfe_dev_has_hw_csum(struct net_device *dev);
 
+bool sfe_ipv4_sync_invoke(uint16_t index);
+void sfe_ipv4_register_many_sync_callback(sfe_ipv4_many_sync_callback_t cb);
+void sfe_ipv4_stats_convert(struct sfe_ipv4_conn_sync *sync_msg, struct sfe_connection_sync *sis);
 #ifdef SFE_SUPPORT_IPV6
 /*
  * IPv6 APIs used by connection manager
@@ -184,6 +189,9 @@ void sfe_ipv6_destroy_rule(struct sfe_ipv6_rule_destroy_msg *msg);
 void sfe_ipv6_destroy_all_rules_for_dev(struct net_device *dev);
 void sfe_ipv6_register_sync_rule_callback(sfe_sync_rule_callback_t callback);
 void sfe_ipv6_update_rule(struct sfe_ipv6_rule_create_msg *msg);
+bool sfe_ipv6_sync_invoke(uint16_t index);
+void sfe_ipv6_register_many_sync_callback(sfe_ipv6_many_sync_callback_t cb);
+void sfe_ipv6_stats_convert(struct sfe_ipv6_conn_sync *sync_msg, struct sfe_connection_sync *sis);
 #else
 static inline int sfe_ipv6_recv(struct net_device *dev, struct sk_buff *skb, struct sfe_l2_info *l2_info, bool tun_outer)
 {
@@ -215,6 +223,20 @@ static inline void sfe_ipv6_update_rule(struct sfe_ipv6_rule_create_msg *msg)
 	return;
 }
 
+static inline bool sfe_ipv6_sync_invoke(uint16_t index)
+{
+	return false;
+}
+
+static inline void sfe_ipv6_register_many_sync_callback(sfe_ipv6_many_sync_callback_t cb)
+{
+	return;
+}
+
+static inline void sfe_ipv6_stats_convert(struct sfe_ipv6_conn_sync *sync_msg, struct sfe_connection_sync *sis)
+{
+	return;
+}
 #endif
 
 /*
