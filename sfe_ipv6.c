@@ -31,6 +31,7 @@
 #include <linux/netfilter.h>
 #include <linux/inetdevice.h>
 #include <linux/netfilter_ipv6.h>
+#include <linux/seqlock.h>
 #include <net/protocol.h>
 #include <net/addrconf.h>
 #include <net/gre.h>
@@ -107,6 +108,8 @@ static char *sfe_ipv6_exception_events_string[SFE_IPV6_EXCEPTION_EVENT_LAST] = {
 };
 
 static struct sfe_ipv6 __si6;
+struct sfe_ipv6_msg *sfe_ipv6_sync_many_msg;
+uint32_t sfe_ipv6_sync_max_number;
 
 /*
  * sfe_ipv6_get_debug_dev()
@@ -709,9 +712,8 @@ void sfe_ipv6_sync_status(struct sfe_ipv6 *si,
 
 	rcu_read_lock();
 	sync_rule_callback = rcu_dereference(si->sync_rule_callback);
-
+	rcu_read_unlock();
 	if (unlikely(!sync_rule_callback)) {
-		rcu_read_unlock();
 		return;
 	}
 
@@ -721,8 +723,6 @@ void sfe_ipv6_sync_status(struct sfe_ipv6 *si,
 	now_jiffies = get_jiffies_64();
 	sfe_ipv6_gen_sync_connection(si, c, &sis, reason, now_jiffies);
 	sync_rule_callback(&sis);
-
-	rcu_read_unlock();
 }
 
 /*
@@ -750,7 +750,65 @@ void sfe_ipv6_flush_connection(struct sfe_ipv6 *si,
 	call_rcu(&c->rcu, sfe_ipv6_free_sfe_ipv6_connection_rcu);
 }
 
- /*
+/*
+ * sfe_ipv4_service_class_stats_pcpu_get()
+ *	Gets one CPU's service class statistics.
+ */
+static inline bool sfe_ipv6_service_class_stats_pcpu_get(struct sfe_ipv6_per_service_class_stats *sc_stats, uint64_t *bytes, uint64_t *packets)
+{
+	uint32_t retries = 0;
+	uint32_t seq;
+	uint64_t bytes_tmp, packets_tmp;
+
+	do {
+		seq = read_seqcount_begin(&sc_stats->seq);
+		bytes_tmp = sc_stats->tx_bytes;
+		packets_tmp = sc_stats->tx_packets;
+	} while (read_seqcount_retry(&sc_stats->seq, seq) && ++retries < SFE_SERVICE_CLASS_STATS_MAX_RETRY);
+
+	*bytes += bytes_tmp;
+	*packets += packets_tmp;
+
+	return retries < SFE_SERVICE_CLASS_STATS_MAX_RETRY;
+}
+
+/*
+ * sfe_ipv4_service_class_stats_get()
+ *	Copy the ipv4 statistics for the given service class.
+ */
+bool sfe_ipv6_service_class_stats_get(uint8_t sid, uint64_t *bytes, uint64_t *packets)
+{
+	struct sfe_ipv6 *si = &__si6;
+	uint32_t cpu = 0;
+
+	for_each_possible_cpu(cpu) {
+		struct sfe_ipv6_service_class_stats_db *stats_db = per_cpu_ptr(si->stats_pcpu_psc, cpu);
+		struct sfe_ipv6_per_service_class_stats *sc_stats = &stats_db->psc_stats[sid];
+
+		if (!sfe_ipv6_service_class_stats_pcpu_get(sc_stats, bytes, packets)) {
+			return false;
+		}
+	}
+
+	return true;
+}
+
+/*
+ * sfe_ipv6_service_class_stats_inc()
+ *	Increment per cpu per service class stats.
+ */
+void sfe_ipv6_service_class_stats_inc(struct sfe_ipv6 *si, uint8_t sid, uint64_t bytes)
+{
+	struct sfe_ipv6_service_class_stats_db *sc_stats_db = this_cpu_ptr(si->stats_pcpu_psc);
+	struct sfe_ipv6_per_service_class_stats *sc_stats = &sc_stats_db->psc_stats[sid];
+
+	write_seqcount_begin(&sc_stats->seq);
+	sc_stats->tx_bytes += bytes;
+	sc_stats->tx_packets++;
+	write_seqcount_end(&sc_stats->seq);
+}
+
+/*
  * sfe_ipv6_exception_stats_inc()
  *	Increment exception stats.
  */
@@ -1063,6 +1121,8 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 
 	s32 flow_interface_num = msg->conn_rule.flow_top_interface_num;
 	s32 return_interface_num = msg->conn_rule.return_top_interface_num;
+	u32 flow_sawf_tag;
+	u32 return_sawf_tag;
 
 	if (msg->rule_flags & SFE_RULE_CREATE_FLAG_USE_FLOW_BOTTOM_INTERFACE) {
 		flow_interface_num = msg->conn_rule.flow_interface_num;
@@ -1228,6 +1288,16 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 		original_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_FAST_XMIT_DEV_ADMISSION;
 	}
 
+	/*
+	 * Mark SAWF metadata if the sawf tag is valid.
+	 */
+	original_cm->sawf_valid = false;
+	flow_sawf_tag = SFE_GET_SAWF_TAG(msg->sawf_rule.flow_mark);
+	if (likely(SFE_SAWF_TAG_IS_VALID(flow_sawf_tag))) {
+		original_cm->mark = msg->sawf_rule.flow_mark;
+		original_cm->sawf_valid = true;
+		original_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_MARK;
+	}
 
 	/*
 	 * Add VLAN rule to original_cm
@@ -1410,6 +1480,17 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 
 	if ((IPPROTO_GRE == tuple->protocol) && !sfe_ipv6_is_local_ip(si, (uint8_t *)reply_cm->match_dest_ip)) {
 		reply_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_PASSTHROUGH;
+	}
+
+	/*
+	 * Mark return SAWF metadata if the sawf tag is valid.
+	 */
+	reply_cm->sawf_valid = false;
+	return_sawf_tag = SFE_GET_SAWF_TAG(msg->sawf_rule.return_mark);
+	if (likely(SFE_SAWF_TAG_IS_VALID(return_sawf_tag))) {
+		reply_cm->mark = msg->sawf_rule.return_mark;
+		reply_cm->sawf_valid = true;
+		reply_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_MARK;
 	}
 
 	/*
@@ -1735,6 +1816,16 @@ void sfe_ipv6_destroy_rule(struct sfe_ipv6_rule_destroy_msg *msg)
 }
 
 /*
+ * sfe_ipv6_sync_invoke()
+ *	Schedule many sync stats.
+ */
+bool sfe_ipv6_sync_invoke(uint16_t index)
+{
+	struct sfe_ipv6 *si = &__si6;
+	return schedule_delayed_work_on(si->work_cpu, &(si->sync_dwork), 0);
+}
+
+/*
  * sfe_ipv6_register_sync_rule_callback()
  *	Register a callback for rule synchronization.
  */
@@ -1744,6 +1835,19 @@ void sfe_ipv6_register_sync_rule_callback(sfe_sync_rule_callback_t sync_rule_cal
 
 	spin_lock_bh(&si->lock);
 	rcu_assign_pointer(si->sync_rule_callback, sync_rule_callback);
+	spin_unlock_bh(&si->lock);
+}
+
+/*
+ * sfe_ipv6_register_sync_rule_callback()
+ *	Register a callback for rule synchronization.
+ */
+void sfe_ipv6_register_many_sync_callback(sfe_ipv6_many_sync_callback_t cb)
+{
+	struct sfe_ipv6 *si = &__si6;
+
+	spin_lock_bh(&si->lock);
+	rcu_assign_pointer(si->many_sync_callback, cb);
 	spin_unlock_bh(&si->lock);
 }
 
@@ -1814,16 +1918,17 @@ static void sfe_ipv6_periodic_sync(struct work_struct *work)
 	struct sfe_ipv6 *si = container_of((struct delayed_work *)work, struct sfe_ipv6, sync_dwork);
 	u64 now_jiffies;
 	int quota;
-	sfe_sync_rule_callback_t sync_rule_callback;
+	sfe_ipv6_many_sync_callback_t sync_rule_callback;
 	struct sfe_ipv6_connection *c;
+	struct sfe_ipv6_conn_sync *conn_sync;
 
 	now_jiffies = get_jiffies_64();
 
 	rcu_read_lock();
-	sync_rule_callback = rcu_dereference(si->sync_rule_callback);
+	sync_rule_callback = rcu_dereference(si->many_sync_callback);
+	rcu_read_unlock();
 	if (!sync_rule_callback) {
-		rcu_read_unlock();
-		goto done;
+		return;
 	}
 
 	spin_lock_bh(&si->lock);
@@ -1836,10 +1941,12 @@ static void sfe_ipv6_periodic_sync(struct work_struct *work)
 	if (unlikely(!c)) {
 		c = si->all_connections_head;
 	}
+
 	/*
-	 * Get an estimate of the number of connections to parse in this sync.
+	 * Get the max number of connections to be put in this sync msg.
 	 */
-	quota = (si->num_connections + 63) / 64;
+	quota = sfe_ipv6_sync_max_number;
+	conn_sync = sfe_ipv6_sync_many_msg->msg.conn_stats_many.conn_sync;
 
 	/*
 	 * Walk the "all connection" list and sync the connection state.
@@ -1861,37 +1968,36 @@ static void sfe_ipv6_periodic_sync(struct work_struct *work)
 			continue;
 		}
 
-		quota--;
-
 		/*
 		 * Sync the connection state.
 		 */
 		sfe_ipv6_gen_sync_connection(si, c, &sis, SFE_SYNC_REASON_STATS, now_jiffies);
+		sfe_ipv6_stats_convert(conn_sync, &sis);
 
-		si->wc_next = c->all_connections_next;
-
-		spin_unlock_bh(&si->lock);
-		sync_rule_callback(&sis);
-		spin_lock_bh(&si->lock);
-
-		/*
-		 * c must be set and used in the same lock/unlock window;
-		 * because c could be removed when we don't hold the lock,
-		 * so delay grabbing until after the callback and relock.
-		 */
-		c = si->wc_next;
+		quota--;
+		conn_sync++;
+		c = c->all_connections_next;
 	}
 
 	/*
 	 * At the end of loop, put wc_next to the connection we left
 	 */
 	si->wc_next = c;
-
 	spin_unlock_bh(&si->lock);
-	rcu_read_unlock();
 
-done:
-	schedule_delayed_work_on(si->work_cpu, (struct delayed_work *)work, ((HZ + 99) / 100));
+	if (c == NULL) {
+		DEBUG_INFO("Synced all connections\n");
+		sfe_ipv6_sync_many_msg->msg.conn_stats_many.next = 0;
+	} else {
+		DEBUG_INFO("Some connections left\n");
+		sfe_ipv6_sync_many_msg->msg.conn_stats_many.next = sfe_ipv6_sync_max_number - quota;
+	}
+	DEBUG_INFO("Synced [%d] connections\n", (sfe_ipv6_sync_max_number - quota));
+
+	sfe_ipv6_sync_many_msg->msg.conn_stats_many.count = sfe_ipv6_sync_max_number - quota;
+	sfe_ipv6_sync_many_msg->cm.response = SFE_CMN_RESPONSE_ACK;
+
+	sync_rule_callback(sfe_ipv6_sync_many_msg);
 }
 
 /*
@@ -1966,6 +2072,9 @@ static bool sfe_ipv6_debug_dev_read_connections_connection(struct sfe_ipv6 *si, 
 	u64 dest_rx_bytes;
 	u64 last_sync_jiffies;
 	u32 src_mark, dest_mark,  src_priority, dest_priority, src_dscp, dest_dscp;
+	bool original_cm_sawf_valid, reply_cm_sawf_valid;
+	u32 flow_service_class, return_service_class;
+	u32 flow_msduq, return_msduq;
 	u32 packet, byte, original_cm_flags;
 	u16 pppoe_session_id;
 	u8 pppoe_remote_mac[ETH_ALEN];
@@ -2026,6 +2135,13 @@ static bool sfe_ipv6_debug_dev_read_connections_connection(struct sfe_ipv6 *si, 
 	ether_addr_copy(pppoe_remote_mac, original_cm->pppoe_remote_mac);
 	dest_mark = reply_cm->mark;
 	reply_fast_xmit = reply_cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_FAST_XMIT;
+	original_cm_sawf_valid = original_cm->sawf_valid;
+	reply_cm_sawf_valid = reply_cm->sawf_valid;
+	flow_service_class = SFE_GET_SAWF_SERVICE_CLASS(original_cm->mark);
+	flow_msduq = SFE_GET_SAWF_MSDUQ(original_cm->mark);
+	return_service_class = SFE_GET_SAWF_SERVICE_CLASS(reply_cm->mark);
+	return_msduq = SFE_GET_SAWF_MSDUQ(reply_cm->mark);
+
 #ifdef CONFIG_NF_FLOW_COOKIE
 	src_flow_cookie = original_cm->flow_cookie;
 	dst_flow_cookie = reply_cm->flow_cookie;
@@ -2075,6 +2191,16 @@ static bool sfe_ipv6_debug_dev_read_connections_connection(struct sfe_ipv6 *si, 
 	if (original_cm_flags &= (SFE_IPV6_CONNECTION_MATCH_FLAG_PPPOE_DECAP | SFE_IPV6_CONNECTION_MATCH_FLAG_PPPOE_ENCAP)) {
 		bytes_read += snprintf(msg + bytes_read, CHAR_DEV_MSG_SIZE, "pppoe_session_id=\"%u\" pppoe_server_MAC=\"%pM\" ",
 			pppoe_session_id, pppoe_remote_mac);
+	}
+
+	if (original_cm_sawf_valid) {
+		bytes_read += snprintf(msg + bytes_read, CHAR_DEV_MSG_SIZE, "flow_service_class=\"%d\" flow_msduq= \"0x%x\" ",
+			flow_service_class, flow_msduq);
+	}
+
+	if (reply_cm_sawf_valid) {
+		bytes_read += snprintf(msg + bytes_read, CHAR_DEV_MSG_SIZE, "return_service_class=\"%d\" return_msduq= \"0x%x\" ",
+			return_service_class, return_msduq);
 	}
 
 	bytes_read += snprintf(msg + bytes_read, CHAR_DEV_MSG_SIZE, ")/>\n");
@@ -2533,12 +2659,22 @@ int sfe_ipv6_init(void)
 	}
 
 	/*
+	 * Allocate per cpu per service class memory.
+	 */
+	si->stats_pcpu_psc = alloc_percpu_gfp(struct sfe_ipv6_service_class_stats_db,
+						GFP_KERNEL | __GFP_ZERO);
+	if (!si->stats_pcpu_psc) {
+		DEBUG_ERROR("failed to allocate per cpu per service clas stats memory\n");
+		goto exit1;
+	}
+
+	/*
 	 * Create sys/sfe_ipv6
 	 */
 	si->sys_ipv6 = kobject_create_and_add("sfe_ipv6", NULL);
 	if (!si->sys_ipv6) {
 		DEBUG_ERROR("failed to register sfe_ipv6\n");
-		goto exit1;
+		goto exit2;
 	}
 
 	/*
@@ -2547,20 +2683,20 @@ int sfe_ipv6_init(void)
 	result = sysfs_create_file(si->sys_ipv6, &sfe_ipv6_debug_dev_attr.attr);
 	if (result) {
 		DEBUG_ERROR("failed to register debug dev file: %d\n", result);
-		goto exit2;
+		goto exit3;
 	}
 
 	result = sysfs_create_file(si->sys_ipv6, &sfe_ipv6_cpu_attr.attr);
 	if (result) {
 		DEBUG_ERROR("failed to register debug dev file: %d\n", result);
-		goto exit3;
+		goto exit4;
 	}
 
 #ifdef CONFIG_NF_FLOW_COOKIE
 	result = sysfs_create_file(si->sys_ipv6, &sfe_ipv6_flow_cookie_attr.attr);
 	if (result) {
 		DEBUG_ERROR("failed to register flow cookie enable file: %d\n", result);
-		goto exit4;
+		goto exit5;
 	}
 #endif /* CONFIG_NF_FLOW_COOKIE */
 
@@ -2573,7 +2709,7 @@ int sfe_ipv6_init(void)
 #endif
 	if (result < 0) {
 		DEBUG_ERROR("can't register nf local out hook: %d\n", result);
-		goto exit5;
+		goto exit6;
 	} else {
 		DEBUG_ERROR("Register nf local out hook success: %d\n", result);
 	}
@@ -2584,7 +2720,7 @@ int sfe_ipv6_init(void)
 	result = register_chrdev(0, "sfe_ipv6", &sfe_ipv6_debug_dev_fops);
 	if (result < 0) {
 		DEBUG_ERROR("Failed to register chrdev: %d\n", result);
-		goto exit6;
+		goto exit7;
 	}
 
 	si->debug_dev = result;
@@ -2594,12 +2730,26 @@ int sfe_ipv6_init(void)
 	 * Create work to handle periodic statistics.
 	 */
 	INIT_DELAYED_WORK(&(si->sync_dwork), sfe_ipv6_periodic_sync);
-	schedule_delayed_work_on(si->work_cpu, &(si->sync_dwork), ((HZ + 99) / 100));
-	spin_lock_init(&si->lock);
 
+	sfe_ipv6_sync_many_msg = kzalloc(PAGE_SIZE, GFP_KERNEL);
+	if(!sfe_ipv6_sync_many_msg) {
+		goto exit8;
+	}
+
+	sfe_ipv6_msg_init(sfe_ipv6_sync_many_msg, SFE_SPECIAL_INTERFACE_IPV6,
+			SFE_TX_CONN_STATS_SYNC_MANY_MSG,
+			sizeof(struct sfe_ipv4_conn_sync_many_msg),
+			NULL,
+			NULL);
+	sfe_ipv6_sync_max_number = (PAGE_SIZE - sizeof(struct sfe_ipv6_msg)) / sizeof(struct sfe_ipv6_conn_sync);
+
+	spin_lock_init(&si->lock);
 	return 0;
 
-exit6:
+exit8:
+	unregister_chrdev(si->debug_dev, "sfe_ipv6");
+
+exit7:
 #ifdef SFE_PROCESS_LOCAL_OUT
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 13, 0))
 	DEBUG_TRACE("sfe: Unregister local out hook\n");
@@ -2610,19 +2760,22 @@ exit6:
 #endif
 #endif
 
-exit5:
+exit6:
 #ifdef CONFIG_NF_FLOW_COOKIE
 	sysfs_remove_file(si->sys_ipv6, &sfe_ipv6_flow_cookie_attr.attr);
 
-exit4:
+exit5:
 #endif /* CONFIG_NF_FLOW_COOKIE */
 	sysfs_remove_file(si->sys_ipv6, &sfe_ipv6_cpu_attr.attr);
 
-exit3:
+exit4:
 	sysfs_remove_file(si->sys_ipv6, &sfe_ipv6_debug_dev_attr.attr);
 
-exit2:
+exit3:
 	kobject_put(si->sys_ipv6);
+
+exit2:
+	free_percpu(si->stats_pcpu_psc);
 
 exit1:
 	free_percpu(si->stats_pcpu);
@@ -2650,6 +2803,7 @@ void sfe_ipv6_exit(void)
 	unregister_chrdev(si->debug_dev, "sfe_ipv6");
 
 	free_percpu(si->stats_pcpu);
+	free_percpu(si->stats_pcpu_psc);
 
 #ifdef SFE_PROCESS_LOCAL_OUT
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 13, 0))
