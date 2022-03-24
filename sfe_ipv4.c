@@ -1155,7 +1155,7 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	/*
 	 * Allocate the various connection tracking objects.
 	 */
-	c = (struct sfe_ipv4_connection *)kmalloc(sizeof(struct sfe_ipv4_connection), GFP_ATOMIC);
+	c = (struct sfe_ipv4_connection *)kzalloc(sizeof(struct sfe_ipv4_connection), GFP_ATOMIC);
 	if (unlikely(!c)) {
 		DEBUG_WARN("%px: memory allocation of connection entry failed\n", msg);
 		this_cpu_inc(si->stats_pcpu->connection_create_failures64);
@@ -1164,7 +1164,7 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 		return -ENOMEM;
 	}
 
-	original_cm = (struct sfe_ipv4_connection_match *)kmalloc(sizeof(struct sfe_ipv4_connection_match), GFP_ATOMIC);
+	original_cm = (struct sfe_ipv4_connection_match *)kzalloc(sizeof(struct sfe_ipv4_connection_match), GFP_ATOMIC);
 	if (unlikely(!original_cm)) {
 		DEBUG_WARN("%px: memory allocation of connection match entry failed\n", msg);
 		this_cpu_inc(si->stats_pcpu->connection_create_failures64);
@@ -1174,7 +1174,7 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 		return -ENOMEM;
 	}
 
-	reply_cm = (struct sfe_ipv4_connection_match *)kmalloc(sizeof(struct sfe_ipv4_connection_match), GFP_ATOMIC);
+	reply_cm = (struct sfe_ipv4_connection_match *)kzalloc(sizeof(struct sfe_ipv4_connection_match), GFP_ATOMIC);
 	if (unlikely(!reply_cm)) {
 		DEBUG_WARN("%px: memory allocation of connection match entry failed\n", msg);
 		this_cpu_inc(si->stats_pcpu->connection_create_failures64);
@@ -1255,18 +1255,11 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 		original_cm->xlate_src_port = 0;
 	}
 
-	atomic_set(&original_cm->rx_packet_count, 0);
-	original_cm->rx_packet_count64 = 0;
-	atomic_set(&original_cm->rx_byte_count, 0);
-	original_cm->rx_byte_count64 = 0;
-
 	original_cm->xmit_dev = dest_dev;
 	original_cm->xmit_dev_mtu = msg->conn_rule.return_mtu;
 
 	original_cm->connection = c;
 	original_cm->counter_match = reply_cm;
-	original_cm->l2_hdr_size = 0;
-	original_cm->flags = 0;
 
 	/*
 	 * UDP Socket is valid only in decap direction.
@@ -1355,12 +1348,9 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 		}
 	}
 
-	reply_cm->l2_hdr_size = 0;
 	if (msg->rule_flags & SFE_RULE_CREATE_FLAG_SRC_INTERFACE_CHECK) {
 		original_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_SRC_INTERFACE_CHECK;
 	}
-
-	reply_cm->flags = 0;
 
 	/*
 	 * Adding PPPoE parameters to original and reply entries based on the direction where
@@ -1470,11 +1460,6 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 		reply_cm->match_src_port = 0;
 		reply_cm->xlate_src_port = 0;
 	}
-
-	atomic_set(&reply_cm->rx_packet_count, 0);
-	reply_cm->rx_packet_count64 = 0;
-	atomic_set(&reply_cm->rx_byte_count, 0);
-	reply_cm->rx_byte_count64 = 0;
 
 	reply_cm->xmit_dev = src_dev;
 	reply_cm->xmit_dev_mtu = msg->conn_rule.flow_mtu;
