@@ -190,6 +190,8 @@ struct sfe_ipv4_connection_match {
 	u16 pppoe_session_id;
 	u8 pppoe_remote_mac[ETH_ALEN];
 
+	struct net_device *top_interface_dev;	/* Used by tun6rd to store decap VLAN netdevice.*/
+
 	/*
 	 * Size of all needed L2 headers
 	 */

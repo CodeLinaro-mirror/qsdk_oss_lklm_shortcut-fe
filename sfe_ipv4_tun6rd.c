@@ -28,6 +28,7 @@
 #include "sfe.h"
 #include "sfe_flow_cookie.h"
 #include "sfe_ipv4.h"
+#include "sfe_vlan.h"
 
 /*
  * sfe_ipv4_recv_tun6rd()
@@ -95,6 +96,28 @@ int sfe_ipv4_recv_tun6rd(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_de
 #else
 		struct net_protocol *ipprot = cm->proto;
 #endif
+
+		/*
+		 * Do we expect an ingress VLAN tag for this flow?
+		 * Note: We will only have ingress tag check in decap direction.
+		 * Here, no modification is needed, we only check tag match between
+		 * vlan hdr stored in cm and l2_info.
+		 */
+		if (unlikely(!sfe_vlan_validate_ingress_tag(skb, cm->ingress_vlan_hdr_cnt, cm->ingress_vlan_hdr, l2_info))) {
+			rcu_read_unlock();
+			sfe_ipv4_exception_stats_inc(si, SFE_IPV4_EXCEPTION_EVENT_INGRESS_VLAN_TAG_MISMATCH);
+			DEBUG_TRACE("VLAN tag mismatch. skb=%px\n"
+				"cm: %u [0]=%x/%x [1]=%x/%x\n"
+				"l2_info+: %u [0]=%x/%x [1]=%x/%x\n", skb,
+				cm->ingress_vlan_hdr_cnt,
+				htons(cm->ingress_vlan_hdr[0].tpid), cm->ingress_vlan_hdr[0].tci,
+				htons(cm->ingress_vlan_hdr[1].tpid), cm->ingress_vlan_hdr[1].tci,
+				l2_info->vlan_hdr_cnt,
+				htons(l2_info->vlan_hdr[0].tpid), l2_info->vlan_hdr[0].tci,
+				htons(l2_info->vlan_hdr[1].tpid), l2_info->vlan_hdr[1].tci);
+			return 0;
+		}
+		skb_reset_network_header(skb);
 		skb_pull(skb, ihl);
 		skb_reset_transport_header(skb);
 
@@ -105,10 +128,15 @@ int sfe_ipv4_recv_tun6rd(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_de
 		 */
 		atomic_inc(&cm->rx_packet_count);
 		atomic_add(len, &cm->rx_byte_count);
-		ipprot->handler(skb);
 		rcu_read_unlock();
 		this_cpu_inc(si->stats_pcpu->packets_forwarded64);
 		DEBUG_TRACE("%px: %s decap done \n", skb, __func__);
+
+		/*
+		 * Update top interface for tunnel searching.
+		 */
+		skb->dev = cm->top_interface_dev;
+		ipprot->handler(skb);
 		return 1;
 
 	}
@@ -142,15 +170,32 @@ int sfe_ipv4_recv_tun6rd(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_de
 	skb->dev = cm->xmit_dev;
 
 	/*
+	 * Check to see if we need to add VLAN tags
+	 */
+	if (unlikely(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_INSERT_EGRESS_VLAN_TAG)) {
+
+		/*
+		 * Check if skb has enough headroom to write L2 headers
+		 */
+		if (unlikely(skb_headroom(skb) < cm->l2_hdr_size)) {
+			rcu_read_unlock();
+			DEBUG_WARN("%px: Not enough headroom: %u\n", skb, skb_headroom(skb));
+			sfe_ipv4_exception_stats_inc(si, SFE_IPV4_EXCEPTION_EVENT_NO_HEADROOM);
+			return 0;
+		}
+		sfe_vlan_add_tag(skb, cm->egress_vlan_hdr_cnt, cm->egress_vlan_hdr);
+	}
+
+	/*
 	 * Check to see if we need to write a header.
 	 */
 	if (likely(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_WRITE_L2_HDR)) {
 		if (unlikely(!(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_WRITE_FAST_ETH_HDR))) {
-			dev_hard_header(skb, cm->xmit_dev, ETH_P_IP,
+			dev_hard_header(skb, cm->xmit_dev, ntohs(skb->protocol),
 					cm->xmit_dest_mac, cm->xmit_src_mac, len);
 		} else {
 			struct ethhdr *eth = (struct ethhdr *)__skb_push(skb, ETH_HLEN);
-			eth->h_proto = htons(ETH_P_IP);
+			eth->h_proto = skb->protocol;
 			ether_addr_copy((u8 *)eth->h_dest, (u8 *)cm->xmit_dest_mac);
 			ether_addr_copy((u8 *)eth->h_source, (u8 *)cm->xmit_src_mac);
 		}
