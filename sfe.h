@@ -127,18 +127,6 @@ struct sfe_connection_sync {
 };
 
 /*
- * connection mark structure
- */
-struct sfe_connection_mark {
-	int protocol;
-	sfe_ip_addr_t src_ip;
-	sfe_ip_addr_t dest_ip;
-	__be16 src_port;
-	__be16 dest_port;
-	u32 mark;
-};
-
-/*
  * Expose the hook for the receive processing.
  */
 extern int (*athrs_fast_nat_recv)(struct sk_buff *skb);

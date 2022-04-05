@@ -165,6 +165,18 @@ enum sfe_message_types {
 };
 
 /**
+ * Connection mark structure.
+ */
+struct sfe_connection_mark {
+	int protocol;		/**< Protocol number. */
+	__be32 src_ip[4];	/**< Source IP address. */
+	__be32 dest_ip[4];	/**< Destination IP address. */
+	__be16 src_port;	/**< Source port number. */
+	__be16 dest_port;	/**< Destination port number. */
+	u32 mark;		/**< Mark value to be updated. */
+};
+
+/**
  * Common message structure.
  */
 struct sfe_cmn_msg {
@@ -766,6 +778,26 @@ void sfe_tun6rd_msg_init(struct sfe_tun6rd_msg *ncm, u16 if_num, u32 type,  u32 
  * True if enabled; false if disabled.
  */
 bool sfe_is_l2_feature_enabled(void);
+
+/**
+ * Updates mark values of an IPv4 connection.
+ *
+ * @param	mark		The mark object.
+ *
+ * @return
+ * None.
+ */
+void sfe_ipv4_mark_rule_update(struct sfe_connection_mark *mark);
+
+/**
+ * Updates mark values of an IPv6 connection.
+ *
+ * @param	mark		The mark object.
+ *
+ * @return
+ * None.
+ */
+void sfe_ipv6_mark_rule_update(struct sfe_connection_mark *mark);
 
 /**
  * @}

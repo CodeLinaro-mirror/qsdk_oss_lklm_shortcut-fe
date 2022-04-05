@@ -1083,6 +1083,33 @@ void sfe_ipv6_update_rule(struct sfe_ipv6_rule_create_msg *msg)
 }
 
 /*
+ * sfe_ipv6_mark_rule_update()
+ *	Updates the mark values of match entries.
+ */
+void sfe_ipv6_mark_rule_update(struct sfe_connection_mark *mark)
+{
+	struct sfe_ipv6_connection *c;
+	struct sfe_ipv6 *si = &__si6;
+
+	spin_lock_bh(&si->lock);
+	c = sfe_ipv6_find_connection(si, mark->protocol,
+				     (struct sfe_ipv6_addr *)mark->src_ip,
+				     mark->src_port,
+				     (struct sfe_ipv6_addr *)mark->dest_ip,
+				     mark->dest_port);
+	if (!c) {
+		spin_unlock_bh(&si->lock);
+		DEBUG_WARN("%px: connection not found for mark update\n", mark);
+		return;
+	}
+	c->original_match ->mark = mark->mark;
+	c->reply_match->mark = mark->mark;
+	spin_unlock_bh(&si->lock);
+	DEBUG_TRACE("%px: connection mark updated with %d\n", mark, mark->mark);
+}
+EXPORT_SYMBOL(sfe_ipv6_mark_rule_update);
+
+/*
  * sfe_ipv6_xmit_eth_type_check
  *	Checking if MAC header has to be written.
  */
