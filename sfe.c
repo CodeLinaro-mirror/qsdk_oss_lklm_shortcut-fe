@@ -175,12 +175,14 @@ inline bool sfe_dev_is_layer_3_interface(struct net_device *dev, bool check_v4)
 		}
 
 		/*
-		 * Does it have an IPv4 address?  If it doesn't then it could be MAP-T
-		 * (or dslite) interface, else we can't do anything interesting here!
+		 * Does it have an IPv4 address?  If it doesn't then it
+		 * could be map-t, dslite or tun6rd interface, otherwise we
+		 * can't do anything interesting here!
 		 */
 		if (likely(in4_dev->ifa_list || (dev->priv_flags_ext & IFF_EXT_MAPT)
 					     || (dev->rtnl_link_ops
-					     && !strcmp(dev->rtnl_link_ops->kind, "ip6tnl")))) {
+					     && (!strcmp(dev->rtnl_link_ops->kind, "ip6tnl")
+					     || !strcmp(dev->rtnl_link_ops->kind, "sit"))))) {
 			return true;
 		}
 		return false;
@@ -682,6 +684,9 @@ sfe_tx_status_t sfe_create_ipv4_rule_msg(struct sfe_ctx_instance_internal *sfe_c
 		break;
 
 	case IPPROTO_GRE:
+		break;
+
+	case IPPROTO_IPV6:
 		break;
 
 	default:
