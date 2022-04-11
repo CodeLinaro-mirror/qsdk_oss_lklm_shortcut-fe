@@ -1543,6 +1543,7 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 #else
 		if (!refcount_inc_not_zero(&sk->sk_refcnt)) {
 #endif
+			this_cpu_inc(si->stats_pcpu->connection_create_failures64);
 			spin_unlock_bh(&si->lock);
 			kfree(reply_cm);
 			kfree(original_cm);
@@ -1605,6 +1606,8 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 		rcu_read_unlock();
 
 		if (unlikely(!reply_cm->proto)) {
+			this_cpu_inc(si->stats_pcpu->connection_create_failures64);
+			spin_unlock_bh(&si->lock);
 			kfree(reply_cm);
 			kfree(original_cm);
 			kfree(c);
