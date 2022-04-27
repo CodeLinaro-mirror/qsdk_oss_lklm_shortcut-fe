@@ -736,9 +736,16 @@ int sfe_ipv6_recv_tcp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 	 * We do per packet condition check before we could fast xmit the
 	 * packet.
 	 */
-	if (likely(fast_xmit && dev_fast_xmit(skb, xmit_dev, features))) {
-		this_cpu_inc(si->stats_pcpu->packets_fast_xmited64);
-		return 1;
+	if (likely(fast_xmit)) {
+		if (likely(!skb_is_gso(skb))) {
+			if (likely(dev_fast_xmit(skb, xmit_dev, features))) {
+				this_cpu_inc(si->stats_pcpu->packets_fast_xmited64);
+				return 1;
+			}
+		} else {
+			cm->flags &= ~SFE_IPV6_CONNECTION_MATCH_FLAG_FAST_XMIT;
+			DEBUG_TRACE("%px: fast xmit disabled for xmit dev %s", skb, xmit_dev->name);
+		}
 	}
 
 	/*
