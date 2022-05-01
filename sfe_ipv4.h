@@ -289,6 +289,7 @@ enum sfe_ipv4_exception_events {
 	SFE_IPV4_EXCEPTION_EVENT_INVALID_PPPOE_SESSION,
 	SFE_IPV4_EXCEPTION_EVENT_INCORRECT_PPPOE_PARSING,
 	SFE_IPV4_EXCEPTION_EVENT_PPPOE_NOT_SET_IN_CME,
+	SFE_IPV4_EXCEPTION_EVENT_PPPOE_BR_NOT_IN_CME,
 	SFE_IPV4_EXCEPTION_EVENT_INGRESS_VLAN_TAG_MISMATCH,
 	SFE_IPV4_EXCEPTION_EVENT_INVALID_SRC_IFACE,
 	SFE_IPV4_EXCEPTION_EVENT_TUN6RD_NO_CONNECTION,
@@ -333,6 +334,7 @@ struct sfe_ipv4_stats {
 	u64 pppoe_encap_packets_forwarded64;	/* Number of IPv4 PPPoE encap packets forwarded */
 	u64 pppoe_decap_packets_forwarded64;	/* Number of IPv4 PPPoE decap packets forwarded */
 	u64 pppoe_bridge_packets_forwarded64;	/* Number of IPv4 PPPoE bridge packets forwarded */
+	u64 pppoe_bridge_packets_3tuple_forwarded64;    /* Number of IPv4 PPPoE bridge packets forwarded based on 3-tuple info */
 };
 
 /*

@@ -45,6 +45,8 @@
 #include "sfe_ipv4_tcp.h"
 #include "sfe_ipv4_icmp.h"
 #include "sfe_pppoe.h"
+#include "sfe_pppoe_mgr.h"
+#include "sfe_ipv4_pppoe_br.h"
 #include "sfe_ipv4_gre.h"
 #include "sfe_ipv4_tun6rd.h"
 
@@ -90,6 +92,7 @@ static char *sfe_ipv4_exception_events_string[SFE_IPV4_EXCEPTION_EVENT_LAST] = {
 	"INVALID_PPPOE_SESSION",
 	"INCORRECT_PPPOE_PARSING",
 	"PPPOE_NOT_SET_IN_CME",
+	"PPPOE_BR_NOT_IN_CME",
 	"INGRESS_VLAN_TAG_MISMATCH",
 	"INVALID_SOURCE_INTERFACE",
 	"TUN6RD_NO_CONNECTION",
@@ -325,6 +328,7 @@ static void sfe_ipv4_update_summary_stats(struct sfe_ipv4 *si,  struct sfe_ipv4_
 		stats->pppoe_encap_packets_forwarded64 += s->pppoe_encap_packets_forwarded64;
 		stats->pppoe_decap_packets_forwarded64 += s->pppoe_decap_packets_forwarded64;
 		stats->pppoe_bridge_packets_forwarded64 += s->pppoe_bridge_packets_forwarded64;
+		stats->pppoe_bridge_packets_3tuple_forwarded64 += s->pppoe_bridge_packets_3tuple_forwarded64;
 	}
 
 }
@@ -425,7 +429,7 @@ static inline void sfe_ipv4_remove_connection_match(struct sfe_ipv4 *si, struct 
 static inline unsigned int sfe_ipv4_get_connection_hash(u8 protocol, __be32 src_ip, __be16 src_port,
 							__be32 dest_ip, __be16 dest_port)
 {
-	u32 hash = ntohl(src_ip ^ dest_ip) ^ protocol ^ ntohs(src_port ^ dest_port);
+	u32 hash = ntohl(src_ip ^ dest_ip) ^ protocol ^ ntohs(src_port) ^ dest_port;
 	return ((hash >> SFE_IPV4_CONNECTION_HASH_SHIFT) ^ hash) & SFE_IPV4_CONNECTION_HASH_MASK;
 }
 
@@ -887,6 +891,17 @@ int sfe_ipv4_recv(struct net_device *dev, struct sk_buff *skb, struct sfe_l2_inf
 		}
 
 		sync_on_find = true;
+	}
+
+	/*
+	 * Handle PPPoE bridge packets using 3-tuple acceleration if SFE_PPPOE_BR_ACCEL_MODE_EN_3T
+	 */
+	if (unlikely(sfe_l2_parse_flag_check(l2_info, SFE_L2_PARSE_FLAGS_PPPOE_INGRESS)) &&
+	    unlikely(sfe_pppoe_get_br_accel_mode() == SFE_PPPOE_BR_ACCEL_MODE_EN_3T)) {
+		struct ethhdr *eth = eth_hdr(skb);
+		if (!sfe_pppoe_mgr_find_session(l2_info->pppoe_session_id, eth->h_source)) {
+			return sfe_ipv4_recv_pppoe_bridge(si, skb, dev, len, iph, ihl, l2_info);
+		}
 	}
 
 	protocol = iph->protocol;
@@ -1416,14 +1431,14 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 		ether_addr_copy(original_cm->pppoe_remote_mac, msg->pppoe_rule.flow_pppoe_remote_mac);
 
 		reply_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_PPPOE_ENCAP;
-		reply_cm->l2_hdr_size += SFE_PPPOE_SESSION_HEADER_SIZE;
+		reply_cm->l2_hdr_size += PPPOE_SES_HLEN;
 		reply_cm->pppoe_session_id = msg->pppoe_rule.flow_pppoe_session_id;
 		ether_addr_copy(reply_cm->pppoe_remote_mac, msg->pppoe_rule.flow_pppoe_remote_mac);
 	}
 
 	if (msg->valid_flags & SFE_RULE_CREATE_PPPOE_ENCAP_VALID) {
 		original_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_PPPOE_ENCAP;
-		original_cm->l2_hdr_size += SFE_PPPOE_SESSION_HEADER_SIZE;
+		original_cm->l2_hdr_size += PPPOE_SES_HLEN;
 		original_cm->pppoe_session_id = msg->pppoe_rule.return_pppoe_session_id;
 		ether_addr_copy(original_cm->pppoe_remote_mac, msg->pppoe_rule.return_pppoe_remote_mac);
 
@@ -1782,6 +1797,16 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 			reply_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_NO_SEQ_CHECK;
 		}
 		break;
+
+	case IPPROTO_RAW:
+		/*
+		 * Set src_port to 0 to avoid hash collision in connection match lookups.
+		 */
+		original_cm->match_src_port = 0;
+		original_cm->xlate_src_port = 0;
+		reply_cm->match_src_port = 0;
+		reply_cm->xlate_src_port = 0;
+		break;
 	}
 
 	/*
@@ -1813,7 +1838,7 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	/*
 	 * We have everything we need!
 	 */
-	DEBUG_INFO("NEW connection - p: %d\n"
+	DEBUG_INFO("%px: NEW connection - p: %d\n"
 		   "original_cm: match_dev=src_dev: %s %d %pM\n"
 		   " xmit_dev=dest_dev: %s %d %pM\n"
 		   " xmit_src_mac: %pM\n"
@@ -1831,7 +1856,7 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 		   "return_ip_xlate: %pI4:%u\n"
 		   "return_mac: %pM\n"
 		   "flags: valid=%x src_mac_valid=%x\n",
-		   tuple->protocol,
+		   c, tuple->protocol,
 		   original_cm->match_dev->name, original_cm->match_dev->ifindex, original_cm->match_dev->dev_addr,
 		   original_cm->xmit_dev->name, original_cm->xmit_dev->ifindex, original_cm->xmit_dev->dev_addr,
 		   original_cm->xmit_src_mac, original_cm->xmit_dest_mac, original_cm->flags, original_cm->l2_hdr_size,
@@ -2433,7 +2458,8 @@ static bool sfe_ipv4_debug_dev_read_stats(struct sfe_ipv4 *si, char *buffer, cha
 			      "hash_hits=\"%llu\" hash_reorders=\"%llu\" "
 			      "pppoe_encap_pkts_fwded=\"%llu\" "
 			      "pppoe_decap_pkts_fwded=\"%llu\" "
-			      "pppoe_bridge_pkts_fwded=\"%llu\" />\n",
+			      "pppoe_bridge_pkts_fwded=\"%llu\" "
+			      "pppoe_bridge_pkts_3tuple_fwded=\"%llu\" />\n",
 				num_conn,
 				stats.packets_dropped64,
 				stats.packets_fast_xmited64,
@@ -2449,7 +2475,8 @@ static bool sfe_ipv4_debug_dev_read_stats(struct sfe_ipv4 *si, char *buffer, cha
 				stats.connection_match_hash_reorders64,
 				stats.pppoe_encap_packets_forwarded64,
 				stats.pppoe_decap_packets_forwarded64,
-				stats.pppoe_bridge_packets_forwarded64);
+				stats.pppoe_bridge_packets_forwarded64,
+				stats.pppoe_bridge_packets_3tuple_forwarded64);
 	if (copy_to_user(buffer + *total_read, msg, CHAR_DEV_MSG_SIZE)) {
 		return false;
 	}

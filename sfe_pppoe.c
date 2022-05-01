@@ -28,6 +28,38 @@
 #include "sfe_pppoe.h"
 
 /*
+ * sfe_pppoe_br_accel_mode controls how to accelerate PPPoE bridge flow.
+ * - SFE_PPPOE_BR_ACCEL_MODE_EN_5T: 5-tuple (src_ip, dest_ip, src_port, dest_port, protocol) acceleration
+ * - SFE_PPPOE_BR_ACCEL_MODE_EN_3T: 3-tuple (src_ip, dest_ip, PPPoE session id) acceleration
+ * - SFE_PPPOE_BR_ACCEL_MODE_DISABLED: No acceleration
+ */
+static sfe_pppoe_br_accel_mode_t sfe_pppoe_br_accel_mode __read_mostly = SFE_PPPOE_BR_ACCEL_MODE_EN_5T;
+
+/*
+ * sfe_pppoe_get_br_accel_mode()
+ *	Gets PPPoE bridge acceleration mode
+ */
+sfe_pppoe_br_accel_mode_t sfe_pppoe_get_br_accel_mode(void)
+{
+	return sfe_pppoe_br_accel_mode;
+}
+EXPORT_SYMBOL(sfe_pppoe_get_br_accel_mode);
+
+/*
+ * sfe_pppoe_set_br_accel_mode()
+ *	Sets PPPoE bridge acceleration mode
+ */
+int sfe_pppoe_set_br_accel_mode(sfe_pppoe_br_accel_mode_t mode)
+{
+	if (mode >= SFE_PPPOE_BR_ACCEL_MODE_MAX) {
+		return -1;
+	}
+
+	sfe_pppoe_br_accel_mode = mode;
+	return 0;
+}
+
+/*
  * sfe_pppoe_add_header()
  *	Add PPPoE header.
  *

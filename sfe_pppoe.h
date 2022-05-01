@@ -27,13 +27,9 @@ struct sfe_ppp_hdr {
 	u16 protocol;
 };
 
-/*
- * PPPoE (6-byte) + PPP (2-byte) header.
- */
-#define SFE_PPPOE_SESSION_HEADER_SIZE 8
-
 void sfe_pppoe_add_header(struct sk_buff *skb, u16 pppoe_session_id, u16 ppp_protocol);
 bool sfe_pppoe_parse_hdr(struct sk_buff *skb, struct sfe_l2_info *l2_info);
 void sfe_pppoe_undo_parse(struct sk_buff *skb, struct sfe_l2_info *l2_info);
+int sfe_pppoe_set_br_accel_mode(sfe_pppoe_br_accel_mode_t mode);
 
 #endif /* __SFE_PPPOE_H */

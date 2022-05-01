@@ -5,9 +5,9 @@
 KERNELVERSION := $(word 1, $(subst ., ,$(KERNELVERSION))).$(word 2, $(subst ., ,$(KERNELVERSION)))
 
 SFE_BASE_OBJS := sfe.o sfe_init.o
-SFE_IPV4_OBJS := sfe_ipv4.o sfe_ipv4_udp.o sfe_ipv4_tcp.o sfe_ipv4_icmp.o sfe_ipv4_tun6rd.o
-SFE_IPV6_OBJS := sfe_ipv6.o sfe_ipv6_udp.o sfe_ipv6_tcp.o sfe_ipv6_icmp.o sfe_ipv6_tunipip6.o
-SFE_PPPOE_OBJS := sfe_pppoe.o
+SFE_IPV4_OBJS := sfe_ipv4.o sfe_ipv4_udp.o sfe_ipv4_tcp.o sfe_ipv4_icmp.o sfe_ipv4_tun6rd.o sfe_ipv4_pppoe_br.o
+SFE_IPV6_OBJS := sfe_ipv6.o sfe_ipv6_udp.o sfe_ipv6_tcp.o sfe_ipv6_icmp.o sfe_ipv6_tunipip6.o sfe_ipv6_pppoe_br.o
+SFE_PPPOE_OBJS := sfe_pppoe.o sfe_pppoe_mgr.o
 
 
 ifeq ($(findstring 4.4, $(KERNELVERSION)),)

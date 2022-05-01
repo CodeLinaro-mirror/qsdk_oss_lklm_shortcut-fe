@@ -32,6 +32,7 @@
 #include "sfe_api.h"
 #include "sfe.h"
 #include "sfe_pppoe.h"
+#include "sfe_pppoe_mgr.h"
 #include "sfe_vlan.h"
 #include "sfe_ipv4.h"
 #include "sfe_ipv6.h"
@@ -679,6 +680,7 @@ sfe_tx_status_t sfe_create_ipv4_rule_msg(struct sfe_ctx_instance_internal *sfe_c
 			sfe_incr_exceptions(SFE_EXCEPTION_TCP_INVALID);
 			goto failed_ret;
 		}
+		break;
 
 	case IPPROTO_UDP:
 		break;
@@ -687,6 +689,12 @@ sfe_tx_status_t sfe_create_ipv4_rule_msg(struct sfe_ctx_instance_internal *sfe_c
 		break;
 
 	case IPPROTO_IPV6:
+		break;
+
+	case IPPROTO_RAW:
+		/*
+		 * for accelerating PPPoE bridged flows using 3-tuple information
+		 */
 		break;
 
 	default:
@@ -1126,6 +1134,12 @@ sfe_tx_status_t sfe_create_ipv6_rule_msg(struct sfe_ctx_instance_internal *sfe_c
 		break;
 
 	case IPPROTO_GRE:
+		break;
+
+	case IPPROTO_RAW:
+		/*
+		 * for accelerating PPPoE bridged flows using 3-tuple information
+		 */
 		break;
 
 	default:
@@ -1628,6 +1642,76 @@ static const struct device_attribute sfe_l2_feature_attr =
 	__ATTR(l2_feature,  0644, sfe_get_l2_feature, sfe_set_l2_feature);
 
 /*
+ * sfe_get_pppoe_br_accel_mode()
+ *	Get PPPoE bridge acceleration mode
+ */
+static ssize_t sfe_get_pppoe_br_accel_mode(struct device *dev,
+					struct device_attribute *attr,
+					char *buf)
+{
+	int len;
+	sfe_pppoe_br_accel_mode_t mode;
+	char *str;
+
+	mode = sfe_pppoe_get_br_accel_mode();
+	switch ((int)mode) {
+	case SFE_PPPOE_BR_ACCEL_MODE_DISABLED:
+		str = "ACCEL_MODE_DISABLED";
+		break;
+
+	case SFE_PPPOE_BR_ACCEL_MODE_EN_5T:
+		str = "ACCEL_MODE_5_TUPLE";
+		break;
+
+	case SFE_PPPOE_BR_ACCEL_MODE_EN_3T:
+		str = "ACCEL_MODE_3_TUPLE";
+		break;
+
+	default:
+		str = "Unknown ACCEL_MODE";
+		break;
+	}
+	len = snprintf(buf, PAGE_SIZE, "%s\n", str);
+
+	return len;
+}
+
+/*
+ * sfe_set_pppoe_br_accel_mode()
+ *	Set PPPoE bridge acceleration mode
+ */
+static ssize_t sfe_set_pppoe_br_accel_mode(struct device *dev,
+				struct device_attribute *attr,
+				const char *buf,
+				size_t count)
+{
+        uint32_t val;
+	int ret;
+
+        ret = sscanf(buf, "%u", &val);
+	if (ret != 1) {
+		DEBUG_ERROR("Unable to write the mode\n");
+		return -EINVAL;
+	}
+
+	ret = sfe_pppoe_set_br_accel_mode(val);
+	if (ret) {
+		DEBUG_ERROR("Wrong input: %d\n"
+			    "Input should be %u or %u or %u\n"
+			    "(%u==ACCEL_MODE_DISABLED %u==ACCEL_MODE_EN_5T %u==ACCEL_MODE_EN_3T)\n",
+			val,
+			SFE_PPPOE_BR_ACCEL_MODE_DISABLED, SFE_PPPOE_BR_ACCEL_MODE_EN_5T, SFE_PPPOE_BR_ACCEL_MODE_EN_3T,
+			SFE_PPPOE_BR_ACCEL_MODE_DISABLED, SFE_PPPOE_BR_ACCEL_MODE_EN_5T, SFE_PPPOE_BR_ACCEL_MODE_EN_3T);
+		return -EINVAL;
+	}
+
+	return count;
+}
+
+static const struct device_attribute sfe_pppoe_br_accel_mode_attr =
+	__ATTR(pppoe_br_accel_mode, 0644, sfe_get_pppoe_br_accel_mode, sfe_set_pppoe_br_accel_mode);
+
+/*
  * sfe_init_if()
  */
 int sfe_init_if(void)
@@ -1658,11 +1742,25 @@ int sfe_init_if(void)
 		goto exit2;
 	}
 
+	/*
+	 * Create sys/sfe/l2_feature
+	 */
 	result = sysfs_create_file(sfe_ctx->sys_sfe, &sfe_l2_feature_attr.attr);
 	if (result) {
 		DEBUG_ERROR("failed to register L2 feature flag sysfs file: %d\n", result);
 		goto exit2;
 	}
+
+	/*
+	 * Create sys/sfe/pppoe_br_accel_mode
+	 */
+	result = sysfs_create_file(sfe_ctx->sys_sfe, &sfe_pppoe_br_accel_mode_attr.attr);
+	if (result) {
+		DEBUG_ERROR("failed to create pppoe_br_accel_mode: %d\n", result);
+		goto exit2;
+	}
+
+	sfe_pppoe_mgr_init();
 
 	spin_lock_init(&sfe_ctx->lock);
 
@@ -1693,6 +1791,8 @@ void sfe_exit_if(void)
 	 * Unregister our receive callback.
 	 */
 	RCU_INIT_POINTER(athrs_fast_nat_recv, NULL);
+
+	sfe_pppoe_mgr_exit();
 
 	/*
 	 * Wait for all callbacks to complete.

@@ -215,7 +215,7 @@ int sfe_ipv6_recv_tcp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 	}
 
 	/*
-	 * If our packet has beern marked as "flush on find" we can't actually
+	 * If our packet has been marked as "sync on find" we can't actually
 	 * forward it in the fast path, but now that we've found an associated
 	 * connection we need sync its status before throw it slow path.
 	 */
@@ -289,8 +289,8 @@ int sfe_ipv6_recv_tcp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 		ret = sfe_ipv6_remove_connection(si, c);
 		spin_unlock_bh(&si->lock);
 
-		DEBUG_TRACE("TCP flags: 0x%x are not fast\n",
-			    flags & (TCP_FLAG_SYN | TCP_FLAG_RST | TCP_FLAG_FIN | TCP_FLAG_ACK));
+		DEBUG_TRACE("TCP flags: %#x are not fast. %u->%u skb=%px\n",
+				htonl(flags), htons(src_port), htons(dest_port), skb);
 		if (ret) {
 			sfe_ipv6_flush_connection(si, c, SFE_SYNC_REASON_FLUSH);
 		}
@@ -509,6 +509,16 @@ int sfe_ipv6_recv_tcp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 	}
 
 	/*
+	 * Check if skb has enough headroom to write L2 headers
+	 */
+	if (unlikely(skb_headroom(skb) < cm->l2_hdr_size)) {
+		rcu_read_unlock();
+		DEBUG_WARN("%px: Not enough headroom: %u\n", skb, skb_headroom(skb));
+		sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_NO_HEADROOM);
+		return 0;
+	}
+
+	/*
 	 * For PPPoE packets, match server MAC and session id
 	 */
 	if (unlikely(cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_PPPOE_DECAP)) {
@@ -543,7 +553,7 @@ int sfe_ipv6_recv_tcp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 		/*
 		 * If packet contains PPPoE header but CME doesn't contain PPPoE flag yet we are exceptioning the packet to linux
 		 */
-		if (unlikely(!(cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_BRIDGE_FLOW))) {
+		if (unlikely(!bridge_flow)) {
 			rcu_read_unlock();
 			DEBUG_TRACE("%px: CME doesn't contain PPPoE flag but packet has PPPoE header\n", skb);
 			sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_PPPOE_NOT_SET_IN_CME);
@@ -554,18 +564,8 @@ int sfe_ipv6_recv_tcp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 		/*
 		 * For bridged flows when packet contains PPPoE header, restore the header back and forward to xmit interface
 		 */
-		__skb_push(skb, (sizeof(struct pppoe_hdr) + sizeof(struct sfe_ppp_hdr)));
+		__skb_push(skb, PPPOE_SES_HLEN);
 		this_cpu_inc(si->stats_pcpu->pppoe_bridge_packets_forwarded64);
-	}
-
-	/*
-	 * Check if skb has enough headroom to write L2 headers
-	 */
-	if (unlikely(skb_headroom(skb) < cm->l2_hdr_size)) {
-		rcu_read_unlock();
-		DEBUG_WARN("%px: Not enough headroom: %u\n", skb, skb_headroom(skb));
-		sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_NO_HEADROOM);
-		return 0;
 	}
 
 	/*
