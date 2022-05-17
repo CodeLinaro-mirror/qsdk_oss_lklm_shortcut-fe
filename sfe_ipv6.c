@@ -1405,8 +1405,12 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 		ether_addr_copy(reply_cm->pppoe_remote_mac, msg->pppoe_rule.return_pppoe_remote_mac);
 	}
 
-	if (msg->rule_flags & SFE_RULE_CREATE_FLAG_SRC_INTERFACE_CHECK) {
+	if (msg->rule_flags & SFE_RULE_CREATE_FLAG_FLOW_SRC_INTERFACE_CHECK) {
 		original_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_SRC_INTERFACE_CHECK;
+	}
+
+	if (msg->rule_flags & SFE_RULE_CREATE_FLAG_FLOW_SRC_INTERFACE_CHECK_NO_FLUSH) {
+		original_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_SRC_INTERFACE_CHECK_NO_FLUSH;
 	}
 
 	/*
@@ -1674,8 +1678,12 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 		}
 	}
 
-	if (msg->rule_flags & SFE_RULE_CREATE_FLAG_SRC_INTERFACE_CHECK) {
+	if (msg->rule_flags & SFE_RULE_CREATE_FLAG_RETURN_SRC_INTERFACE_CHECK) {
 		reply_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_SRC_INTERFACE_CHECK;
+	}
+
+	if (msg->rule_flags & SFE_RULE_CREATE_FLAG_RETURN_SRC_INTERFACE_CHECK_NO_FLUSH) {
+		reply_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_SRC_INTERFACE_CHECK_NO_FLUSH;
 	}
 
 	/*
