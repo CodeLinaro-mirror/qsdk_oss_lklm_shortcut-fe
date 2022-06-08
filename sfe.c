@@ -1400,13 +1400,6 @@ int sfe_recv(struct sk_buff *skb)
 	struct sfe_l2_info l2_info;
 	int ret;
 
-	/*
-	 * We know that for the vast majority of packets we need the transport
-	 * layer header so we may as well start to fetch it now!
-	 */
-	prefetch(skb->data + 32);
-	barrier();
-
 	dev = skb->dev;
 
 	/*

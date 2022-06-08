@@ -42,7 +42,10 @@ int sfe_ipv6_recv_tunipip6(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_
 	struct sfe_ipv6_addr *dest_ip;
 	__be16 src_port = 0;
 	__be16 dest_port = 0;
+	unsigned int ihl_tmp = sizeof(struct ipv6hdr);
 	struct sfe_ipv6_connection_match *cm;
+	bool non_dst = false;
+	u8 next_hdr;
 
 	DEBUG_TRACE("%px: sfe: sfe_ipv6_recv_tunipip6 called.\n", skb);
 
@@ -73,11 +76,36 @@ int sfe_ipv6_recv_tunipip6(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_
 		return 0;
 	}
 
+	next_hdr = iph->nexthdr;
+
+	/*
+	 * Try to find an extension header(if any) that is not NEXTHDR_DEST.
+	 */
+	while (unlikely(sfe_ipv6_is_ext_hdr(next_hdr))) {
+		struct sfe_ipv6_ext_hdr *ext_hdr;
+		unsigned int ext_hdr_len;
+
+		if(next_hdr != NEXTHDR_DEST) {
+			non_dst = true;
+			break;
+		}
+
+		ext_hdr = (struct sfe_ipv6_ext_hdr *)(skb->data + ihl_tmp);
+
+		ext_hdr_len = ext_hdr->hdr_len;
+		ext_hdr_len <<= 3;
+		ext_hdr_len += sizeof(struct sfe_ipv6_ext_hdr);
+		ihl_tmp += ext_hdr_len;
+
+		next_hdr = ext_hdr->next_hdr;
+	}
+
 	/*
 	 * If our packet has been marked as "sync on find" we will sync the status
-	 * and forward it to slowpath.
+	 * and forward it to slowpath, except that encap_limit is set for dslite tunnel
+	 * which is embedded in exthdr type NEXTHDR_DEST.
 	 */
-	if (unlikely(sync_on_find)) {
+	if (unlikely(sync_on_find && non_dst)) {
 		sfe_ipv6_sync_status(si, cm->connection, SFE_SYNC_REASON_STATS);
 		rcu_read_unlock();
 		sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_TUNIPIP6_SYNC_ON_FIND);
