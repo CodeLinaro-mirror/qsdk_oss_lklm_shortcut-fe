@@ -195,17 +195,20 @@ int sfe_ipv4_recv_tcp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 	 * Source interface validate.
 	 */
 	if (unlikely((cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_SRC_INTERFACE_CHECK) && (cm->match_dev != dev))) {
-		struct sfe_ipv4_connection *c = cm->connection;
-		spin_lock_bh(&si->lock);
-		ret = sfe_ipv4_remove_connection(si, c);
-		spin_unlock_bh(&si->lock);
+		if (!(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_SRC_INTERFACE_CHECK_NO_FLUSH)) {
+			struct sfe_ipv4_connection *c = cm->connection;
+			DEBUG_TRACE("flush on source interface check failure\n");
+			spin_lock_bh(&si->lock);
+			ret = sfe_ipv4_remove_connection(si, c);
+			spin_unlock_bh(&si->lock);
 
-		if (ret) {
-			sfe_ipv4_flush_connection(si, c, SFE_SYNC_REASON_FLUSH);
+			if (ret) {
+				sfe_ipv4_flush_connection(si, c, SFE_SYNC_REASON_FLUSH);
+			}
 		}
 		rcu_read_unlock();
 		sfe_ipv4_exception_stats_inc(si, SFE_IPV4_EXCEPTION_EVENT_INVALID_SRC_IFACE);
-		DEBUG_TRACE("flush on wrong source interface check failure\n");
+		DEBUG_TRACE("exception the packet on source interface check failure\n");
 		return 0;
 	}
 

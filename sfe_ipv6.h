@@ -82,7 +82,7 @@ struct sfe_ipv6_tcp_connection_match {
 #define SFE_IPV6_CONNECTION_MATCH_FLAG_INSERT_EGRESS_VLAN_TAG (1<<12)
 					/* Insert VLAN tag */
 #define SFE_IPV6_CONNECTION_MATCH_FLAG_SRC_INTERFACE_CHECK (1<<13)
-					/* Source interface check.*/
+					/* Source interface check */
 #define SFE_IPV6_CONNECTION_MATCH_FLAG_PASSTHROUGH (1<<14)
 					/* passthrough flow: encap/decap to be skipped for this flow */
 #define SFE_IPV6_CONNECTION_MATCH_FLAG_FAST_XMIT (1<<15)
@@ -91,6 +91,8 @@ struct sfe_ipv6_tcp_connection_match {
 					/* fast xmit checked or not*/
 #define SFE_IPV6_CONNECTION_MATCH_FLAG_FAST_XMIT_DEV_ADMISSION (1<<17)
 					/* Fast xmit may be possible for this flow, if SFE check passes */
+#define SFE_IPV6_CONNECTION_MATCH_FLAG_SRC_INTERFACE_CHECK_NO_FLUSH (1<<18)
+					/* Source interface check but do not flush the connection */
 
 /*
  * IPv6 connection matching structure.
