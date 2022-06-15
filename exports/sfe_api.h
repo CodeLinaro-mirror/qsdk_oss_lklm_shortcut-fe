@@ -34,6 +34,7 @@
 
 #define SFE_MAX_VLAN_DEPTH 2			/**< Maximum VLAN depth. */
 #define SFE_VLAN_ID_NOT_CONFIGURED 0xfff	/**< VLAN ID not configured. */
+#define SFE_INVALID_VLAN_PCP 0xff		/**< VLAN PCP remark is invalid for SAWF (Service Aware Wi-Fi). */
 #define SFE_MAX_SERVICE_CLASS_ID 0x80		/**< Maximum service class ID. */
 #define SFE_INVALID_SERVICE_CLASS_ID 0xff	/**< Service class ID not valid. */
 #define SFE_SERVICE_CLASS_STATS_MAX_RETRY 100	/**< Maximum retries for fetching service class statistics. */
