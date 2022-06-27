@@ -257,6 +257,19 @@ int sfe_ipv4_recv_esp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 		skb->mark = cm->mark;
 	}
 
+	/*
+	 * For the first packets, check if it could got fast xmit.
+	 */
+	if (unlikely(!(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_FAST_XMIT_FLOW_CHECKED)
+				&& (cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_FAST_XMIT_DEV_ADMISSION))){
+		cm->features = netif_skb_features(skb);
+		if (likely(sfe_fast_xmit_check(skb, cm->features))) {
+			cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_FAST_XMIT;
+		}
+		cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_FAST_XMIT_FLOW_CHECKED;
+	}
+
+	features = cm->features;
 	fast_xmit = !!(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_FAST_XMIT);
 
 	rcu_read_unlock();

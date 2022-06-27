@@ -1593,11 +1593,11 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	 * which will be released in sfe_ipv4_free_connection_rcu()
 	 */
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 13, 0))
-	sk = __udp4_lib_lookup(net, reply_cm->match_dest_ip, reply_cm->match_dest_port,
-			reply_cm->xlate_src_ip, reply_cm->xlate_src_port, src_if_idx, &udp_table);
+	sk = __udp4_lib_lookup(net, reply_cm->xlate_src_ip, reply_cm->xlate_src_port,
+			reply_cm->match_dest_ip, reply_cm->match_dest_port, src_if_idx, &udp_table);
 #else
-	sk = __udp4_lib_lookup(net, reply_cm->match_dest_ip, reply_cm->match_dest_port,
-			reply_cm->xlate_src_ip, reply_cm->xlate_src_port, src_if_idx, 0, &udp_table, NULL);
+	sk = __udp4_lib_lookup(net, reply_cm->xlate_src_ip, reply_cm->xlate_src_port,
+			reply_cm->match_dest_ip, reply_cm->match_dest_port, src_if_idx, 0, &udp_table, NULL);
 #endif
 
 	rcu_read_unlock();

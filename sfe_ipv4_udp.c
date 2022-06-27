@@ -72,10 +72,10 @@ static int sfe_ipv4_udp_sk_deliver(struct sk_buff *skb, struct sfe_ipv4_connecti
 	 * TODO: The following approach is ignorant for UDPLITE for now.
 	 * Instead, consider calling Linux API to do checksum validation.
 	 */
-	if (unlikely(skb->ip_summed != CHECKSUM_UNNECESSARY) && unlikely(skb->ip_summed != CHECKSUM_COMPLETE)) {
+	if (unlikely(skb->ip_summed != CHECKSUM_UNNECESSARY) && unlikely(skb->ip_summed != CHECKSUM_COMPLETE) && udp_hdr(skb)->check) {
 		skb->csum = inet_compute_pseudo(skb, IPPROTO_UDP);
 		if (unlikely(__skb_checksum_complete(skb))) {
-			DEBUG_ERROR("%px: sfe: Invalid udp checksum\n", skb);
+			DEBUG_TRACE("%px: sfe: Invalid udp checksum\n", skb);
 			kfree_skb(skb);
 			return -1;
 		}
@@ -100,13 +100,9 @@ static int sfe_ipv4_udp_sk_deliver(struct sk_buff *skb, struct sfe_ipv4_connecti
 	 */
 	ret = encap_rcv(sk, skb);
 	if (unlikely(ret)) {
-		/*
-		 * If encap_rcv fails, vxlan driver drops the packet.
-		 * No need to free the skb here.
-		 */
-
-		DEBUG_ERROR("%px: sfe: udp-decap API return error: %d\n", skb, ret);
-		return -1;
+		DEBUG_TRACE("%px: sfe: udp-decap API return error: %d\n", skb, ret);
+		skb_push(skb, ihl);
+		return 1;
 	}
 
 	return 0;
