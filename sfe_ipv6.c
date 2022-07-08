@@ -1404,9 +1404,7 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 			/*
 			 * Dont enable CSUM offload
 			 */
-#if 0
 			 original_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_CSUM_OFFLOAD;
-#endif
 		}
 	}
 
@@ -1729,9 +1727,7 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 			/*
 			 * Dont enable CSUM offload
 			 */
-#if 0
 			 reply_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_CSUM_OFFLOAD;
-#endif
 		}
 	}
 
