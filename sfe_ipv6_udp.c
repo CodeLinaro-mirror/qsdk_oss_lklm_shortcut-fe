@@ -270,7 +270,7 @@ int sfe_ipv6_recv_udp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 	 * If our packet is larger than the MTU of the transmit interface then
 	 * we can't forward it easily.
 	 */
-	if (unlikely(len > cm->xmit_dev_mtu)) {
+	if (unlikely((len > cm->xmit_dev_mtu) && (!cm->up))) {
 		sfe_ipv6_sync_status(si, cm->connection, SFE_SYNC_REASON_STATS);
 		rcu_read_unlock();
 
