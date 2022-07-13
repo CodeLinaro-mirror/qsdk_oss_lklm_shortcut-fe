@@ -47,6 +47,8 @@ static int sfe_ipv4_udp_sk_deliver(struct sk_buff *skb, struct sfe_ipv4_connecti
 	struct sock *sk;
 	int ret;
 	int (*encap_rcv)(struct sock *sk, struct sk_buff *skb);
+	struct udphdr *uh;
+	unsigned short ulen;
 
 	/*
 	 * Call the decap handler for valid encap_rcv handler.
@@ -63,26 +65,43 @@ static int sfe_ipv4_udp_sk_deliver(struct sk_buff *skb, struct sfe_ipv4_connecti
 #else
 	nf_reset_ct(skb);
 #endif
-
 	skb_pull(skb, ihl);
 	skb_reset_transport_header(skb);
+	sk = (struct sock *)up;
+
+	uh = udp_hdr(skb);
+	ulen = ntohs(uh->len);
+	if (ulen < sizeof(*uh) || pskb_trim_rcsum(skb, ulen)) {
+		DEBUG_TRACE("%px: short packet", skb);
+		goto except;
+	}
+	uh = udp_hdr(skb);
 
 	/*
 	 * Verify checksum before giving to encap_rcv handler function.
 	 * TODO: The following approach is ignorant for UDPLITE for now.
 	 * Instead, consider calling Linux API to do checksum validation.
 	 */
-	if (unlikely(skb->ip_summed != CHECKSUM_UNNECESSARY) && unlikely(skb->ip_summed != CHECKSUM_COMPLETE) && udp_hdr(skb)->check) {
-		skb->csum = inet_compute_pseudo(skb, IPPROTO_UDP);
-		if (unlikely(__skb_checksum_complete(skb))) {
-			DEBUG_TRACE("%px: sfe: Invalid udp checksum\n", skb);
-			kfree_skb(skb);
-			return -1;
+	if (unlikely(skb->ip_summed != CHECKSUM_UNNECESSARY && skb->ip_summed != CHECKSUM_COMPLETE) && uh->check) {
+
+		UDP_SKB_CB(skb)->partial_cov = 0;
+		UDP_SKB_CB(skb)->cscov = skb->len;
+
+		if (skb_checksum_init(skb, IPPROTO_UDP, inet_compute_pseudo)) {
+			DEBUG_TRACE("%px: checksum initilization failed", skb);
+			goto except;
+		}
+
+		if (inet_get_convert_csum(sk)) {
+			skb_checksum_try_convert(skb, IPPROTO_UDP, inet_compute_pseudo);
+		}
+
+		if (udp_lib_checksum_complete(skb)) {
+			DEBUG_TRACE("%px: udp checksum validation failed", skb);
+			goto except;
 		}
 		DEBUG_TRACE("%px: sfe: udp checksum verified in s/w correctly.\n", skb);
 	}
-
-	sk = (struct sock *)up;
 
 	/*
 	 * At this point, L4 checksum has already been verified and pkt is going
@@ -101,11 +120,18 @@ static int sfe_ipv4_udp_sk_deliver(struct sk_buff *skb, struct sfe_ipv4_connecti
 	ret = encap_rcv(sk, skb);
 	if (unlikely(ret)) {
 		DEBUG_TRACE("%px: sfe: udp-decap API return error: %d\n", skb, ret);
-		skb_push(skb, ihl);
-		return 1;
+		goto except;
 	}
 
 	return 0;
+
+except:
+	/*
+	 * The packet could be restored with the original L2 Information for L2
+	 * flow, but it couldn't restore the NATed IP in the packets.
+	 */
+	skb_push(skb, ihl);
+	return 1;
 }
 
 /*
@@ -443,11 +469,7 @@ int sfe_ipv4_recv_udp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 		 * Also validates UDP checksum before calling decap handler.
 		 */
 		err = sfe_ipv4_udp_sk_deliver(skb, cm, ihl);
-		if (unlikely(err == -1)) {
-			rcu_read_unlock();
-			this_cpu_inc(si->stats_pcpu->packets_dropped64);
-			return 1;
-		} else if (unlikely(err == 1)) {
+		if (unlikely(err == 1)) {
 			rcu_read_unlock();
 			this_cpu_inc(si->stats_pcpu->packets_not_forwarded64);
 			return 0;
