@@ -36,6 +36,10 @@
 #include <net/addrconf.h>
 #include <net/gre.h>
 
+#if defined(SFE_RFS_SUPPORTED)
+#include <ppe_rfs.h>
+#endif
+
 #include "sfe_debug.h"
 #include "sfe_api.h"
 #include "sfe.h"
@@ -752,6 +756,31 @@ void sfe_ipv6_flush_connection(struct sfe_ipv6 *si,
 
 	this_cpu_inc(si->stats_pcpu->connection_flushes64);
 	sfe_ipv6_sync_status(si, c, reason);
+
+#if defined(SFE_RFS_SUPPORTED)
+	if (sfe_is_ppe_rfs_feature_enabled()) {
+		struct ppe_rfs_ipv6_rule_destroy_msg pr6rd;
+
+		pr6rd.tuple.flow_ip[0] = ntohl(c->src_ip[0].addr[3]);
+		pr6rd.tuple.flow_ip[1] = ntohl(c->src_ip[0].addr[2]);
+		pr6rd.tuple.flow_ip[2] = ntohl(c->src_ip[0].addr[1]);
+		pr6rd.tuple.flow_ip[3] = ntohl(c->src_ip[0].addr[0]);
+		pr6rd.tuple.flow_ident = ntohs(c->src_port);
+		pr6rd.tuple.return_ip[0] = ntohl(c->dest_ip[0].addr[3]);
+		pr6rd.tuple.return_ip[1] = ntohl(c->dest_ip[0].addr[2]);
+		pr6rd.tuple.return_ip[2] = ntohl(c->dest_ip[0].addr[1]);
+		pr6rd.tuple.return_ip[3] = ntohl(c->dest_ip[0].addr[0]);
+		pr6rd.tuple.return_ident = ntohs(c->dest_port);
+		pr6rd.tuple.protocol = c->protocol;
+
+		pr6rd.original_dev = c->original_dev;
+		pr6rd.reply_dev = c->reply_dev;
+
+		if (ppe_rfs_ipv6_rule_destroy(&pr6rd) != PPE_RFS_RET_SUCCESS) {
+			DEBUG_INFO("%p: Error in deleting IPv6 PPE RFS rules\n", &pr6rd);
+		}
+	}
+#endif
 
 	/*
 	 * Release our hold of the source and dest devices and free the memory
@@ -1856,6 +1885,32 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 
 	return 0;
 }
+
+#if defined(SFE_RFS_SUPPORTED)
+/*
+ * sfe_ipv6_fill_connection_dev()
+ */
+void sfe_ipv6_fill_connection_dev(struct sfe_ipv6_rule_destroy_msg *msg, struct net_device **original_dev, struct net_device **reply_dev)
+{
+	struct sfe_ipv6 *si = &__si6;
+	struct sfe_ipv6_connection *c;
+	struct sfe_ipv6_5tuple *tuple = &msg->tuple;
+
+	spin_lock_bh(&si->lock);
+	c = sfe_ipv6_find_connection(si, tuple->protocol, (struct sfe_ipv6_addr *)tuple->flow_ip, tuple->flow_ident,
+				     (struct sfe_ipv6_addr *)tuple->return_ip, tuple->return_ident);
+	if (!c) {
+		*original_dev = NULL;
+		*reply_dev = NULL;
+		spin_unlock_bh(&si->lock);
+		return;
+	}
+
+	*original_dev = c->original_dev;
+	*reply_dev = c->reply_dev;
+	spin_unlock_bh(&si->lock);
+}
+#endif
 
 /*
  * sfe_ipv6_destroy_rule()
