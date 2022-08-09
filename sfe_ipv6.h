@@ -477,6 +477,9 @@ static inline void sfe_ipv6_change_dsfield(struct ipv6hdr *iph, u8 dscp)
 bool sfe_ipv6_service_class_stats_get(uint8_t sid, uint64_t *bytes, uint64_t *packets);
 void sfe_ipv6_exception_stats_inc(struct sfe_ipv6 *si, enum sfe_ipv6_exception_events reason);
 void sfe_ipv6_service_class_stats_inc(struct sfe_ipv6 *si, uint8_t sid, uint64_t bytes);
+#if defined(SFE_RFS_SUPPORTED)
+void sfe_ipv6_fill_connection_dev(struct sfe_ipv6_rule_destroy_msg *msg, struct net_device **original_dev, struct net_device **reply_dev);
+#endif
 struct sfe_ipv6_connection_match *
 sfe_ipv6_find_connection_match_rcu(struct sfe_ipv6 *si, struct net_device *dev, u8 protocol,
 					struct sfe_ipv6_addr *src_ip, __be16 src_port,
