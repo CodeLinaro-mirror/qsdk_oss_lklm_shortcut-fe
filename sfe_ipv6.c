@@ -169,10 +169,10 @@ sfe_ipv6_find_connection_match_rcu(struct sfe_ipv6 *si, struct net_device *dev, 
 	 * Hopefully the first entry is the one we want.
 	 */
 	hlist_for_each_entry_rcu(cm, lhead, hnode) {
-		if ((cm->match_dest_port != dest_port) ||
-		    (cm->match_src_port != src_port) ||
-		    (!sfe_ipv6_addr_equal(cm->match_src_ip, src_ip)) ||
+		if ((!sfe_ipv6_addr_equal(cm->match_src_ip, src_ip)) ||
 		    (!sfe_ipv6_addr_equal(cm->match_dest_ip, dest_ip)) ||
+		    (cm->match_dest_port != dest_port) ||
+		    (cm->match_src_port != src_port) ||
 		    (cm->match_protocol != protocol)) {
 			continue;
 		}
