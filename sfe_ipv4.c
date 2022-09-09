@@ -334,6 +334,7 @@ static void sfe_ipv4_update_summary_stats(struct sfe_ipv4 *si,  struct sfe_ipv4_
 		stats->pppoe_decap_packets_forwarded64 += s->pppoe_decap_packets_forwarded64;
 		stats->pppoe_bridge_packets_forwarded64 += s->pppoe_bridge_packets_forwarded64;
 		stats->pppoe_bridge_packets_3tuple_forwarded64 += s->pppoe_bridge_packets_3tuple_forwarded64;
+		stats->connection_create_requests_overflow64 += s->connection_create_requests_overflow64;
 	}
 
 }
@@ -1253,6 +1254,20 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	this_cpu_inc(si->stats_pcpu->connection_create_requests64);
 
 	spin_lock_bh(&si->lock);
+
+#if (defined(SFE_MEM_PROFILE_MEDIUM) || defined(SFE_MEM_PROFILE_LOW))
+	if (si->num_connections  >= sfe_ipv4_max_conn_count()) {
+		spin_unlock_bh(&si->lock);
+		this_cpu_inc(si->stats_pcpu->connection_create_requests_overflow64);
+		kfree(reply_cm);
+		kfree(original_cm);
+		kfree(c);
+		dev_put(src_dev);
+		dev_put(dest_dev);
+		DEBUG_WARN("%px: Maximum connection count(%d), reached %d\n", msg, sfe_ipv4_max_conn_count(), si->num_connections);
+		return -EPERM;
+	}
+#endif
 
 	/*
 	 * Check to see if there is already a flow that matches the rule we're
@@ -2486,7 +2501,8 @@ static bool sfe_ipv4_debug_dev_read_stats(struct sfe_ipv4 *si, char *buffer, cha
 			      "pppoe_encap_pkts_fwded=\"%llu\" "
 			      "pppoe_decap_pkts_fwded=\"%llu\" "
 			      "pppoe_bridge_pkts_fwded=\"%llu\" "
-			      "pppoe_bridge_pkts_3tuple_fwded=\"%llu\" />\n",
+			      "pppoe_bridge_pkts_3tuple_fwded=\"%llu\" "
+			      "connection_create_requests_overflow64=\"%llu\" />\n",
 				num_conn,
 				stats.packets_dropped64,
 				stats.packets_fast_xmited64,
@@ -2503,7 +2519,8 @@ static bool sfe_ipv4_debug_dev_read_stats(struct sfe_ipv4 *si, char *buffer, cha
 				stats.pppoe_encap_packets_forwarded64,
 				stats.pppoe_decap_packets_forwarded64,
 				stats.pppoe_bridge_packets_forwarded64,
-				stats.pppoe_bridge_packets_3tuple_forwarded64);
+				stats.pppoe_bridge_packets_3tuple_forwarded64,
+				stats.connection_create_requests_overflow64);
 	if (copy_to_user(buffer + *total_read, msg, CHAR_DEV_MSG_SIZE)) {
 		return false;
 	}
