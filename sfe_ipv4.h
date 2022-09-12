@@ -341,6 +341,7 @@ struct sfe_ipv4_stats {
 	u64 pppoe_decap_packets_forwarded64;	/* Number of IPv4 PPPoE decap packets forwarded */
 	u64 pppoe_bridge_packets_forwarded64;	/* Number of IPv4 PPPoE bridge packets forwarded */
 	u64 pppoe_bridge_packets_3tuple_forwarded64;    /* Number of IPv4 PPPoE bridge packets forwarded based on 3-tuple info */
+	u64 connection_create_requests_overflow64;	/* Number of IPV4 connection create requests after reaching max limit */
 };
 
 /*
