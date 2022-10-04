@@ -32,7 +32,8 @@
 #define SFE_MAX_CONNECTION_NUM 4096
 #endif
 
-#define SFE_L2_PARSE_FLAGS_PPPOE_INGRESS 0x01	/* Indicates presence of a valid PPPoE header */
+#define SFE_L2_PARSE_FLAGS_PPPOE_INGRESS 0x01		/* Indicates presence of a valid PPPoE header */
+#define SFE_L2_PARSE_FLAGS_TRUSTSEC_INGRESS 0x02	/* Indicates presence of a valid trustsec header */
 
 /**
  * SAWF_metadata information placement in mark field.
@@ -78,12 +79,20 @@ struct sfe_vlan_hdr {
 };
 
 /*
+ * trustsec header
+ */
+struct sfe_trustsec_hdr {
+	u16 sgt;		/* Tag Protocol Identifier */
+};
+
+/*
  * Structure used to store L2 information
  */
 struct sfe_l2_info {
 	u16 parse_flags;	/* Flags indicating L2.5 headers presence */
 	u16 pppoe_session_id;	/* PPPOE header offset */
 	u16 protocol;		/* L3 Protocol */
+	u16 trustsec_sgt;	/* trustsec SGT value */
 	struct sfe_vlan_hdr vlan_hdr[SFE_MAX_VLAN_DEPTH];
 				/* VLAN tag(s) of ingress packet */
 	u8 vlan_hdr_cnt;        /* Number of VLAN tags in the ingress packet */
@@ -330,6 +339,24 @@ static inline u16 sfe_l2_protocol_get(struct sfe_l2_info *l2_info)
 static inline void sfe_l2_protocol_set(struct sfe_l2_info *l2_info, u16 proto)
 {
 	l2_info->protocol = proto;
+}
+
+/*
+ * sfe_l2_trustsec_sgt_get()
+ *	Get trustsec SGT from l2_info
+ */
+static inline u16 sfe_l2_trustsec_sgt_get(struct sfe_l2_info *l2_info)
+{
+	return l2_info->trustsec_sgt;
+}
+
+/*
+ * sfe_l2_trustsec_sgt_set()
+ *	Set trustsec SGT to l2_info
+ */
+static inline void sfe_l2_trustsec_sgt_set(struct sfe_l2_info *l2_info, u16 sgt)
+{
+	l2_info->trustsec_sgt = sgt;
 }
 
 int sfe_init_if(void);

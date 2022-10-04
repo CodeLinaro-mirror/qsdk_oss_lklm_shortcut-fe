@@ -81,6 +81,8 @@ struct sfe_ipv4_tcp_connection_match {
 					/* Fast xmit may be possible for this flow, if SFE check passes */
 #define SFE_IPV4_CONNECTION_MATCH_FLAG_SRC_INTERFACE_CHECK_NO_FLUSH (1<<18)
 					/* Source interface check but do not flush the connection */
+#define SFE_IPV4_CONNECTION_MATCH_FLAG_INSERT_EGRESS_TRUSTSEC_SGT (1<<19)
+					/* Insert Trustsec SGT */
 
 /*
  * IPv4 connection matching structure.
@@ -165,6 +167,12 @@ struct sfe_ipv4_connection_match {
 	struct sfe_vlan_hdr egress_vlan_hdr[SFE_MAX_VLAN_DEPTH];
 
 	/*
+	 * trustsec headers
+	 */
+	struct sfe_trustsec_hdr ingress_trustsec_hdr;
+	struct sfe_trustsec_hdr egress_trustsec_hdr;
+
+	/*
 	 * Packet translation information.
 	 */
 	__be32 xlate_src_ip;		/* Address after source translation */
@@ -206,6 +214,7 @@ struct sfe_ipv4_connection_match {
 	struct net_device *top_interface_dev;	/* Used by tun6rd to store decap VLAN netdevice.*/
 
 	bool sawf_valid;		/* Indicates mark has valid SAWF information */
+	bool ingress_trustsec_valid;	/* Indicates trustsec header is valid */
 };
 
 /*
@@ -307,6 +316,7 @@ enum sfe_ipv4_exception_events {
 	SFE_IPV4_EXCEPTION_EVENT_ESP_IP_OPTIONS_OR_INITIAL_FRAGMENT,
 	SFE_IPV4_EXCEPTION_EVENT_ESP_NEEDS_FRAGMENTATION,
 	SFE_IPV4_EXCEPTION_EVENT_ESP_SMALL_TTL,
+	SFE_IPV4_EXCEPTION_EVENT_INGRESS_TRUSTSEC_SGT_MISMATCH,
 	SFE_IPV4_EXCEPTION_EVENT_LAST
 };
 

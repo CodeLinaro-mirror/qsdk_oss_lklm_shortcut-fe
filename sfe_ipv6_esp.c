@@ -30,6 +30,7 @@
 #include "sfe_ipv6.h"
 #include "sfe_ipv6_esp.h"
 #include "sfe_vlan.h"
+#include "sfe_trustsec.h"
 
 /*
  * sfe_ipv6_recv_esp()
@@ -122,6 +123,16 @@ int sfe_ipv6_recv_esp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 		rcu_read_unlock();
 		sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_INGRESS_VLAN_TAG_MISMATCH);
 		DEBUG_TRACE("VLAN tag mismatch. skb=%px\n", skb);
+		return 0;
+	}
+
+	/*
+	 * Do we expect a trustsec header for this flow ?
+	 */
+	if (unlikely(!sfe_trustsec_validate_ingress_sgt(skb, cm->ingress_trustsec_valid, &cm->ingress_trustsec_hdr, l2_info))) {
+		rcu_read_unlock();
+		sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_INGRESS_TRUSTSEC_SGT_MISMATCH);
+		DEBUG_TRACE("Trustsec SGT mismatch. skb=%px\n", skb);
 		return 0;
 	}
 

@@ -117,7 +117,8 @@ static char *sfe_ipv6_exception_events_string[SFE_IPV6_EXCEPTION_EVENT_LAST] = {
 	"ESP_NO_CONNECTION",
 	"ESP_IP_OPTIONS_OR_INITIAL_FRAGMENT",
 	"ESP_NEEDS_FRAGMENTATION",
-	"ESP_SMALL_TTL"
+	"ESP_SMALL_TTL",
+	"INGRESS_TRUSTSEC_SGT_MISMATCH"
 };
 
 static struct sfe_ipv6 __si6;
@@ -196,7 +197,7 @@ sfe_ipv6_find_connection_match_rcu(struct sfe_ipv6 *si, struct net_device *dev, 
  *	Update the summary stats for a connection match entry.
  */
 static inline void sfe_ipv6_connection_match_update_summary_stats(struct sfe_ipv6_connection_match *cm,
-                                               u32 *packets, u32 *bytes)
+					       u32 *packets, u32 *bytes)
 
 {
 	u32 packet_count, byte_count;
@@ -1113,6 +1114,19 @@ static void sfe_ipv6_match_entry_set_vlan(
 }
 
 /*
+ * sfe_ipv6_match_entry_set_trustsec()
+ */
+static void sfe_ipv6_match_entry_set_trustsec(
+			struct sfe_ipv6_connection_match *cm,
+			u16 ingress_sgt,
+			u16 egress_sgt
+			)
+{
+	cm->ingress_trustsec_hdr.sgt = ingress_sgt;
+	cm->egress_trustsec_hdr.sgt = egress_sgt;
+}
+
+/*
  * sfe_ipv6_update_rule()
  *	update forwarding rule after rule is created.
  */
@@ -1279,7 +1293,7 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 	spin_lock_bh(&si->lock);
 
 #if (defined(SFE_MEM_PROFILE_MEDIUM) || defined(SFE_MEM_PROFILE_LOW))
-        if (si->num_connections  >= sfe_ipv6_max_conn_count()) {
+	if (si->num_connections  >= sfe_ipv6_max_conn_count()) {
 		spin_unlock_bh(&si->lock);
 		this_cpu_inc(si->stats_pcpu->connection_create_requests_overflow64);
 		kfree(reply_cm);
@@ -1289,7 +1303,7 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 		dev_put(dest_dev);
 		DEBUG_WARN("%px: Maximum connection count(%d), reached %d\n", msg, sfe_ipv6_max_conn_count(), si->num_connections);
 		return -EPERM;
-        }
+	}
 #endif
 
 	/*
@@ -1481,6 +1495,25 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 	}
 
 	/*
+	 * Disable HW CSUM Offload for connection with trustsec header
+	 */
+	if (msg->valid_flags & SFE_RULE_CREATE_TRUSTSEC_VALID) {
+		struct sfe_trustsec_rule *trustsec_rule = &msg->trustsec_rule;
+		sfe_ipv6_match_entry_set_trustsec(original_cm,
+						trustsec_rule->ingress_sgt,
+						trustsec_rule->egress_sgt);
+		original_cm->flags &= ~SFE_IPV6_CONNECTION_MATCH_FLAG_CSUM_OFFLOAD;
+
+		if (trustsec_rule->sgt_valid_flags & SFE_TRUSTSEC_INGRESS_SGT_VALID) {
+			original_cm->ingress_trustsec_valid = true;
+		}
+
+		if (trustsec_rule->sgt_valid_flags & SFE_TRUSTSEC_EGRESS_SGT_VALID) {
+			original_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_INSERT_EGRESS_TRUSTSEC_SGT;
+		}
+	}
+
+	/*
 	 * For the non-arp interface, we don't write L2 HDR.
 	 * Excluding PPPoE from this, since we are now supporting PPPoE encap/decap.
 	 */
@@ -1616,7 +1649,7 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 
 			DEBUG_INFO("sfe: unable to take reference for socket  p:%d\n", tuple->protocol);
 			DEBUG_INFO("SK: connection - \n"
-		     			"  s: %s:%pI6(%pI6):%u(%u)\n"
+					"  s: %s:%pI6(%pI6):%u(%u)\n"
 				   "  d: %s:%pI6(%pI6):%u(%u)\n",
 					reply_cm->match_dev->name, &reply_cm->match_src_ip, &reply_cm->xlate_src_ip,
 					ntohs(reply_cm->match_src_port), ntohs(reply_cm->xlate_src_port),
@@ -1756,6 +1789,26 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 			 reply_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_CSUM_OFFLOAD;
 		}
 	}
+
+	/*
+	 * Disable HW CSUM Offload for connection with trustsec header
+	 */
+	if (msg->valid_flags & SFE_RULE_CREATE_TRUSTSEC_VALID) {
+		struct sfe_trustsec_rule *trustsec_rule = &msg->trustsec_rule;
+		sfe_ipv6_match_entry_set_trustsec(reply_cm,
+						trustsec_rule->egress_sgt,
+						trustsec_rule->ingress_sgt);
+		reply_cm->flags &= ~SFE_IPV6_CONNECTION_MATCH_FLAG_CSUM_OFFLOAD;
+
+		if (trustsec_rule->sgt_valid_flags & SFE_TRUSTSEC_EGRESS_SGT_VALID) {
+			reply_cm->ingress_trustsec_valid = true;
+		}
+
+		if (trustsec_rule->sgt_valid_flags & SFE_TRUSTSEC_INGRESS_SGT_VALID) {
+			original_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_INSERT_EGRESS_TRUSTSEC_SGT;
+		}
+	}
+
 
 	if (msg->rule_flags & SFE_RULE_CREATE_FLAG_RETURN_SRC_INTERFACE_CHECK) {
 		reply_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_SRC_INTERFACE_CHECK;

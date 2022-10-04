@@ -31,6 +31,7 @@
 #include "sfe_ipv6.h"
 #include "sfe_pppoe.h"
 #include "sfe_vlan.h"
+#include "sfe_trustsec.h"
 
 /*
  * sfe_ipv6_udp_sk_deliver()
@@ -200,6 +201,16 @@ int sfe_ipv6_recv_udp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 		rcu_read_unlock();
 		sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_INGRESS_VLAN_TAG_MISMATCH);
 		DEBUG_TRACE("VLAN tag mismatch. skb=%px\n", skb);
+		return 0;
+	}
+
+	/*
+	 * Do we expect a trustsec header for this flow ?
+	 */
+	if (unlikely(!sfe_trustsec_validate_ingress_sgt(skb, cm->ingress_trustsec_valid, &cm->ingress_trustsec_hdr, l2_info))) {
+		rcu_read_unlock();
+		sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_INGRESS_TRUSTSEC_SGT_MISMATCH);
+		DEBUG_TRACE("Trustsec SGT mismatch. skb=%px\n", skb);
 		return 0;
 	}
 
@@ -395,7 +406,7 @@ int sfe_ipv6_recv_udp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 
 		/*
 		 * Update traffic stats
-	 	*/
+		*/
 		atomic_inc(&cm->rx_packet_count);
 		atomic_add(len, &cm->rx_byte_count);
 
@@ -495,6 +506,13 @@ int sfe_ipv6_recv_udp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 
 	xmit_dev = cm->xmit_dev;
 	skb->dev = xmit_dev;
+
+	/*
+	 * For trustsec flows, add trustsec header before L2 header is added.
+	 */
+	if (unlikely(cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_INSERT_EGRESS_TRUSTSEC_SGT)) {
+		sfe_trustsec_add_sgt(skb, &cm->egress_trustsec_hdr);
+	}
 
 	/*
 	 * Check to see if we need to add VLAN tags

@@ -93,6 +93,8 @@ struct sfe_ipv6_tcp_connection_match {
 					/* Fast xmit may be possible for this flow, if SFE check passes */
 #define SFE_IPV6_CONNECTION_MATCH_FLAG_SRC_INTERFACE_CHECK_NO_FLUSH (1<<18)
 					/* Source interface check but do not flush the connection */
+#define SFE_IPV6_CONNECTION_MATCH_FLAG_INSERT_EGRESS_TRUSTSEC_SGT (1<<19)
+					/* Insert Trustsec SGT */
 
 /*
  * IPv6 connection matching structure.
@@ -146,7 +148,7 @@ struct sfe_ipv6_connection_match {
 	u32 flow_cookie;		/* used flow cookie, for debug */
 #endif
 #ifdef CONFIG_XFRM
-	u32 flow_accel;            	/* The flow accelerated or not */
+	u32 flow_accel;			/* The flow accelerated or not */
 #endif
 	struct sfe_ipv6_connection *connection;
 	struct sfe_ipv6_connection_match *counter_match;
@@ -171,6 +173,12 @@ struct sfe_ipv6_connection_match {
 	 */
 	struct sfe_vlan_hdr ingress_vlan_hdr[SFE_MAX_VLAN_DEPTH];
 	struct sfe_vlan_hdr egress_vlan_hdr[SFE_MAX_VLAN_DEPTH];
+
+	/*
+	 * trustsec headers
+	 */
+	struct sfe_trustsec_hdr ingress_trustsec_hdr;
+	struct sfe_trustsec_hdr egress_trustsec_hdr;
 
 	/*
 	 * Packet translation information.
@@ -209,9 +217,8 @@ struct sfe_ipv6_connection_match {
 
 	struct net_device *top_interface_dev;	/* Used by tunipip6 to store decap VLAN netdevice.*/
 
-
-
 	bool sawf_valid;		/* Indicates mark has valid SAWF information. */
+	bool ingress_trustsec_valid;	/* Indicates trustsec header is valid */
 };
 
 /*
@@ -316,6 +323,7 @@ enum sfe_ipv6_exception_events {
 	SFE_IPV6_EXCEPTION_EVENT_ESP_IP_OPTIONS_OR_INITIAL_FRAGMENT,
 	SFE_IPV6_EXCEPTION_EVENT_ESP_NEEDS_FRAGMENTATION,
 	SFE_IPV6_EXCEPTION_EVENT_ESP_SMALL_TTL,
+	SFE_IPV6_EXCEPTION_EVENT_INGRESS_TRUSTSEC_SGT_MISMATCH,
 	SFE_IPV6_EXCEPTION_EVENT_LAST
 };
 

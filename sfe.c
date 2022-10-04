@@ -36,6 +36,7 @@
 #include "sfe_pppoe.h"
 #include "sfe_pppoe_mgr.h"
 #include "sfe_vlan.h"
+#include "sfe_trustsec.h"
 #include "sfe_ipv4.h"
 #include "sfe_ipv6.h"
 
@@ -157,7 +158,7 @@ static inline void sfe_incr_exceptions(sfe_exception_t except)
 
 /*
  * sfe_dev_is_layer_3_interface()
- * 	Check if a network device is ipv4 or ipv6 layer 3 interface
+ *	Check if a network device is ipv4 or ipv6 layer 3 interface
  *
  * @param dev network device to check
  * @param check_v4 check ipv4 layer 3 interface(which have ipv4 address) or ipv6 layer 3 interface(which have ipv6 address)
@@ -296,7 +297,7 @@ bool sfe_dev_has_hw_csum(struct net_device *dev)
 
 /*
  * sfe_clean_response_msg_by_type()
- * 	clean response message in queue when ECM exit
+ *	clean response message in queue when ECM exit
  *
  * @param sfe_ctx SFE context
  * @param msg_type message type, ipv4 or ipv6
@@ -325,7 +326,7 @@ static void sfe_clean_response_msg_by_type(struct sfe_ctx_instance_internal *sfe
 
 /*
  * sfe_process_response_msg()
- * 	Send all pending response message to ECM by calling callback function included in message
+ *	Send all pending response message to ECM by calling callback function included in message
  *
  * @param work work structure
  */
@@ -369,7 +370,7 @@ static void sfe_process_response_msg(struct work_struct *work)
 
 /*
  * sfe_alloc_response_msg()
- * 	Alloc and construct new response message
+ *	Alloc and construct new response message
  *
  * @param type message type
  * @param msg used to construct response message if not NULL
@@ -451,7 +452,7 @@ bool sfe_fast_xmit_check(struct sk_buff *skb, netdev_features_t features)
 
 /*
  * sfe_enqueue_msg()
- * 	Queue response message
+ *	Queue response message
  *
  * @param sfe_ctx SFE context
  * @param response response message to be queue
@@ -701,6 +702,20 @@ static bool sfe_recv_parse_l2(struct net_device *dev, struct sk_buff *skb, struc
 	}
 
 	/*
+	 * Parse only trustsec packets
+	 */
+	if (htons(ETH_P_TRSEC) == skb->protocol) {
+		if (!sfe_trustsec_check_and_parse_sgt(skb, l2_info)) {
+
+			/*
+			 * For exception from trustsec return from here without modifying the skb->data
+			 * This includes non-IPv4/v6 cases also.
+			 */
+			return false;
+		}
+	}
+
+	/*
 	 * Parse only PPPoE session packets
 	 */
 	if (htons(ETH_P_PPP_SES) == skb->protocol) {
@@ -727,6 +742,11 @@ static void sfe_recv_undo_parse_l2(struct net_device *dev, struct sk_buff *skb, 
 	sfe_pppoe_undo_parse(skb, l2_info);
 
 	/*
+	 * Trustsec undo
+	 */
+	sfe_trustsec_undo_parse(skb, l2_info);
+
+	/*
 	 * VLAN undo
 	 */
 	sfe_vlan_undo_parse(skb, l2_info);
@@ -739,7 +759,7 @@ static void sfe_recv_undo_parse_l2(struct net_device *dev, struct sk_buff *skb, 
 
 /*
  * sfe_create_ipv4_rule_msg()
- * 	Convert create message format from ecm to sfe
+ *	Convert create message format from ecm to sfe
  *
  * @param sfe_ctx SFE context
  * @param msg The IPv4 message
@@ -918,7 +938,7 @@ failed_ret:
 
 /*
  * sfe_destroy_ipv4_rule_msg()
- * 	Convert destroy message format from ecm to sfe
+ *	Convert destroy message format from ecm to sfe
  *
  * @param sfe_ctx SFE context
  * @param msg The IPv4 message
@@ -970,7 +990,7 @@ sfe_tx_status_t sfe_destroy_ipv4_rule_msg(struct sfe_ctx_instance_internal *sfe_
 
 /*
  * sfe_sync_ipv4_stats_many_msg()
- * 	sync con stats msg from the ecm
+ *	sync con stats msg from the ecm
  *
  * @param sfe_ctx SFE context
  * @param msg The IPv4 message
@@ -990,7 +1010,7 @@ sfe_tx_status_t sfe_sync_ipv4_stats_many_msg(struct sfe_ctx_instance_internal *s
 
 /*
  * sfe_ipv4_tx()
- * 	Transmit an IPv4 message to the sfe
+ *	Transmit an IPv4 message to the sfe
  *
  * @param sfe_ctx SFE context
  * @param msg The IPv4 message
@@ -1026,7 +1046,7 @@ EXPORT_SYMBOL(sfe_ipv4_msg_init);
 
 /*
  * sfe_ipv4_max_conn_count()
- * 	Return maximum number of entries SFE supported
+ *	Return maximum number of entries SFE supported
  */
 int sfe_ipv4_max_conn_count(void)
 {
@@ -1036,7 +1056,7 @@ EXPORT_SYMBOL(sfe_ipv4_max_conn_count);
 
 /*
  * sfe_ipv4_notify_register()
- * 	Register a notifier callback for IPv4 messages from SFE
+ *	Register a notifier callback for IPv4 messages from SFE
  *
  * @param cb The callback pointer
  * @param app_data The application context for this message
@@ -1072,7 +1092,7 @@ EXPORT_SYMBOL(sfe_ipv4_notify_register);
 
 /*
  * sfe_ipv4_notify_unregister()
- * 	Un-Register the notifier callback for IPv4 messages from SFE
+ *	Un-Register the notifier callback for IPv4 messages from SFE
  */
 void sfe_ipv4_notify_unregister(void)
 {
@@ -1237,7 +1257,7 @@ static void sfe_ipv6_stats_sync_callback(struct sfe_connection_sync *sis)
 
 /*
  * sfe_create_ipv6_rule_msg()
- * 	convert create message format from ecm to sfe
+ *	convert create message format from ecm to sfe
  *
  * @param sfe_ctx SFE context
  * @param msg The IPv6 message
@@ -1418,7 +1438,7 @@ failed_ret:
 
 /*
  * sfe_destroy_ipv6_rule_msg()
- * 	Convert destroy message format from ecm to sfe
+ *	Convert destroy message format from ecm to sfe
  *
  * @param sfe_ctx SFE context
  * @param msg The IPv6 message
@@ -1476,7 +1496,7 @@ sfe_tx_status_t sfe_destroy_ipv6_rule_msg(struct sfe_ctx_instance_internal *sfe_
 
 /*
  * sfe_sync_ipv6_stats_many_msg()
- * 	sync con stats msg from the ecm
+ *	sync con stats msg from the ecm
  *
  * @param sfe_ctx SFE context
  * @param msg The IPv6 message
@@ -1496,7 +1516,7 @@ sfe_tx_status_t sfe_sync_ipv6_stats_many_msg(struct sfe_ctx_instance_internal *s
 
 /*
  * sfe_ipv6_tx()
- * 	Transmit an IPv6 message to the sfe
+ *	Transmit an IPv6 message to the sfe
  *
  * @param sfe_ctx SFE context
  * @param msg The IPv6 message
@@ -1532,7 +1552,7 @@ EXPORT_SYMBOL(sfe_ipv6_msg_init);
 
 /*
  * sfe_ipv6_max_conn_count()
- * 	Return maximum number of entries SFE supported
+ *	Return maximum number of entries SFE supported
  */
 int sfe_ipv6_max_conn_count(void)
 {
@@ -1542,7 +1562,7 @@ EXPORT_SYMBOL(sfe_ipv6_max_conn_count);
 
 /*
  * sfe_ipv6_notify_register()
- * 	Register a notifier callback for IPv6 messages from SFE
+ *	Register a notifier callback for IPv6 messages from SFE
  *
  * @param one_rule_cb The callback pointer of one rule sync
  * @param many_rule_cb The callback pointer of many rule sync
@@ -1579,7 +1599,7 @@ EXPORT_SYMBOL(sfe_ipv6_notify_register);
 
 /*
  * sfe_ipv6_notify_unregister()
- * 	Un-Register a notifier callback for IPv6 messages from SFE
+ *	Un-Register a notifier callback for IPv6 messages from SFE
  */
 void sfe_ipv6_notify_unregister(void)
 {
@@ -1618,7 +1638,7 @@ EXPORT_SYMBOL(sfe_ipv6_notify_unregister);
 
 /*
  * sfe_tun6rd_tx()
- * 	Transmit a tun6rd message to sfe engine
+ *	Transmit a tun6rd message to sfe engine
  */
 sfe_tx_status_t sfe_tun6rd_tx(struct sfe_ctx_instance *sfe_ctx, struct sfe_tun6rd_msg *msg)
 {
@@ -1738,7 +1758,7 @@ int sfe_recv(struct sk_buff *skb)
 	DEBUG_TRACE("Non-IP(%x) %s skb=%px skb_vlan:%x/%x/%x skb_proto=%x\n",
 			l2_info.protocol, dev->name, skb,
 			ntohs(skb->vlan_proto), skb->vlan_tci, skb_vlan_tag_present(skb),
-		       	htons(skb->protocol));
+			htons(skb->protocol));
 
 send_to_linux:
 	/*
@@ -1841,12 +1861,12 @@ ssize_t sfe_get_l2_feature(struct device *dev,
  *	Enable or disable l2 features flag.
  */
 ssize_t sfe_set_l2_feature(struct device *dev, struct device_attribute *attr,
-                         const char *buf, size_t count)
+			 const char *buf, size_t count)
 {
-        unsigned long val;
+	unsigned long val;
 	struct sfe_ctx_instance_internal *sfe_ctx = &__sfe_ctx;
 	int ret;
-        ret = sscanf(buf, "%lu", &val);
+	ret = sscanf(buf, "%lu", &val);
 
 	if (ret != 1) {
 		pr_err("Wrong input, %s\n", buf);
@@ -1925,10 +1945,10 @@ static ssize_t sfe_set_pppoe_br_accel_mode(struct device *dev,
 				const char *buf,
 				size_t count)
 {
-        uint32_t val;
+	uint32_t val;
 	int ret;
 
-        ret = sscanf(buf, "%u", &val);
+	ret = sscanf(buf, "%u", &val);
 	if (ret != 1) {
 		DEBUG_ERROR("Unable to write the mode\n");
 		return -EINVAL;

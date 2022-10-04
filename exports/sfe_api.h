@@ -72,8 +72,8 @@
 #define SFE_RULE_CREATE_FLAG_FLOW_SRC_INTERFACE_CHECK  (1<<10)  /**< Check source interface on the flow direction. */
 #define SFE_RULE_CREATE_FLAG_RETURN_SRC_INTERFACE_CHECK  (1<<11)
 								/**< Check source interface on the return direction. */
-#define SFE_RULE_CREATE_FLAG_FLOW_TRANSMIT_FAST (1<<12) 	/**< Original flow can be transmitted fast. */
-#define SFE_RULE_CREATE_FLAG_RETURN_TRANSMIT_FAST (1<<13) 	/**< Return flow can be transmitted fast. */
+#define SFE_RULE_CREATE_FLAG_FLOW_TRANSMIT_FAST (1<<12)		/**< Original flow can be transmitted fast. */
+#define SFE_RULE_CREATE_FLAG_RETURN_TRANSMIT_FAST (1<<13)	/**< Return flow can be transmitted fast. */
 #define SFE_RULE_CREATE_FLAG_FLOW_SRC_INTERFACE_CHECK_NO_FLUSH  (1<<14)
 								/**< Check source interface on the flow direction but do not flush the connection. */
 #define SFE_RULE_CREATE_FLAG_RETURN_SRC_INTERFACE_CHECK_NO_FLUSH  (1<<15)
@@ -94,6 +94,7 @@
 #define SFE_RULE_CREATE_SRC_MAC_VALID      (1<<9)	/**< Source MAC address is valid. */
 #define SFE_RULE_CREATE_MARK_VALID         (1<<10)	/**< SKB marking fields are valid. */
 #define SFE_RULE_CREATE_NO_SRC_IDENT       (1<<11)	/**< Zero out the src ident. */
+#define SFE_RULE_CREATE_TRUSTSEC_VALID     (1<<12)	/**< trustsec fields are valid. */
 
 /*
  * Source MAC address validity flags; used with the mac_valid_flags field in the sfe_ipv4_src_mac_rule structure.
@@ -101,6 +102,14 @@
 #define SFE_SRC_MAC_FLOW_VALID 0x01
 		/**< MAC address for the flow interface is valid. */
 #define SFE_SRC_MAC_RETURN_VALID 0x02
+		/**< MAC address for the return interface is valid. */
+
+/*
+ * Ingress/egress trustsec validity flags; used with the CREATE_TRUSTSEC_VALID and sfe_trustsec_rule.
+ */
+#define SFE_TRUSTSEC_INGRESS_SGT_VALID 0x01
+		/**< Ingress SGT for the flow interface is valid. */
+#define SFE_TRUSTSEC_EGRESS_SGT_VALID 0x02
 		/**< MAC address for the return interface is valid. */
 
 /**
@@ -307,6 +316,15 @@ struct sfe_vlan_rule {
 };
 
 /**
+ * Trustsec connection rule structure.
+ */
+struct sfe_trustsec_rule {
+	u16 ingress_sgt;	/**< Trustsec SGT for ingress packets. */
+	u16 egress_sgt;		/**< Trustsec SGT for egress packets. */
+	u8 sgt_valid_flags;	/**< SGT validity flags. */
+};
+
+/**
  * Acceleration direction rule structure.
  * Sometimes it is useful to accelerate traffic in one direction and not in another.
  */
@@ -343,6 +361,8 @@ struct sfe_ipv4_rule_create_msg {
 	struct sfe_dscp_rule dscp_rule;			/**< DSCP-related acceleration parameters. */
 	struct sfe_vlan_rule vlan_primary_rule;		/**< Primary VLAN-related acceleration parameters. */
 	struct sfe_vlan_rule vlan_secondary_rule;	/**< Secondary VLAN-related acceleration parameters. */
+	struct sfe_trustsec_rule trustsec_rule;		/**< Trustsec-related acceleration parameters. */
+
 #ifdef CONFIG_XFRM
 	struct sfe_acceleration_direction_rule direction_rule;
 							/**< Direction related acceleration parameters. */
@@ -500,6 +520,8 @@ struct sfe_ipv6_rule_create_msg {
 	struct sfe_dscp_rule dscp_rule;			/**< DSCP-related acceleration parameters. */
 	struct sfe_vlan_rule vlan_primary_rule;		/**< VLAN-related acceleration parameters. */
 	struct sfe_vlan_rule vlan_secondary_rule;	/**< VLAN-related acceleration parameters. */
+	struct sfe_trustsec_rule trustsec_rule;		/**< Trustsec-related acceleration parameters. */
+
 #ifdef CONFIG_XFRM
 	struct sfe_acceleration_direction_rule direction_rule;
 							/**< Direction-related acceleration parameters. */

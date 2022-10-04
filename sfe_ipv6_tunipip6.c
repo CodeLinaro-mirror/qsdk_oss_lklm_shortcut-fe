@@ -29,6 +29,7 @@
 #include "sfe_flow_cookie.h"
 #include "sfe_ipv6.h"
 #include "sfe_vlan.h"
+#include "sfe_trustsec.h"
 
 /*
  * sfe_ipv6_recv_tunipip6()
@@ -143,6 +144,17 @@ int sfe_ipv6_recv_tunipip6(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_
 				htons(l2_info->vlan_hdr[1].tpid), l2_info->vlan_hdr[1].tci);
 			return 0;
 		}
+
+		/*
+		 * Do we expect a trustsec header for this flow ?
+		 */
+		if (unlikely(!sfe_trustsec_validate_ingress_sgt(skb, cm->ingress_trustsec_valid, &cm->ingress_trustsec_hdr, l2_info))) {
+			rcu_read_unlock();
+			sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_INGRESS_TRUSTSEC_SGT_MISMATCH);
+			DEBUG_TRACE("Trustsec SGT mismatch. skb=%px\n", skb);
+			return 0;
+		}
+
 		skb_reset_network_header(skb);
 		skb_pull(skb, ihl);
 		skb_reset_transport_header(skb);
@@ -203,6 +215,13 @@ int sfe_ipv6_recv_tunipip6(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_
 	atomic_add(len, &cm->rx_byte_count);
 
 	skb->dev = cm->xmit_dev;
+
+	/*
+	 * For trustsec flows, add trustsec header before L2 header is added.
+	 */
+	if (unlikely(cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_INSERT_EGRESS_TRUSTSEC_SGT)) {
+		sfe_trustsec_add_sgt(skb, &cm->egress_trustsec_hdr);
+	}
 
 	/*
 	 * Check to see if we need to add VLAN tags
