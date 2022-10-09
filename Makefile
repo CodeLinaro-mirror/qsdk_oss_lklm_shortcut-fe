@@ -35,6 +35,10 @@ qca-nss-sfe-objs += $(SFE_IPV6_OBJS)
 ccflags-y += -DSFE_SUPPORT_IPV6
 endif
 
+ifdef SFE_RFS_SUPPORTED
+ccflags-y += -DSFE_RFS_SUPPORTED
+endif
+
 ifdef SFE_PROCESS_LOCAL_OUT
 ccflags-y += -DSFE_PROCESS_LOCAL_OUT
 endif
