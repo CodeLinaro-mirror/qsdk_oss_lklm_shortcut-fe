@@ -1338,7 +1338,7 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	original_cm->match_dev = src_dev;
 	original_cm->match_protocol = tuple->protocol;
 	original_cm->match_src_ip = tuple->flow_ip;
-	original_cm->match_src_port = netif_is_vxlan(src_dev) ? 0 : tuple->flow_ident;
+	original_cm->match_src_port = (msg->rule_flags & SFE_RULE_CREATE_NO_SRC_IDENT) ? 0 : tuple->flow_ident;
 	original_cm->match_dest_ip = tuple->return_ip;
 	original_cm->match_dest_port = tuple->return_ident;
 
@@ -1545,13 +1545,9 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	reply_cm->match_src_ip = msg->conn_rule.return_ip_xlate;
 
 	/*
-	 * Keep source port as 0 for VxLAN tunnels.
+	 * Keep source port as 0 for tunnels requiring 4-tuple match (eg: VxLAN).
 	 */
-	if (netif_is_vxlan(src_dev) || netif_is_vxlan(dest_dev)) {
-		reply_cm->match_src_port = 0;
-	} else {
-		reply_cm->match_src_port = msg->conn_rule.return_ident_xlate;
-	}
+	reply_cm->match_src_port = (msg->rule_flags & SFE_RULE_CREATE_NO_SRC_IDENT) ? 0 : msg->conn_rule.return_ident_xlate;
 
 	reply_cm->match_dest_ip = msg->conn_rule.flow_ip_xlate;
 	reply_cm->match_dest_port = msg->conn_rule.flow_ident_xlate;

@@ -93,6 +93,7 @@
 #define SFE_RULE_CREATE_DIRECTION_VALID    (1<<8)	/**< Acceleration direction is valid. */
 #define SFE_RULE_CREATE_SRC_MAC_VALID      (1<<9)	/**< Source MAC address is valid. */
 #define SFE_RULE_CREATE_MARK_VALID         (1<<10)	/**< SKB marking fields are valid. */
+#define SFE_RULE_CREATE_NO_SRC_IDENT       (1<<11)	/**< Zero out the src ident. */
 
 /*
  * Source MAC address validity flags; used with the mac_valid_flags field in the sfe_ipv4_src_mac_rule structure.
