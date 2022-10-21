@@ -561,12 +561,6 @@ int sfe_ipv6_recv_udp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 	this_cpu_inc(si->stats_pcpu->packets_forwarded64);
 
 	/*
-	 * We're going to check for GSO flags when we transmit the packet so
-	 * start fetching the necessary cache line now.
-	 */
-	prefetch(skb_shinfo(skb));
-
-	/*
 	 * We do per packet condition check before we could fast xmit the
 	 * packet.
 	 */
@@ -574,6 +568,12 @@ int sfe_ipv6_recv_udp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 		this_cpu_inc(si->stats_pcpu->packets_fast_xmited64);
 		return 1;
 	}
+
+	/*
+	 * We're going to check for GSO flags when we transmit the packet so
+	 * start fetching the necessary cache line now.
+	 */
+	prefetch(skb_shinfo(skb));
 
 	/*
 	 * Mark that this packet has been fast forwarded.

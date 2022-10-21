@@ -36,6 +36,9 @@
 #include <net/protocol.h>
 #include <net/gre.h>
 
+#if defined(SFE_RFS_SUPPORTED)
+#include <ppe_rfs.h>
+#endif
 #include "sfe_debug.h"
 #include "sfe_api.h"
 #include "sfe.h"
@@ -175,10 +178,10 @@ sfe_ipv4_find_connection_match_rcu(struct sfe_ipv4 *si, struct net_device *dev, 
 	lhead = &si->hlist_conn_match_hash_head[conn_match_idx];
 
 	hlist_for_each_entry_rcu(cm, lhead, hnode) {
-		if (cm->match_src_port != src_port
-			   || cm->match_dest_port != dest_port
-			   || cm->match_src_ip != src_ip
+		if (cm->match_src_ip != src_ip
 			   || cm->match_dest_ip != dest_ip
+			   || cm->match_src_port != src_port
+			   || cm->match_dest_port != dest_port
 			   || cm->match_protocol != protocol) {
 			continue;
 		}
@@ -334,6 +337,7 @@ static void sfe_ipv4_update_summary_stats(struct sfe_ipv4 *si,  struct sfe_ipv4_
 		stats->pppoe_decap_packets_forwarded64 += s->pppoe_decap_packets_forwarded64;
 		stats->pppoe_bridge_packets_forwarded64 += s->pppoe_bridge_packets_forwarded64;
 		stats->pppoe_bridge_packets_3tuple_forwarded64 += s->pppoe_bridge_packets_3tuple_forwarded64;
+		stats->connection_create_requests_overflow64 += s->connection_create_requests_overflow64;
 	}
 
 }
@@ -746,6 +750,25 @@ void sfe_ipv4_flush_connection(struct sfe_ipv4 *si,
 	this_cpu_inc(si->stats_pcpu->connection_flushes64);
 	sfe_ipv4_sync_status(si, c, reason);
 
+#if defined(SFE_RFS_SUPPORTED)
+	if (sfe_is_ppe_rfs_feature_enabled()) {
+		struct ppe_rfs_ipv4_rule_destroy_msg pr4rd;
+
+		pr4rd.original_dev = c->original_dev;
+		pr4rd.reply_dev = c->reply_dev;
+
+		pr4rd.tuple.flow_ip = ntohl(c->src_ip);
+		pr4rd.tuple.flow_ident = ntohs(c->src_port);
+		pr4rd.tuple.return_ip = ntohl(c->dest_ip);
+		pr4rd.tuple.return_ident = ntohs(c->dest_port);
+		pr4rd.tuple.protocol = c->protocol;
+
+		if (ppe_rfs_ipv4_rule_destroy(&pr4rd) != PPE_RFS_RET_SUCCESS) {
+			DEBUG_INFO("%p: Error in deleting ppe rules\n", &pr4rd);
+		}
+	}
+#endif
+
 	/*
 	 * Release our hold of the source and dest devices and free the memory
 	 * for our connection objects.
@@ -919,7 +942,7 @@ int sfe_ipv4_recv(struct net_device *dev, struct sk_buff *skb, struct sfe_l2_inf
 	}
 
 	if (IPPROTO_ESP == protocol) {
-		return sfe_ipv4_recv_esp(si, skb, dev, len, iph, ihl, sync_on_find, tun_outer);
+		return sfe_ipv4_recv_esp(si, skb, dev, len, iph, ihl, sync_on_find, l2_info, tun_outer);
 	}
 
 	if (IPPROTO_ICMP == protocol) {
@@ -1254,6 +1277,20 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 
 	spin_lock_bh(&si->lock);
 
+#if (defined(SFE_MEM_PROFILE_MEDIUM) || defined(SFE_MEM_PROFILE_LOW))
+	if (si->num_connections  >= sfe_ipv4_max_conn_count()) {
+		spin_unlock_bh(&si->lock);
+		this_cpu_inc(si->stats_pcpu->connection_create_requests_overflow64);
+		kfree(reply_cm);
+		kfree(original_cm);
+		kfree(c);
+		dev_put(src_dev);
+		dev_put(dest_dev);
+		DEBUG_WARN("%px: Maximum connection count(%d), reached %d\n", msg, sfe_ipv4_max_conn_count(), si->num_connections);
+		return -EPERM;
+	}
+#endif
+
 	/*
 	 * Check to see if there is already a flow that matches the rule we're
 	 * trying to create.  If there is then we can't create a new one.
@@ -1301,7 +1338,7 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	original_cm->match_dev = src_dev;
 	original_cm->match_protocol = tuple->protocol;
 	original_cm->match_src_ip = tuple->flow_ip;
-	original_cm->match_src_port = netif_is_vxlan(src_dev) ? 0 : tuple->flow_ident;
+	original_cm->match_src_port = (msg->rule_flags & SFE_RULE_CREATE_NO_SRC_IDENT) ? 0 : tuple->flow_ident;
 	original_cm->match_dest_ip = tuple->return_ip;
 	original_cm->match_dest_port = tuple->return_ident;
 
@@ -1409,9 +1446,7 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 			/*
 			 * Dont enable CSUM offload
 			 */
-#if 0
 			original_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_CSUM_OFFLOAD;
-#endif
 		}
 	}
 
@@ -1510,13 +1545,9 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	reply_cm->match_src_ip = msg->conn_rule.return_ip_xlate;
 
 	/*
-	 * Keep source port as 0 for VxLAN tunnels.
+	 * Keep source port as 0 for tunnels requiring 4-tuple match (eg: VxLAN).
 	 */
-	if (netif_is_vxlan(src_dev) || netif_is_vxlan(dest_dev)) {
-		reply_cm->match_src_port = 0;
-	} else {
-		reply_cm->match_src_port = msg->conn_rule.return_ident_xlate;
-	}
+	reply_cm->match_src_port = (msg->rule_flags & SFE_RULE_CREATE_NO_SRC_IDENT) ? 0 : msg->conn_rule.return_ident_xlate;
 
 	reply_cm->match_dest_ip = msg->conn_rule.flow_ip_xlate;
 	reply_cm->match_dest_port = msg->conn_rule.flow_ident_xlate;
@@ -1749,9 +1780,7 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 			/*
 			 * Dont enable CSUM offload
 			 */
-#if 0
 			 reply_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_CSUM_OFFLOAD;
-#endif
 		}
 	}
 
@@ -1900,6 +1929,38 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 
 	return 0;
 }
+
+#if defined(SFE_RFS_SUPPORTED)
+/*
+ * sfe_ipv4_fill_connection_dev()
+ */
+void sfe_ipv4_fill_connection_dev(struct sfe_ipv4_rule_destroy_msg *msg, struct net_device **original_dev, struct net_device **reply_dev)
+{
+	struct sfe_ipv4 *si = &__si;
+	struct sfe_ipv4_connection *c;
+	struct sfe_ipv4_5tuple *tuple = &msg->tuple;
+
+	this_cpu_inc(si->stats_pcpu->connection_destroy_requests64);
+	spin_lock_bh(&si->lock);
+
+	/*
+	 * Check to see if we have a flow that matches the rule we're trying
+	 * to destroy.  If there isn't then we can't destroy it.
+	 */
+	c = sfe_ipv4_find_connection(si, tuple->protocol, tuple->flow_ip, tuple->flow_ident,
+					      tuple->return_ip, tuple->return_ident);
+	if (!c) {
+		*original_dev = NULL;
+		*reply_dev = NULL;
+		spin_unlock_bh(&si->lock);
+		return;
+	}
+
+	*original_dev = c->original_dev;
+	*reply_dev = c->reply_dev;
+	spin_unlock_bh(&si->lock);
+}
+#endif
 
 /*
  * sfe_ipv4_destroy_rule()
@@ -2486,7 +2547,8 @@ static bool sfe_ipv4_debug_dev_read_stats(struct sfe_ipv4 *si, char *buffer, cha
 			      "pppoe_encap_pkts_fwded=\"%llu\" "
 			      "pppoe_decap_pkts_fwded=\"%llu\" "
 			      "pppoe_bridge_pkts_fwded=\"%llu\" "
-			      "pppoe_bridge_pkts_3tuple_fwded=\"%llu\" />\n",
+			      "pppoe_bridge_pkts_3tuple_fwded=\"%llu\" "
+			      "connection_create_requests_overflow64=\"%llu\" />\n",
 				num_conn,
 				stats.packets_dropped64,
 				stats.packets_fast_xmited64,
@@ -2503,7 +2565,8 @@ static bool sfe_ipv4_debug_dev_read_stats(struct sfe_ipv4 *si, char *buffer, cha
 				stats.pppoe_encap_packets_forwarded64,
 				stats.pppoe_decap_packets_forwarded64,
 				stats.pppoe_bridge_packets_forwarded64,
-				stats.pppoe_bridge_packets_3tuple_forwarded64);
+				stats.pppoe_bridge_packets_3tuple_forwarded64,
+				stats.connection_create_requests_overflow64);
 	if (copy_to_user(buffer + *total_read, msg, CHAR_DEV_MSG_SIZE)) {
 		return false;
 	}

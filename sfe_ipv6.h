@@ -102,18 +102,62 @@ struct sfe_ipv6_connection_match {
 	 * References to other objects.
 	 */
 	struct hlist_node hnode;
-	struct sfe_ipv6_connection *connection;
-	struct sfe_ipv6_connection_match *counter_match;
-					/* Matches the flow in the opposite direction as the one in connection */
 	/*
 	 * Characteristics that identify flows that match this rule.
 	 */
-	struct net_device *match_dev;	/* Network device */
-	u8 match_protocol;		/* Protocol */
 	struct sfe_ipv6_addr match_src_ip[1];	/* Source IP address */
 	struct sfe_ipv6_addr match_dest_ip[1];	/* Destination IP address */
 	__be16 match_src_port;		/* Source port/connection ident */
 	__be16 match_dest_port;		/* Destination port/connection ident */
+	u8 match_protocol;		/* Protocol */
+	u32 flags;			/* Bit flags */
+	u16 xmit_dest_mac[ETH_ALEN / 2];
+					/* Destination MAC address to use when forwarding */
+	u16 xmit_src_mac[ETH_ALEN / 2];
+					/* Source MAC address to use when forwarding */
+	/*
+	 * Packet transmit information.
+	 */
+	struct net_device *xmit_dev;	/* Network device on which to transmit */
+	/*
+	 * xmit device's feature
+	 */
+	netdev_features_t features;
+	unsigned short int xmit_dev_mtu;
+					/* Interface MTU */
+	/*
+	 * Size of all needed L2 headers
+	 */
+	u16 l2_hdr_size;
+
+	/*
+	 * Stats recorded in a sync period. These stats will be added to
+	 * rx_packet_count64/rx_byte_count64 after a sync period.
+	 */
+	atomic_t rx_packet_count;
+	atomic_t rx_byte_count;
+
+	struct net_device *match_dev;	/* Network device */
+
+	/*
+	 * Control the operations of the match.
+	 */
+#ifdef CONFIG_NF_FLOW_COOKIE
+	u32 flow_cookie;		/* used flow cookie, for debug */
+#endif
+#ifdef CONFIG_XFRM
+	u32 flow_accel;            	/* The flow accelerated or not */
+#endif
+	struct sfe_ipv6_connection *connection;
+	struct sfe_ipv6_connection_match *counter_match;
+					/* Matches the flow in the opposite direction as the one in connection */
+
+	/*
+	 * Connection state that we track once we match.
+	 */
+	union {				/* Protocol-specific state */
+		struct sfe_ipv6_tcp_connection_match tcp;
+	} protocol_state;
 
 	struct udp_sock *up;		/* Stores UDP sock information; valid only in decap path */
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 13, 0))
@@ -123,35 +167,10 @@ struct sfe_ipv6_connection_match {
 #endif
 
 	/*
-	 * Control the operations of the match.
-	 */
-	u32 flags;			/* Bit flags */
-#ifdef CONFIG_NF_FLOW_COOKIE
-	u32 flow_cookie;		/* used flow cookie, for debug */
-#endif
-#ifdef CONFIG_XFRM
-	u32 flow_accel;            	/* The flow accelerated or not */
-#endif
-
-	/*
-	 * Connection state that we track once we match.
-	 */
-	union {				/* Protocol-specific state */
-		struct sfe_ipv6_tcp_connection_match tcp;
-	} protocol_state;
-
-	/*
 	 * VLAN headers
 	 */
 	struct sfe_vlan_hdr ingress_vlan_hdr[SFE_MAX_VLAN_DEPTH];
 	struct sfe_vlan_hdr egress_vlan_hdr[SFE_MAX_VLAN_DEPTH];
-
-	/*
-	 * Stats recorded in a sync period. These stats will be added to
-	 * rx_packet_count64/rx_byte_count64 after a sync period.
-	 */
-	atomic_t rx_packet_count;
-	atomic_t rx_byte_count;
 
 	/*
 	 * Packet translation information.
@@ -172,16 +191,6 @@ struct sfe_ipv6_connection_match {
 	u32 priority;
 	u32 dscp;
 
-	/*
-	 * Packet transmit information.
-	 */
-	struct net_device *xmit_dev;	/* Network device on which to transmit */
-	unsigned short int xmit_dev_mtu;
-					/* Interface MTU */
-	u16 xmit_dest_mac[ETH_ALEN / 2];
-					/* Destination MAC address to use when forwarding */
-	u16 xmit_src_mac[ETH_ALEN / 2];
-					/* Source MAC address to use when forwarding */
 
 	u8 ingress_vlan_hdr_cnt;        /* Ingress active vlan headers count */
 	u8 egress_vlan_hdr_cnt;         /* Egress active vlan headers count */
@@ -200,15 +209,7 @@ struct sfe_ipv6_connection_match {
 
 	struct net_device *top_interface_dev;	/* Used by tunipip6 to store decap VLAN netdevice.*/
 
-	/*
-	 * Size of all needed L2 headers
-	 */
-	u16 l2_hdr_size;
 
-	/*
-	 * xmit device's feature
-	 */
-	netdev_features_t features;
 
 	bool sawf_valid;		/* Indicates mark has valid SAWF information. */
 };
@@ -350,6 +351,7 @@ struct sfe_ipv6_stats {
 	u64 pppoe_decap_packets_forwarded64;	/* Number of IPv6 PPPoE decap packets forwarded */
 	u64 pppoe_bridge_packets_forwarded64;	/* Number of IPv6 PPPoE decap packets forwarded */
 	u64 pppoe_bridge_packets_3tuple_forwarded64;    /* Number of IPv6 PPPoE bridge packets forwarded based on 3-tuple info */
+	u64 connection_create_requests_overflow64;	/* Number of IPv6 connection create requests after reaching max limit */
 };
 
 /*
@@ -475,6 +477,9 @@ static inline void sfe_ipv6_change_dsfield(struct ipv6hdr *iph, u8 dscp)
 bool sfe_ipv6_service_class_stats_get(uint8_t sid, uint64_t *bytes, uint64_t *packets);
 void sfe_ipv6_exception_stats_inc(struct sfe_ipv6 *si, enum sfe_ipv6_exception_events reason);
 void sfe_ipv6_service_class_stats_inc(struct sfe_ipv6 *si, uint8_t sid, uint64_t bytes);
+#if defined(SFE_RFS_SUPPORTED)
+void sfe_ipv6_fill_connection_dev(struct sfe_ipv6_rule_destroy_msg *msg, struct net_device **original_dev, struct net_device **reply_dev);
+#endif
 struct sfe_ipv6_connection_match *
 sfe_ipv6_find_connection_match_rcu(struct sfe_ipv6 *si, struct net_device *dev, u8 protocol,
 					struct sfe_ipv6_addr *src_ip, __be16 src_port,

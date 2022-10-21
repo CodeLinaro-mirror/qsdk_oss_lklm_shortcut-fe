@@ -142,6 +142,13 @@ extern int nf_ct_tcp_no_window_check;
 bool sfe_fast_xmit_check(struct sk_buff *skb, netdev_features_t features);
 
 /*
+ * sfe_is_ppe_rfs_feature_enabled()
+ */
+#if defined(SFE_RFS_SUPPORTED)
+bool sfe_is_ppe_rfs_feature_enabled(void);
+#endif
+
+/*
  * This callback will be called in a timer
  * at 100 times per second to sync stats back to
  * Linux connection track.
