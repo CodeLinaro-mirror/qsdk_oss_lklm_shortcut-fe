@@ -457,5 +457,6 @@ sfe_ipv4_find_connection_match_rcu(struct sfe_ipv4 *si, struct net_device *dev, 
 
 void sfe_ipv4_exit(void);
 int sfe_ipv4_init(void);
+bool sfe_ipv4_cancel_delayed_work_sync(void);
 
 #endif /* __SFE_IPV4_H */

@@ -2839,6 +2839,15 @@ static struct nf_hook_ops sfe_ipv4_ops_local_out[] __read_mostly = {
 #endif
 
 /*
+ * sfe_ipv4_cancel_delayed_work_sync()
+ */
+bool sfe_ipv4_cancel_delayed_work_sync(void)
+{
+	struct sfe_ipv4 *si = &__si;
+	return cancel_delayed_work_sync(&si->sync_dwork);
+}
+
+/*
  * sfe_ipv4_init()
  */
 int sfe_ipv4_init(void)

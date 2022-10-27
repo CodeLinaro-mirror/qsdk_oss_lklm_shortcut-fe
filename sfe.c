@@ -1078,6 +1078,15 @@ void sfe_ipv4_notify_unregister(void)
 {
 	struct sfe_ctx_instance_internal *sfe_ctx = &__sfe_ctx;
 
+	/*
+	 * The race condition may occur:
+	 * 1. SFE delayed work reads ipv4_stats_sync_cb which is ECM's connection_sync callback.
+	 * 2. ecm.ko is being 'rmmod'ed.
+	 * 3. SFE delayed work calls ipv4_stats_sync_cb if ipv4_stats_sync_cb is not NULL.
+	 * To eliminate the race condition, we should cancel SFE delayed work first.
+	 */
+	sfe_ipv4_cancel_delayed_work_sync();
+
 	spin_lock_bh(&sfe_ctx->lock);
 
 	/*
@@ -1575,6 +1584,15 @@ EXPORT_SYMBOL(sfe_ipv6_notify_register);
 void sfe_ipv6_notify_unregister(void)
 {
 	struct sfe_ctx_instance_internal *sfe_ctx = &__sfe_ctx;
+
+	/*
+	 * The race condition may occur:
+	 * 1. SFE delayed work reads ipv6_stats_sync_cb which is ECM's connection_sync callback.
+	 * 2. ecm.ko is being 'rmmod'ed.
+	 * 3. SFE delayed work calls ipv6_stats_sync_cb if ipv6_stats_sync_cb is not NULL.
+	 * To eliminate the race condition, we should cancel SFE delayed work first.
+	 */
+	sfe_ipv6_cancel_delayed_work_sync();
 
 	spin_lock_bh(&sfe_ctx->lock);
 	/*
