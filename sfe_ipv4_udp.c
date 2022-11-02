@@ -32,6 +32,7 @@
 #include "sfe_pppoe.h"
 #include "sfe_vlan.h"
 #include "sfe_trustsec.h"
+#include "sfe_ipv4_multicast.h"
 
 /*
  * sfe_ipv4_udp_sk_deliver()
@@ -391,6 +392,16 @@ int sfe_ipv4_recv_udp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 	/*
 	 * From this point on we're good to modify the packet.
 	 */
+
+	/*
+	 * Multicast share the same check with unicast, from this point, they are going to
+	 * divert.
+	 */
+	if (unlikely(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_MULTICAST)) {
+		sfe_ipv4_recv_multicast(si, skb, ihl, len, cm, l2_info, tun_outer);
+		rcu_read_unlock();
+		return 1;
+	}
 
 	/*
 	 * For PPPoE flows, add PPPoE header before L2 header is added.

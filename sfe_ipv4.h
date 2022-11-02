@@ -85,6 +85,37 @@ struct sfe_ipv4_tcp_connection_match {
 					/* Insert Trustsec SGT */
 #define SFE_IPV4_CONNECTION_MATCH_FLAG_FAST_QDISC_XMIT (1<<20)
 					/* Fast Qdisc transmit enabled */
+#define SFE_IPV4_CONNECTION_MATCH_FLAG_MULTICAST (1<<21)
+					/* Multicast flow*/
+#define SFE_IPV4_CONNECTION_MATCH_FLAG_MULTICAST_CHANGED (1<<22)
+					/* Multicast flow changed the data */
+
+/*
+ * IPv4 multicast destination structure
+ */
+struct sfe_ipv4_mc_dest {
+	struct list_head list;		/* Link in the list*/
+	struct rcu_head rcu;            /* delay rcu free */
+	uint32_t flags;				/* Bit flags associated with the rule */
+	u16 xmit_dest_mac[ETH_ALEN / 2];	/* Destination MAC address to use when forwarding */
+	u16 xmit_src_mac[ETH_ALEN / 2];		/* Src MAC address to use when forwarding */
+	struct net_device *xmit_dev;		/* Transmit interface */
+	netdev_features_t features;		/* Device features */
+
+	uint32_t xlate_src_ip;			/* Translated flow IP address */
+	uint32_t xlate_src_ident;		/* Translated flow ident (e.g. port) */
+	uint32_t xlate_src_csum_adjustment;	/* Transport layer checksum adjustment after source translation */
+	u16 xlate_src_partial_csum_adjustment;	/* Increase compute checksum adjustment */
+	u16 l2_hdr_size;			/* l2 hdr length */
+
+	uint16_t if_mac[3];			/* Interface MAC address */
+	u16 pppoe_session_id;			/* PPPOE header session id */
+	u8 pppoe_remote_mac[ETH_ALEN];		/* PPPOE remote mac address */
+	u8 egress_vlan_hdr_cnt;			/* Active egress vlan headers count */
+	u8 reserved[1];				/* Reserved for alignment */
+	struct sfe_vlan_hdr egress_vlan_hdr[SFE_MAX_VLAN_DEPTH];
+						/* VLAN Tag stack for the egress packets */
+};
 
 /*
  * IPv4 connection matching structure.
@@ -214,6 +245,11 @@ struct sfe_ipv4_connection_match {
 	 */
 	u16 pppoe_session_id;
 	u8 pppoe_remote_mac[ETH_ALEN];
+
+	/*
+	 * Multicast destination device list
+	 */
+	struct list_head mc_list;
 
 	struct net_device *top_interface_dev;	/* Used by tun6rd to store decap VLAN netdevice.*/
 

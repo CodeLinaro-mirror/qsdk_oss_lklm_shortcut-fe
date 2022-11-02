@@ -762,6 +762,152 @@ static void sfe_recv_undo_parse_l2(struct net_device *dev, struct sk_buff *skb, 
 }
 
 /*
+ * sfe_destroy_ipv4_mc_rule_msg()
+ * 	Convert mc destroy message format from ecm to sfe
+ *
+ * @param sfe_ctx SFE context
+ * @param msg The IPv4 message
+ *
+ * @return sfe_tx_status_t The status of the Tx operation
+ */
+sfe_tx_status_t sfe_destroy_ipv4_mc_rule_msg(struct sfe_ctx_instance_internal *sfe_ctx, struct sfe_ipv4_msg *msg)
+{
+	struct sfe_response_msg *response;
+
+	response = sfe_alloc_response_msg(SFE_MSG_TYPE_IPV4, msg);
+	if (!response) {
+		sfe_incr_exceptions(SFE_EXCEPTION_ENQUEUE_FAILED);
+		return SFE_TX_FAILURE_QUEUE;
+	}
+
+	/*
+	 * TO DO destroy mc rule.
+	 */
+	sfe_ipv4_destroy_mc_rule(&(msg->msg.mc_rule_destroy));
+	DEBUG_TRACE("%p: Received a MC destroy rule msg\n", msg);
+
+	/*
+	 * Try to queue response message
+	 */
+	((struct sfe_ipv4_msg *)response->msg)->cm.response = msg->cm.response = SFE_CMN_RESPONSE_ACK;
+	sfe_enqueue_msg(sfe_ctx, response);
+
+	return SFE_TX_SUCCESS;
+}
+
+/*
+ * sfe_create_ipv4_mc_rule_msg()
+ * 	Convert create mc message format from ecm to sfe
+ *
+ * @param sfe_ctx SFE context
+ * @param msg The IPv4 message
+ *
+ * @return sfe_tx_status_t The status of the Tx operation
+ */
+sfe_tx_status_t sfe_create_ipv4_mc_rule_msg(struct sfe_ctx_instance_internal *sfe_ctx, struct sfe_ipv4_msg *msg)
+{
+	struct net_device *src_dev = NULL;
+	struct sfe_response_msg *response;
+	enum sfe_cmn_response ret = SFE_CMN_RESPONSE_ACK;
+	bool is_routed = true;
+
+	response = sfe_alloc_response_msg(SFE_MSG_TYPE_IPV4, msg);
+	if (!response) {
+		sfe_incr_exceptions(SFE_EXCEPTION_ENQUEUE_FAILED);
+		return SFE_TX_FAILURE_QUEUE;
+	}
+
+	if (!(msg->msg.rule_create.valid_flags & SFE_RULE_CREATE_CONN_VALID)) {
+		DEBUG_TRACE("%p: SFE_RULE_CREATE_CONN_VALID \n", msg);
+		ret = SFE_CMN_RESPONSE_EMSG;
+		sfe_incr_exceptions(SFE_EXCEPTION_CONNECTION_INVALID);
+		goto failed_ret;
+	}
+
+	/*
+	 * Bridge flows are accelerated if L2 feature is enabled.
+	 */
+	if (msg->msg.rule_create.rule_flags & SFE_RULE_CREATE_FLAG_BRIDGE_FLOW) {
+		if (!sfe_is_l2_feature_enabled()) {
+			ret = SFE_CMN_RESPONSE_EINTERFACE;
+			sfe_incr_exceptions(SFE_EXCEPTION_NOT_SUPPORT_BRIDGE);
+			goto failed_ret;
+		}
+		is_routed = false;
+	}
+
+	src_dev = dev_get_by_index(&init_net, msg->msg.mc_rule_create.conn_rule.flow_top_interface_num);
+	if (!src_dev || !sfe_routed_dev_allow(src_dev, is_routed, true)) {
+		if (!src_dev) {
+			DEBUG_TRACE("%p: No src dev found\n", msg);
+		} else {
+			DEBUG_TRACE("%p: routed not allowed\n", msg);
+		}
+		ret = SFE_CMN_RESPONSE_EINTERFACE;
+		sfe_incr_exceptions(SFE_EXCEPTION_SRC_DEV_NOT_L3);
+		goto failed_ret;
+	}
+
+	DEBUG_TRACE("%p: Received a MC create rule msg\n", msg);
+
+	if (!sfe_ipv4_create_mc_rule(&msg->msg.mc_rule_create)) {
+		/* success */
+		ret = SFE_CMN_RESPONSE_ACK;
+#if defined(SFE_RFS_SUPPORTED)
+		if (sfe_is_ppe_rfs_feature_enabled()) {
+			struct ppe_rfs_ipv4_rule_create_msg pr4rc;
+			struct sfe_ipv4_rule_create_msg *rule_create = &msg->msg.rule_create;
+
+			pr4rc.valid_flags = rule_create->valid_flags;
+			pr4rc.rule_flags = rule_create->rule_flags;
+
+			pr4rc.tuple.flow_ip = ntohl(rule_create->tuple.flow_ip);
+			pr4rc.tuple.flow_ident = ntohs(rule_create->tuple.flow_ident);
+			pr4rc.tuple.return_ip = ntohl(rule_create->tuple.return_ip);
+			pr4rc.tuple.return_ident = ntohs(rule_create->tuple.return_ident);
+			pr4rc.tuple.protocol = rule_create->tuple.protocol;
+			pr4rc.conn_rule.flow_mtu = rule_create->conn_rule.flow_mtu;
+			pr4rc.conn_rule.return_mtu = rule_create->conn_rule.return_mtu;
+			pr4rc.conn_rule.flow_ip_xlate = ntohl(rule_create->conn_rule.flow_ip_xlate);
+			pr4rc.conn_rule.flow_ident_xlate = ntohs(rule_create->conn_rule.flow_ident_xlate);
+			pr4rc.conn_rule.return_ip_xlate = ntohl(rule_create->conn_rule.return_ip_xlate);
+			pr4rc.conn_rule.return_ident_xlate = ntohs(rule_create->conn_rule.return_ident_xlate);
+			pr4rc.conn_rule.flow_interface_num = rule_create->conn_rule.flow_interface_num;
+			pr4rc.conn_rule.return_interface_num = rule_create->conn_rule.return_interface_num;
+
+			if (rule_create->rule_flags & SFE_RULE_CREATE_FLAG_BRIDGE_FLOW) {
+				pr4rc.rule_flags |= PPE_RFS_V4_RULE_FLAG_BRIDGE_FLOW;
+			}
+
+			pr4rc.rule_flags |= PPE_RFS_V4_RULE_FLAG_RETURN_VALID | PPE_RFS_V4_RULE_FLAG_FLOW_VALID;
+
+			if (ppe_rfs_ipv4_rule_create(&pr4rc) != PPE_RFS_RET_SUCCESS) {
+				DEBUG_TRACE("%p: Error in pushing PPE RFS rules\n", msg);
+			}
+		}
+#endif
+	} else {
+		/* Failed */
+		ret = SFE_CMN_RESPONSE_EMSG;
+		sfe_incr_exceptions(SFE_EXCEPTION_CREATE_FAILED);
+	}
+
+
+failed_ret:
+	if (src_dev) {
+		dev_put(src_dev);
+	}
+
+	/*
+	 * Try to queue response message
+	 */
+	((struct sfe_ipv4_msg *)response->msg)->cm.response = msg->cm.response = ret;
+	sfe_enqueue_msg(sfe_ctx, response);
+
+	return SFE_TX_SUCCESS;
+
+}
+/*
  * sfe_create_ipv4_rule_msg()
  *	Convert create message format from ecm to sfe
  *
@@ -1029,7 +1175,11 @@ sfe_tx_status_t sfe_ipv4_tx(struct sfe_ctx_instance *sfe_ctx, struct sfe_ipv4_ms
 	case SFE_TX_DESTROY_RULE_MSG:
 		return sfe_destroy_ipv4_rule_msg(SFE_CTX_TO_PRIVATE(sfe_ctx), msg);
 	case SFE_TX_CONN_STATS_SYNC_MANY_MSG:
-		return sfe_sync_ipv4_stats_many_msg(SFE_CTX_TO_PRIVATE(sfe_ctx),msg);
+		return sfe_sync_ipv4_stats_many_msg(SFE_CTX_TO_PRIVATE(sfe_ctx), msg);
+	case SFE_TX_CREATE_MULTICAST_RULE_MSG:
+		return sfe_create_ipv4_mc_rule_msg(SFE_CTX_TO_PRIVATE(sfe_ctx), msg);
+	case SFE_TX_DESTROY_MULTICAST_RULE_MSG:
+		return sfe_destroy_ipv4_mc_rule_msg(SFE_CTX_TO_PRIVATE(sfe_ctx), msg);
 	default:
 		sfe_incr_exceptions(SFE_EXCEPTION_IPV4_MSG_UNKNOW);
 		return SFE_TX_FAILURE_NOT_ENABLED;
@@ -1224,6 +1374,127 @@ void sfe_ipv6_stats_convert(struct sfe_ipv6_conn_sync *sync_msg, struct sfe_conn
 	}
 
 	return;
+}
+
+/*
+ * sfe_create_ipv6_mc_rule_msg()
+ * 	convert create message format from ecm to sfe
+ *
+ * @param sfe_ctx SFE context
+ * @param msg The IPv6 message
+ *
+ * @return sfe_tx_status_t The status of the Tx operation
+ */
+sfe_tx_status_t sfe_create_ipv6_mc_rule_msg(struct sfe_ctx_instance_internal *sfe_ctx, struct sfe_ipv6_msg *msg)
+{
+	struct net_device *src_dev = NULL;
+	struct sfe_response_msg *response;
+	enum sfe_cmn_response ret = SFE_TX_SUCCESS;
+	bool is_routed = true;
+	bool cfg_err;
+
+	response = sfe_alloc_response_msg(SFE_MSG_TYPE_IPV6, msg);
+	if (!response) {
+		sfe_incr_exceptions(SFE_EXCEPTION_ENQUEUE_FAILED);
+		return SFE_TX_FAILURE_QUEUE;
+	}
+
+	if (!(msg->msg.rule_create.valid_flags & SFE_RULE_CREATE_CONN_VALID)) {
+		ret = SFE_CMN_RESPONSE_EMSG;
+		sfe_incr_exceptions(SFE_EXCEPTION_CONNECTION_INVALID);
+		goto failed_ret;
+	}
+
+	/*
+	 * Bridge flows are accelerated if L2 feature is enabled.
+	 */
+	if (msg->msg.rule_create.rule_flags & SFE_RULE_CREATE_FLAG_BRIDGE_FLOW) {
+		if (!sfe_is_l2_feature_enabled()) {
+			ret = SFE_CMN_RESPONSE_EINTERFACE;
+			sfe_incr_exceptions(SFE_EXCEPTION_NOT_SUPPORT_BRIDGE);
+			goto failed_ret;
+		}
+		is_routed = false;
+	}
+
+	/*
+	 * Does our input device support IP processing?
+	 */
+	src_dev = dev_get_by_index(&init_net, msg->msg.rule_create.conn_rule.flow_top_interface_num);
+	if (!src_dev || !sfe_routed_dev_allow(src_dev, is_routed, false)) {
+		ret = SFE_CMN_RESPONSE_EINTERFACE;
+		sfe_incr_exceptions(SFE_EXCEPTION_SRC_DEV_NOT_L3);
+		goto failed_ret;
+	}
+
+	/*
+	 * Check whether L2 feature is disabled and rule flag is configured to use bottom interface
+	 */
+	cfg_err = (msg->msg.rule_create.rule_flags & SFE_RULE_CREATE_FLAG_USE_FLOW_BOTTOM_INTERFACE) && !sfe_is_l2_feature_enabled();
+	if (cfg_err) {
+		ret = SFE_CMN_RESPONSE_EMSG;
+		sfe_incr_exceptions(SFE_EXCEPTION_CFG_ERR);
+		goto failed_ret;
+	}
+
+	if (!sfe_ipv6_create_mc_rule(&msg->msg.mc_rule_create)) {
+		/* SFE success */
+		ret = SFE_CMN_RESPONSE_ACK;
+#if defined(SFE_RFS_SUPPORTED)
+		if (sfe_is_ppe_rfs_feature_enabled()) {
+			struct ppe_rfs_ipv6_rule_create_msg pr6rc;
+			struct sfe_ipv6_rule_create_msg *rule_create = &msg->msg.rule_create;
+
+			pr6rc.valid_flags = rule_create->valid_flags;
+			pr6rc.rule_flags = rule_create->rule_flags;
+			pr6rc.tuple.flow_ip[0] = ntohl(rule_create->tuple.flow_ip[3]);
+			pr6rc.tuple.flow_ip[1] = ntohl(rule_create->tuple.flow_ip[2]);
+			pr6rc.tuple.flow_ip[2] = ntohl(rule_create->tuple.flow_ip[1]);
+			pr6rc.tuple.flow_ip[3] = ntohl(rule_create->tuple.flow_ip[0]);
+			pr6rc.tuple.flow_ident = ntohs(rule_create->tuple.flow_ident);
+			pr6rc.tuple.return_ip[0] = ntohl(rule_create->tuple.return_ip[3]);
+			pr6rc.tuple.return_ip[1] = ntohl(rule_create->tuple.return_ip[2]);
+			pr6rc.tuple.return_ip[2] = ntohl(rule_create->tuple.return_ip[1]);
+			pr6rc.tuple.return_ip[3] = ntohl(rule_create->tuple.return_ip[0]);
+			pr6rc.tuple.return_ident = ntohs(rule_create->tuple.return_ident);
+			pr6rc.tuple.protocol = rule_create->tuple.protocol;
+			pr6rc.conn_rule.flow_mtu = rule_create->conn_rule.flow_mtu;
+			pr6rc.conn_rule.return_mtu = rule_create->conn_rule.return_mtu;
+			pr6rc.conn_rule.flow_interface_num = rule_create->conn_rule.flow_interface_num;
+			pr6rc.conn_rule.return_interface_num = rule_create->conn_rule.flow_interface_num;
+
+			if (rule_create->rule_flags & SFE_RULE_CREATE_FLAG_BRIDGE_FLOW) {
+				pr6rc.rule_flags |= PPE_RFS_V6_RULE_FLAG_BRIDGE_FLOW;
+			}
+
+			pr6rc.rule_flags |= PPE_RFS_V6_RULE_FLAG_RETURN_VALID | PPE_RFS_V6_RULE_FLAG_FLOW_VALID;
+
+			if (ppe_rfs_ipv6_rule_create(&pr6rc) != PPE_RFS_RET_SUCCESS) {
+				DEBUG_TRACE("%p: Error in pushing PPE RFS rules\n", msg);
+			}
+		}
+#endif
+	} else {
+		/* Failed */
+		ret = SFE_CMN_RESPONSE_EMSG;
+		sfe_incr_exceptions(SFE_EXCEPTION_CREATE_FAILED);
+	}
+
+	/*
+	 * Fall through
+	 */
+failed_ret:
+	if (src_dev) {
+		dev_put(src_dev);
+	}
+
+	/*
+	 * Try to queue response message
+	 */
+	((struct sfe_ipv6_msg *)response->msg)->cm.response = msg->cm.response = ret;
+	sfe_enqueue_msg(sfe_ctx, response);
+
+	return SFE_TX_SUCCESS;
 }
 
 /*
@@ -1448,6 +1719,64 @@ failed_ret:
 }
 
 /*
+ * sfe_destroy_ipv6_mc_rule_msg()
+ * 	Convert mc destroy message format from ecm to sfe
+ *
+ * @param sfe_ctx SFE context
+ * @param msg The IPv6 message
+ *
+ * @return sfe_tx_status_t The status of the Tx operation
+ */
+sfe_tx_status_t sfe_destroy_ipv6_mc_rule_msg(struct sfe_ctx_instance_internal *sfe_ctx, struct sfe_ipv6_msg *msg)
+{
+	struct sfe_response_msg *response;
+
+	response = sfe_alloc_response_msg(SFE_MSG_TYPE_IPV6, msg);
+	if (!response) {
+		sfe_incr_exceptions(SFE_EXCEPTION_ENQUEUE_FAILED);
+		return SFE_TX_FAILURE_QUEUE;
+	}
+
+#if defined(SFE_RFS_SUPPORTED)
+	if (sfe_is_ppe_rfs_feature_enabled()) {
+		struct ppe_rfs_ipv6_rule_destroy_msg pr6rd;
+		struct sfe_ipv6_rule_destroy_msg *rule_destroy = &msg->msg.rule_destroy;
+
+		pr6rd.tuple.flow_ip[0] = ntohl(rule_destroy->tuple.flow_ip[3]);
+		pr6rd.tuple.flow_ip[1] = ntohl(rule_destroy->tuple.flow_ip[2]);
+		pr6rd.tuple.flow_ip[2] = ntohl(rule_destroy->tuple.flow_ip[1]);
+		pr6rd.tuple.flow_ip[3] = ntohl(rule_destroy->tuple.flow_ip[0]);
+		pr6rd.tuple.flow_ident = ntohs(rule_destroy->tuple.flow_ident);
+		pr6rd.tuple.return_ip[0] = ntohl(rule_destroy->tuple.return_ip[3]);
+		pr6rd.tuple.return_ip[1] = ntohl(rule_destroy->tuple.return_ip[2]);
+		pr6rd.tuple.return_ip[2] = ntohl(rule_destroy->tuple.return_ip[1]);
+		pr6rd.tuple.return_ip[3] = ntohl(rule_destroy->tuple.return_ip[0]);
+		pr6rd.tuple.return_ident = ntohs(rule_destroy->tuple.return_ident);
+		pr6rd.tuple.protocol = rule_destroy->tuple.protocol;
+
+		sfe_ipv6_fill_connection_dev(rule_destroy, &pr6rd.original_dev, &pr6rd.reply_dev);
+		if (!pr6rd.original_dev || !pr6rd.reply_dev) {
+			DEBUG_INFO("%p: NULL dev while destroying PPE RFS rule\n", &pr6rd);
+		} else {
+			if (ppe_rfs_ipv6_rule_destroy(&pr6rd) != PPE_RFS_RET_SUCCESS) {
+				DEBUG_INFO("%p: Error while deleting PPE RFS IPv6 rule\n", &pr6rd);
+			}
+		}
+	}
+#endif
+
+	sfe_ipv6_destroy_mc_rule(&msg->msg.mc_rule_destroy);
+
+	/*
+	 * Try to queue response message
+	 */
+	((struct sfe_ipv6_msg *)response->msg)->cm.response = msg->cm.response = SFE_CMN_RESPONSE_ACK;
+	sfe_enqueue_msg(sfe_ctx, response);
+
+	return SFE_TX_SUCCESS;
+}
+
+/*
  * sfe_destroy_ipv6_rule_msg()
  *	Convert destroy message format from ecm to sfe
  *
@@ -1543,6 +1872,10 @@ sfe_tx_status_t sfe_ipv6_tx(struct sfe_ctx_instance *sfe_ctx, struct sfe_ipv6_ms
 		return sfe_destroy_ipv6_rule_msg(SFE_CTX_TO_PRIVATE(sfe_ctx), msg);
 	case SFE_TX_CONN_STATS_SYNC_MANY_MSG:
 		return sfe_sync_ipv6_stats_many_msg(SFE_CTX_TO_PRIVATE(sfe_ctx), msg);
+	case SFE_TX_CREATE_MULTICAST_RULE_MSG:
+		return sfe_create_ipv6_mc_rule_msg(SFE_CTX_TO_PRIVATE(sfe_ctx), msg);
+	case SFE_TX_DESTROY_MULTICAST_RULE_MSG:
+		return sfe_destroy_ipv6_mc_rule_msg(SFE_CTX_TO_PRIVATE(sfe_ctx), msg);
 	default:
 		sfe_incr_exceptions(SFE_EXCEPTION_IPV6_MSG_UNKNOW);
 		return SFE_TX_FAILURE_NOT_ENABLED;
