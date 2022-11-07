@@ -2780,6 +2780,15 @@ static struct nf_hook_ops sfe_ipv6_ops_local_out[] __read_mostly = {
 #endif
 
 /*
+ * sfe_ipv6_cancel_delayed_work_sync()
+ */
+bool sfe_ipv6_cancel_delayed_work_sync(void)
+{
+	struct sfe_ipv6 *si = &__si6;
+	return cancel_delayed_work_sync(&si->sync_dwork);
+}
+
+/*
  * sfe_ipv6_init()
  */
 int sfe_ipv6_init(void)
@@ -2935,7 +2944,7 @@ void sfe_ipv6_exit(void)
 	 */
 	sfe_ipv6_destroy_all_rules_for_dev(NULL);
 
-	cancel_delayed_work(&si->sync_dwork);
+	cancel_delayed_work_sync(&si->sync_dwork);
 
 	unregister_chrdev(si->debug_dev, "sfe_ipv6");
 

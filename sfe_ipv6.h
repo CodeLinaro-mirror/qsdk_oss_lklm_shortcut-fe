@@ -497,5 +497,6 @@ void sfe_ipv6_sync_status(struct sfe_ipv6 *si,
 
 void sfe_ipv6_exit(void);
 int sfe_ipv6_init(void);
+bool sfe_ipv6_cancel_delayed_work_sync(void);
 
 #endif /* __SFE_IPV6_H */
