@@ -338,7 +338,6 @@ static void sfe_process_response_msg(struct work_struct *work)
 	while ((response = list_first_entry_or_null(&sfe_ctx->msg_queue, struct sfe_response_msg, node))) {
 		list_del(&response->node);
 		spin_unlock_bh(&sfe_ctx->lock);
-		rcu_read_lock();
 
 		/*
 		 * Send response message back to caller
@@ -357,7 +356,6 @@ static void sfe_process_response_msg(struct work_struct *work)
 			}
 		}
 
-		rcu_read_unlock();
 		/*
 		 * Free response message
 		 */
