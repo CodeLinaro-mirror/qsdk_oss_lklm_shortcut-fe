@@ -627,8 +627,15 @@ int sfe_ipv4_recv_udp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 	skb->fast_forwarded = 1;
 
 	/*
-	 * Send the packet on its way.
+	 * check if fast qdisc xmit is enabled and send the packet on its way.
 	 */
+	if (cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_FAST_QDISC_XMIT) {
+		if (likely(dev_fast_xmit_qdisc(skb, xmit_dev, cm->qdisc_xmit_dev))) {
+			this_cpu_inc(si->stats_pcpu->packets_fast_qdisc_xmited64);
+			return 1;
+		}
+	}
+
 	dev_queue_xmit(skb);
 
 	return 1;

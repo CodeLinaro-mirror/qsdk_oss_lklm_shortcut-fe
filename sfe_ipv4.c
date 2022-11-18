@@ -334,6 +334,7 @@ static void sfe_ipv4_update_summary_stats(struct sfe_ipv4 *si,  struct sfe_ipv4_
 		stats->packets_dropped64 += s->packets_dropped64;
 		stats->packets_forwarded64 += s->packets_forwarded64;
 		stats->packets_fast_xmited64 += s->packets_fast_xmited64;
+		stats->packets_fast_qdisc_xmited64 += s->packets_fast_qdisc_xmited64;
 		stats->packets_not_forwarded64 += s->packets_not_forwarded64;
 		stats->pppoe_encap_packets_forwarded64 += s->pppoe_encap_packets_forwarded64;
 		stats->pppoe_decap_packets_forwarded64 += s->pppoe_decap_packets_forwarded64;
@@ -2656,6 +2657,7 @@ static bool sfe_ipv4_debug_dev_read_stats(struct sfe_ipv4 *si, char *buffer, cha
 			      "num_connections=\"%u\" "
 			      "pkts_dropped=\"%llu\" "
 			      "pkts_fast_xmited=\"%llu\" "
+			      "pkts_fast_qdisc_xmited=\"%llu\" "
 			      "pkts_forwarded=\"%llu\" pkts_not_forwarded=\"%llu\" "
 			      "create_requests=\"%llu\" create_collisions=\"%llu\" "
 			      "create_failures=\"%llu\" "
@@ -2670,6 +2672,7 @@ static bool sfe_ipv4_debug_dev_read_stats(struct sfe_ipv4 *si, char *buffer, cha
 				num_conn,
 				stats.packets_dropped64,
 				stats.packets_fast_xmited64,
+				stats.packets_fast_qdisc_xmited64,
 				stats.packets_forwarded64,
 				stats.packets_not_forwarded64,
 				stats.connection_create_requests64,
