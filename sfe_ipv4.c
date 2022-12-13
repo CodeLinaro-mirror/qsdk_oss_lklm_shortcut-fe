@@ -552,6 +552,20 @@ bool sfe_ipv4_remove_connection(struct sfe_ipv4 *si, struct sfe_ipv4_connection 
 	}
 
 	/*
+	 * If qdisc_xmit_dev is present, dereference qdisc net dev.
+	 */
+	if (c->reply_match->qdisc_xmit_dev) {
+		dev_put(c->reply_match->xmit_dev);
+	}
+
+	/*
+	 * If qdisc_xmit_dev is present, dereference qdisc net dev.
+	 */
+	if (c->original_match->qdisc_xmit_dev) {
+		dev_put(c->original_match->xmit_dev);
+	}
+
+	/*
 	 * Remove the connection match objects.
 	 */
 	sfe_ipv4_remove_connection_match(si, c->reply_match);
@@ -1220,6 +1234,22 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	u32 flow_sawf_tag;
 	u32 return_sawf_tag;
 
+	/*
+	 * When Qdisc rule is invalid i.e either there is no qdisc present or there are multiple qdisc
+	 * Add bottom interface and fast transmit flag for now.
+	 *
+	 * TODO: Remove this check once multiple qdisc check is added in SFE
+	 */
+	if (sfe_is_l2_feature_enabled()) {
+		if (!(msg->qdisc_rule.valid_flags & SFE_QDISC_RULE_FLOW_VALID)) {
+			msg->rule_flags |= SFE_RULE_CREATE_FLAG_USE_FLOW_BOTTOM_INTERFACE;
+		}
+
+		if (!(msg->qdisc_rule.valid_flags & SFE_QDISC_RULE_RETURN_VALID)) {
+			msg->rule_flags |= SFE_RULE_CREATE_FLAG_USE_RETURN_BOTTOM_INTERFACE;
+		}
+	}
+
 	if (msg->rule_flags & SFE_RULE_CREATE_FLAG_USE_FLOW_BOTTOM_INTERFACE) {
 		flow_interface_num = msg->conn_rule.flow_interface_num;
 	}
@@ -1373,6 +1403,21 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	}
 
 	original_cm->xmit_dev = dest_dev;
+
+	/*
+	 * Enable qdisc fast xmit path if single qdisc is present on non-bottom interface.
+	 * For qdisc is enabled on bottom interface alone, we use dev_queue_xmit() instead to transmit to bottom interface.
+	 */
+	if ((msg->valid_flags & SFE_RULE_CREATE_QDISC_RULE_VALID) &&
+			(msg->qdisc_rule.valid_flags & SFE_QDISC_RULE_RETURN_VALID) &&
+			(msg->qdisc_rule.return_qdisc_interface != msg->conn_rule.return_interface_num)) {
+		original_cm->xmit_dev = dev_get_by_index(&init_net, msg->qdisc_rule.return_qdisc_interface);
+		original_cm->qdisc_xmit_dev = dest_dev;
+		original_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_FAST_QDISC_XMIT;
+		DEBUG_TRACE("%p: Fast qdisc xmit flag is set for original_cm, xmit_dev: %s, qdisc_xmit_dev: %s\n",
+				msg, original_cm->xmit_dev->name, original_cm->qdisc_xmit_dev->name);
+	}
+
 	original_cm->xmit_dev_mtu = msg->conn_rule.return_mtu;
 
 	original_cm->connection = c;
@@ -1603,6 +1648,21 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	}
 
 	reply_cm->xmit_dev = src_dev;
+
+	/*
+	 * Enable qdisc fast xmit path if single qdisc is present on non-bottom interface.
+	 * For qdisc is enabled on bottom interface alone, we use dev_queue_xmit() instead to transmit to bottom interface.
+	 */
+	if ((msg->valid_flags & SFE_RULE_CREATE_QDISC_RULE_VALID) &&
+			(msg->qdisc_rule.valid_flags & SFE_QDISC_RULE_FLOW_VALID) &&
+			(msg->qdisc_rule.flow_qdisc_interface != msg->conn_rule.flow_interface_num)) {
+		reply_cm->xmit_dev = dev_get_by_index(&init_net, msg->qdisc_rule.flow_qdisc_interface);
+		reply_cm->qdisc_xmit_dev = src_dev;
+		reply_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_FAST_QDISC_XMIT;
+		DEBUG_TRACE("%p: Fast qdisc xmit flag is set for reply_cm, xmit_dev: %s, qdisc_xmit_dev: %s\n",
+				msg, reply_cm->xmit_dev->name, reply_cm->qdisc_xmit_dev->name);
+	}
+
 	reply_cm->xmit_dev_mtu = msg->conn_rule.flow_mtu;
 
 	reply_cm->connection = c;
@@ -1967,7 +2027,8 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 		   "return_ip: %pI4:%u\n"
 		   "return_ip_xlate: %pI4:%u\n"
 		   "return_mac: %pM\n"
-		   "flags: valid=%x src_mac_valid=%x\n",
+		   "flags: valid=%x src_mac_valid=%x\n"
+		   "qdisc_rule: valid=%x flow_qdisc_interface=%d return_qdisc_interface=%d",
 		   c, tuple->protocol,
 		   original_cm->match_dev->name, original_cm->match_dev->ifindex, original_cm->match_dev->dev_addr,
 		   original_cm->xmit_dev->name, original_cm->xmit_dev->ifindex, original_cm->xmit_dev->dev_addr,
@@ -1981,7 +2042,8 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 		   &tuple->return_ip, ntohs(tuple->return_ident),
 		   &msg->conn_rule.return_ip_xlate, ntohs(msg->conn_rule.return_ident_xlate),
 		   msg->conn_rule.return_mac,
-		   msg->valid_flags, msg->src_mac_rule.mac_valid_flags);
+		   msg->valid_flags, msg->src_mac_rule.mac_valid_flags,
+		   msg->qdisc_rule.valid_flags, msg->qdisc_rule.flow_qdisc_interface, msg->qdisc_rule.return_qdisc_interface);
 
 	return 0;
 }

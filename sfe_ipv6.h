@@ -95,6 +95,8 @@ struct sfe_ipv6_tcp_connection_match {
 					/* Source interface check but do not flush the connection */
 #define SFE_IPV6_CONNECTION_MATCH_FLAG_INSERT_EGRESS_TRUSTSEC_SGT (1<<19)
 					/* Insert Trustsec SGT */
+#define SFE_IPV6_CONNECTION_MATCH_FLAG_FAST_QDISC_XMIT (1<<20)
+					/* Fast Qdisc transmit enabled */
 
 /*
  * IPv6 connection matching structure.
@@ -121,6 +123,8 @@ struct sfe_ipv6_connection_match {
 	 * Packet transmit information.
 	 */
 	struct net_device *xmit_dev;	/* Network device on which to transmit */
+	struct net_device *qdisc_xmit_dev;      /* Interface used for fast qdisc xmit */
+
 	/*
 	 * xmit device's feature
 	 */

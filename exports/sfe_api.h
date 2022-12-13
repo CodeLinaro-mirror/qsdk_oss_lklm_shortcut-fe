@@ -95,6 +95,7 @@
 #define SFE_RULE_CREATE_MARK_VALID         (1<<10)	/**< SKB marking fields are valid. */
 #define SFE_RULE_CREATE_NO_SRC_IDENT       (1<<11)	/**< Zero out the src ident. */
 #define SFE_RULE_CREATE_TRUSTSEC_VALID     (1<<12)	/**< trustsec fields are valid. */
+#define SFE_RULE_CREATE_QDISC_RULE_VALID   (1<<13)	/**< Qdisc rule is valid. */
 
 /*
  * Source MAC address validity flags; used with the mac_valid_flags field in the sfe_ipv4_src_mac_rule structure.
@@ -110,7 +111,14 @@
 #define SFE_TRUSTSEC_INGRESS_SGT_VALID 0x01
 		/**< Ingress SGT for the flow interface is valid. */
 #define SFE_TRUSTSEC_EGRESS_SGT_VALID 0x02
-		/**< MAC address for the return interface is valid. */
+
+/*
+ * Qdisc interface validity flags; used with the qdisc_valid_flags  field in the sfe_qdisc_rule structure.
+ */
+#define SFE_QDISC_RULE_FLOW_VALID 0x01
+		/**< Qdisc interface for the flow interface is valid. */
+#define SFE_QDISC_RULE_RETURN_VALID 0x02
+		/**< Qdisc interface for the return interface is valid. */
 
 /**
  * @}
@@ -335,11 +343,24 @@ struct sfe_acceleration_direction_rule {
 };
 
 /**
- *	Service class rule information in both directions.
+ * Service class rule information in both directions.
  */
 struct sfe_service_class_rule {
 	uint32_t flow_mark;		/**< Service class information in flow direction. */
 	uint32_t return_mark;		/**< Service class information in return direction. */
+};
+
+/**
+ * Qdisc information for both the directions.
+ *
+ * In case of a single qdisc applied by user in the flow or return interface hierarchy, use this rule to
+ * indicate the netdev on which the qdisc is applied. This enables full SFE offload for the direction including
+ * the qdisc processing.
+ */
+struct sfe_qdisc_rule {
+	uint32_t valid_flags;       	/**< Qdisc interface validity flags. */
+	s32 flow_qdisc_interface;	/**< Netdevice for flow direction on which qdisc is applied. */
+	s32 return_qdisc_interface;	/**< Netdevice for return direction on which qdisc is applied. */
 };
 
 /**
@@ -370,6 +391,7 @@ struct sfe_ipv4_rule_create_msg {
 	/* Response */
 	struct sfe_service_class_rule sawf_rule;
 							/**< Service class related information */
+	struct sfe_qdisc_rule qdisc_rule;		/**< Qdisc indication per direction */
 	u32 index;					/**< Slot ID for cache statistics to host OS. */
 };
 
@@ -530,6 +552,7 @@ struct sfe_ipv6_rule_create_msg {
 	 * Response
 	 */
 	struct sfe_service_class_rule sawf_rule;	/**< Service class related information. */
+	struct sfe_qdisc_rule qdisc_rule;		/**< Qdisc indication per direction */
 	u32 index;					/**< Slot ID for cache statistics to host OS. */
 };
 

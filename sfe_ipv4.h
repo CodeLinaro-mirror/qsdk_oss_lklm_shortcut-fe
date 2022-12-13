@@ -83,6 +83,8 @@ struct sfe_ipv4_tcp_connection_match {
 					/* Source interface check but do not flush the connection */
 #define SFE_IPV4_CONNECTION_MATCH_FLAG_INSERT_EGRESS_TRUSTSEC_SGT (1<<19)
 					/* Insert Trustsec SGT */
+#define SFE_IPV4_CONNECTION_MATCH_FLAG_FAST_QDISC_XMIT (1<<20)
+					/* Fast Qdisc transmit enabled */
 
 /*
  * IPv4 connection matching structure.
@@ -107,6 +109,8 @@ struct sfe_ipv4_connection_match {
 	u16 xmit_src_mac[ETH_ALEN / 2];
 					/* Source MAC address to use when forwarding */
 	struct net_device *xmit_dev;	/* Network device on which to transmit */
+	struct net_device *qdisc_xmit_dev;      /* Interface used for fast qdisc xmit */
+
 	/*
 	 * xmit device's feature
 	 */
