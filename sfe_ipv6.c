@@ -1369,7 +1369,7 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 	original_cm->match_dev = src_dev;
 	original_cm->match_protocol = tuple->protocol;
 	original_cm->match_src_ip[0] = *(struct sfe_ipv6_addr *)tuple->flow_ip;
-	original_cm->match_src_port = (msg->rule_flags & SFE_RULE_CREATE_NO_SRC_IDENT) ? 0 : tuple->flow_ident;
+	original_cm->match_src_port = (msg->rule_flags & SFE_RULE_CREATE_FLAG_NO_SRC_IDENT) ? 0 : tuple->flow_ident;
 	original_cm->match_dest_ip[0] = *(struct sfe_ipv6_addr *)tuple->return_ip;
 	original_cm->match_dest_port = tuple->return_ident;
 
@@ -1586,7 +1586,7 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 	/*
 	 * Keep source port as 0 for tunnels requiring 4-tuple match (eg: VxLAN).
 	 */
-	reply_cm->match_src_port = (msg->rule_flags & SFE_RULE_CREATE_NO_SRC_IDENT) ? 0 : tuple->return_ident;
+	reply_cm->match_src_port = (msg->rule_flags & SFE_RULE_CREATE_FLAG_NO_SRC_IDENT) ? 0 : tuple->return_ident;
 
 	reply_cm->xmit_dev = src_dev;
 
