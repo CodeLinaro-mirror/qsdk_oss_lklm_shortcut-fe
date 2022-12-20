@@ -1324,7 +1324,9 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 
 	spin_lock_bh(&si->lock);
 
-#if (defined(SFE_MEM_PROFILE_MEDIUM) || defined(SFE_MEM_PROFILE_LOW))
+	/*
+	 * Check to see if max number of connection limit reached.
+	 */
 	if (si->num_connections  >= sfe_ipv6_max_conn_count()) {
 		spin_unlock_bh(&si->lock);
 		this_cpu_inc(si->stats_pcpu->connection_create_requests_overflow64);
@@ -1336,7 +1338,6 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 		DEBUG_WARN("%px: Maximum connection count(%d), reached %d\n", msg, sfe_ipv6_max_conn_count(), si->num_connections);
 		return -EPERM;
 	}
-#endif
 
 	/*
 	 * Check to see if there is already a flow that matches the rule we're
