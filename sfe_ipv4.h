@@ -340,6 +340,7 @@ struct sfe_ipv4_stats {
 	u64 packets_dropped64;			/* Number of IPv4 packets dropped */
 	u64 packets_forwarded64;		/* Number of IPv4 packets forwarded */
 	u64 packets_fast_xmited64;		/* Number of IPv4 packets fast transmited */
+	u64 packets_fast_qdisc_xmited64;	/* Number of IPv4 packets that used fast qdisc xmit */
 	u64 packets_not_forwarded64;	/* Number of IPv4 packets not forwarded */
 	u64 exception_events64[SFE_IPV4_EXCEPTION_EVENT_LAST];
 	u64 pppoe_encap_packets_forwarded64;	/* Number of IPv4 PPPoE encap packets forwarded */
