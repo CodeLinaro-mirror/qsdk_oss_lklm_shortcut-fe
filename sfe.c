@@ -585,7 +585,7 @@ void sfe_ipv4_stats_convert(struct sfe_ipv4_conn_sync *sync_msg, struct sfe_conn
 static void sfe_ipv4_stats_one_sync_callback(struct sfe_connection_sync *sis)
 {
 	struct sfe_ctx_instance_internal *sfe_ctx = &__sfe_ctx;
-	struct sfe_ipv4_msg msg;
+	struct sfe_ipv4_msg *msg;
 	struct sfe_ipv4_conn_sync *sync_msg;
 	sfe_ipv4_msg_callback_t sync_cb;
 
@@ -597,10 +597,14 @@ static void sfe_ipv4_stats_one_sync_callback(struct sfe_connection_sync *sis)
 		return;
 	}
 
-	sync_msg = &msg.msg.conn_stats;
+	msg = kzalloc(sizeof(struct sfe_ipv4_msg), GFP_ATOMIC);
+	if (!msg) {
+		DEBUG_ERROR("Can't allocate the sync msg\n");
+		return;
+	}
+	sync_msg = &(msg->msg.conn_stats);
 
-	memset(&msg, 0, sizeof(msg));
-	sfe_cmn_msg_init(&msg.cm, 0, SFE_RX_CONN_STATS_SYNC_MSG,
+	sfe_cmn_msg_init(&msg->cm, 0, SFE_RX_CONN_STATS_SYNC_MSG,
 			sizeof(struct sfe_ipv4_conn_sync), NULL, NULL);
 
 	sfe_ipv4_stats_convert(sync_msg, sis);
@@ -608,7 +612,9 @@ static void sfe_ipv4_stats_one_sync_callback(struct sfe_connection_sync *sis)
 	/*
 	 * SFE sync calling is excuted in a timer, so we can redirect it to ECM directly.
 	 */
-	sync_cb(sfe_ctx->ipv4_stats_sync_data, &msg);
+	sync_cb(sfe_ctx->ipv4_stats_sync_data, msg);
+
+	kfree(msg);
 }
 
 #if defined(SFE_RFS_SUPPORTED)
@@ -1227,7 +1233,7 @@ void sfe_ipv6_stats_convert(struct sfe_ipv6_conn_sync *sync_msg, struct sfe_conn
 static void sfe_ipv6_stats_sync_callback(struct sfe_connection_sync *sis)
 {
 	struct sfe_ctx_instance_internal *sfe_ctx = &__sfe_ctx;
-	struct sfe_ipv6_msg msg;
+	struct sfe_ipv6_msg *msg;
 	struct sfe_ipv6_conn_sync *sync_msg;
 	sfe_ipv6_msg_callback_t sync_cb;
 
@@ -1239,10 +1245,15 @@ static void sfe_ipv6_stats_sync_callback(struct sfe_connection_sync *sis)
 		return;
 	}
 
-	sync_msg = &msg.msg.conn_stats;
+	msg = kzalloc(sizeof(struct sfe_ipv6_msg), GFP_ATOMIC);
+	if (!msg) {
+		DEBUG_ERROR("Can't allocate the sync msg\n");
+		return;
+	}
 
-	memset(&msg, 0, sizeof(msg));
-	sfe_cmn_msg_init(&msg.cm, 0, SFE_RX_CONN_STATS_SYNC_MSG,
+	sync_msg = &msg->msg.conn_stats;
+
+	sfe_cmn_msg_init(&msg->cm, 0, SFE_RX_CONN_STATS_SYNC_MSG,
 			sizeof(struct sfe_ipv6_conn_sync), NULL, NULL);
 
 	sfe_ipv6_stats_convert(sync_msg, sis);
@@ -1250,7 +1261,9 @@ static void sfe_ipv6_stats_sync_callback(struct sfe_connection_sync *sis)
 	/*
 	 * SFE sync calling is excuted in a timer, so we can redirect it to ECM directly.
 	 */
-	sync_cb(sfe_ctx->ipv6_stats_sync_data, &msg);
+	sync_cb(sfe_ctx->ipv6_stats_sync_data, msg);
+
+	kfree(msg);
 }
 
 /*
