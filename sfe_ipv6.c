@@ -118,7 +118,9 @@ static char *sfe_ipv6_exception_events_string[SFE_IPV6_EXCEPTION_EVENT_LAST] = {
 	"ESP_IP_OPTIONS_OR_INITIAL_FRAGMENT",
 	"ESP_NEEDS_FRAGMENTATION",
 	"ESP_SMALL_TTL",
-	"INGRESS_TRUSTSEC_SGT_MISMATCH"
+	"INGRESS_TRUSTSEC_SGT_MISMATCH",
+	"GSO_NOT_SUPPORTED",
+	"TSO_SEG_MAX_NOT_SUPPORTED"
 };
 
 static struct sfe_ipv6 __si6;
@@ -2093,6 +2095,16 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 		original_cm->flow_accel = 1;
 	}
 #endif
+
+	/*
+	 * Check if TSO is enabled on the bottom interface. This flag is used for PPPoE TCP flows.
+	 * For PPPoE TCP flows, we can only use HW TSO since kernel does not support GSO for this path.
+	 */
+	if (unlikely(dest_dev->features & NETIF_F_TSO) && (msg->rule_flags & SFE_RULE_CREATE_FLAG_USE_RETURN_BOTTOM_INTERFACE)) {
+		original_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_TSO_ENABLE;
+		DEBUG_TRACE("%px: TSO is enabled on the destination interface: %s", msg, dest_dev->name);
+	}
+
 	/*
 	 * If l2_features are disabled and flow uses l2 features such as macvlan/bridge/pppoe/vlan,
 	 * bottom interfaces are expected to be disabled in the flow rule and always top interfaces
@@ -2453,6 +2465,16 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 			return -EINVAL;
 		}
 	}
+
+	/*
+	 * Check if TSO is enabled on the bottom interface. This flag is used for PPPoE TCP flows.
+	 * For PPPoE TCP flows, we can only use HW TSO since kernel does not support GSO for this path.
+	 */
+	if (unlikely(src_dev->features & NETIF_F_TSO) && (msg->rule_flags & SFE_RULE_CREATE_FLAG_USE_FLOW_BOTTOM_INTERFACE)) {
+		reply_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_TSO_ENABLE;
+		DEBUG_TRACE("%px: TSO is enabled on the source interface: %s", msg, src_dev->name);
+	}
+
 	/*
 	 * If l2_features are disabled and flow uses l2 features such as macvlan/bridge/pppoe/vlan,
 	 * bottom interfaces are expected to be disabled in the flow rule and always top interfaces

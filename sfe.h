@@ -32,6 +32,13 @@
 #define SFE_MAX_CONNECTION_NUM 4096
 #endif
 
+/*
+ * TSO Maximum segment size. On IPQ53xx and IPQ95xx EDMA, TSO can support max 32 segments.
+ */
+#if defined(SFE_TSO_MAX_SEG_LIMIT_ENABLE)
+#define SFE_TSO_SEG_MAX 32
+#endif
+
 #define SFE_L2_PARSE_FLAGS_PPPOE_INGRESS 0x01		/* Indicates presence of a valid PPPoE header */
 #define SFE_L2_PARSE_FLAGS_TRUSTSEC_INGRESS 0x02	/* Indicates presence of a valid trustsec header */
 

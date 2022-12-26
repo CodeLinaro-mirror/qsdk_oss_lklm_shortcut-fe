@@ -113,7 +113,9 @@ static char *sfe_ipv4_exception_events_string[SFE_IPV4_EXCEPTION_EVENT_LAST] = {
 	"ESP_IP_OPTIONS_OR_INITIAL_FRAGMENT",
 	"ESP_NEEDS_FRAGMENTATION",
 	"ESP_SMALL_TTL",
-	"INGRESS_TRUSTSEC_SGT_MISMATCH"
+	"INGRESS_TRUSTSEC_SGT_MISMATCH",
+	"GSO_NOT_SUPPORTED",
+	"TSO_SEG_MAX_NOT_SUPPORTED"
 };
 
 static struct sfe_ipv4 __si;
@@ -2181,6 +2183,15 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 #endif
 
 	/*
+	 * Check if TSO is enabled on the bottom interface. This flag is used for PPPoE TCP flows.
+	 * For PPPoE TCP flows, we can only use HW TSO since kernel does not support GSO for this path.
+	 */
+	if (unlikely(dest_dev->features & NETIF_F_TSO) && (msg->rule_flags & SFE_RULE_CREATE_FLAG_USE_RETURN_BOTTOM_INTERFACE)) {
+		original_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_TSO_ENABLE;
+		DEBUG_TRACE("%px: TSO is enabled on the destination interface: %s", msg, dest_dev->name);
+	}
+
+	/*
 	 * If l2_features are disabled and flow uses l2 features such as macvlan/bridge/pppoe/vlan,
 	 * bottom interfaces are expected to be disabled in the flow rule and always top interfaces
 	 * are used. In such cases, do not use HW csum offload. csum offload is used only when we
@@ -2550,6 +2561,16 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	}
 
 #endif
+
+	/*
+	 * Check if TSO is enabled on the bottom interface. This flag is used for PPPoE TCP flows.
+	 * For PPPoE TCP flows, we can only use HW TSO since kernel does not support GSO for this path.
+	 */
+	if (unlikely(src_dev->features & NETIF_F_TSO) && (msg->rule_flags & SFE_RULE_CREATE_FLAG_USE_FLOW_BOTTOM_INTERFACE)) {
+		reply_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_TSO_ENABLE;
+		DEBUG_TRACE("%px: TSO is enabled on the source interface: %s", msg, src_dev->name);
+	}
+
 	/*
 	 * If l2_features are disabled and flow uses l2 features such as macvlan/bridge/pppoe/vlan,
 	 * bottom interfaces are expected to be disabled in the flow rule and always top interfaces

@@ -405,8 +405,23 @@ int sfe_ipv4_recv_udp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 
 	/*
 	 * For PPPoE flows, add PPPoE header before L2 header is added.
+	 * SFE + PPPOE flow is not supported with GSO, hence destroy the connection
 	 */
 	if (unlikely(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_PPPOE_ENCAP)) {
+		if ((unlikely(skb_shinfo(skb)->gso_segs))) {
+			struct sfe_ipv4_connection *c = cm->connection;
+			spin_lock_bh(&si->lock);
+			ret = sfe_ipv4_remove_connection(si, c);
+			spin_unlock_bh(&si->lock);
+			if (ret) {
+				sfe_ipv4_flush_connection(si, c, SFE_SYNC_REASON_FLUSH);
+			}
+
+			rcu_read_unlock();
+			sfe_ipv4_exception_stats_inc(si, SFE_IPV4_EXCEPTION_EVENT_GSO_NOT_SUPPORTED);
+			return 0;
+		}
+
 		sfe_pppoe_add_header(skb, cm->pppoe_session_id, PPP_IP);
 		this_cpu_inc(si->stats_pcpu->pppoe_encap_packets_forwarded64);
 	}

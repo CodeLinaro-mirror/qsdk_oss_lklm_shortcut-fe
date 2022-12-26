@@ -101,6 +101,8 @@ struct sfe_ipv6_tcp_connection_match {
 					/* Multicast flow*/
 #define SFE_IPV6_CONNECTION_MATCH_FLAG_MULTICAST_CHANGED (1<<22)
 					/* Multicast flow changed the data */
+#define SFE_IPV6_CONNECTION_MATCH_FLAG_TSO_ENABLE (1<<23)
+					/* TSO enabled for dest dev */
 
 /*
  * IPv6 multicast destination structure
@@ -360,6 +362,8 @@ enum sfe_ipv6_exception_events {
 	SFE_IPV6_EXCEPTION_EVENT_ESP_NEEDS_FRAGMENTATION,
 	SFE_IPV6_EXCEPTION_EVENT_ESP_SMALL_TTL,
 	SFE_IPV6_EXCEPTION_EVENT_INGRESS_TRUSTSEC_SGT_MISMATCH,
+	SFE_IPV6_EXCEPTION_EVENT_GSO_NOT_SUPPORTED,
+	SFE_IPV6_EXCEPTION_EVENT_TSO_SEG_MAX_NOT_SUPPORTED,
 	SFE_IPV6_EXCEPTION_EVENT_LAST
 };
 

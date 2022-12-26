@@ -89,6 +89,8 @@ struct sfe_ipv4_tcp_connection_match {
 					/* Multicast flow*/
 #define SFE_IPV4_CONNECTION_MATCH_FLAG_MULTICAST_CHANGED (1<<22)
 					/* Multicast flow changed the data */
+#define SFE_IPV4_CONNECTION_MATCH_FLAG_TSO_ENABLE (1<<23)
+					/* TSO enabled for dest dev */
 
 /*
  * IPv4 multicast destination structure
@@ -357,6 +359,8 @@ enum sfe_ipv4_exception_events {
 	SFE_IPV4_EXCEPTION_EVENT_ESP_NEEDS_FRAGMENTATION,
 	SFE_IPV4_EXCEPTION_EVENT_ESP_SMALL_TTL,
 	SFE_IPV4_EXCEPTION_EVENT_INGRESS_TRUSTSEC_SGT_MISMATCH,
+	SFE_IPV4_EXCEPTION_EVENT_GSO_NOT_SUPPORTED,
+	SFE_IPV4_EXCEPTION_EVENT_TSO_SEG_MAX_NOT_SUPPORTED,
 	SFE_IPV4_EXCEPTION_EVENT_LAST
 };
 
