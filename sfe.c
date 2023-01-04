@@ -3,7 +3,7 @@
  *     API for shortcut forwarding engine.
  *
  * Copyright (c) 2015,2016, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -2056,6 +2056,10 @@ int sfe_recv(struct sk_buff *skb)
 		}
 
 		DEBUG_TRACE("No IPv6 address for device: %s skb=%px\n", dev->name, skb);
+		return 0;
+
+	case ETH_P_MAP:
+		DEBUG_TRACE("No need to further progress MAP packets: %s skb=%px\n", dev->name, skb);
 		return 0;
 
 	default:
