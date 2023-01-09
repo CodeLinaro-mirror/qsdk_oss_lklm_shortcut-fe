@@ -3,7 +3,7 @@
  *     API for shortcut forwarding engine.
  *
  * Copyright (c) 2015,2016, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -292,6 +292,19 @@ bool sfe_dev_has_hw_csum(struct net_device *dev)
 	}
 
 	return true;
+}
+
+/*
+ * sfe_dev_is_ipip6()
+ *      return true if it is IPIP6 devices.
+ */
+bool sfe_dev_is_ipip6(struct net_device *dev)
+{
+        if (dev->rtnl_link_ops && !strcmp(dev->rtnl_link_ops->kind, "ip6tnl")) {
+                return true;
+        }
+
+	return false;
 }
 
 /*
