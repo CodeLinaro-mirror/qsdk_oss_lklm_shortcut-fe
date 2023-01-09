@@ -2532,6 +2532,14 @@ static bool sfe_ipv4_debug_dev_read_connections_connection(struct sfe_ipv4 *si, 
 	*length -= bytes_read;
 	*total_read += bytes_read;
 
+	/*
+	 * If the length left in current page is <= CHAR_DEV_MSG_SIZE,
+	 * 	then we want next page to be loaded when fops read is called next time.
+	 */
+	if (*length <= CHAR_DEV_MSG_SIZE) {
+		*total_read += *length;
+	}
+
 	return true;
 }
 
@@ -2748,6 +2756,7 @@ static ssize_t sfe_ipv4_debug_dev_read(struct file *filp, char *buffer, size_t l
 	struct sfe_ipv4_debug_xml_write_state *ws;
 	struct sfe_ipv4 *si = &__si;
 
+	memset(msg, 0, CHAR_DEV_MSG_SIZE);
 	ws = (struct sfe_ipv4_debug_xml_write_state *)filp->private_data;
 	while ((ws->state != SFE_IPV4_DEBUG_XML_STATE_DONE) && (length > CHAR_DEV_MSG_SIZE)) {
 		if ((sfe_ipv4_debug_xml_write_methods[ws->state])(si, buffer, msg, &length, &total_read, ws)) {
