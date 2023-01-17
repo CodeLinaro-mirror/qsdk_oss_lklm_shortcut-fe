@@ -275,6 +275,8 @@ struct sfe_ipv6_connection_match {
 
 	struct net_device *top_interface_dev;	/* Used by tunipip6 to store decap VLAN netdevice.*/
 
+	void *fls_conn;
+
 	bool sawf_valid;		/* Indicates mark has valid SAWF information. */
 	bool ingress_trustsec_valid;	/* Indicates trustsec header is valid */
 };
@@ -544,6 +546,7 @@ static inline void sfe_ipv6_change_dsfield(struct ipv6hdr *iph, u8 dscp)
 	*p = ((*p & htons(SFE_IPV6_DSCP_MASK)) | htons((u16)dscp << 4));
 }
 
+void sfe_ipv6_fls_clear(void);
 bool sfe_ipv6_service_class_stats_get(uint8_t sid, uint64_t *bytes, uint64_t *packets);
 void sfe_ipv6_exception_stats_inc(struct sfe_ipv6 *si, enum sfe_ipv6_exception_events reason);
 void sfe_ipv6_service_class_stats_inc(struct sfe_ipv6 *si, uint8_t sid, uint64_t bytes);

@@ -125,6 +125,14 @@ struct sfe_connection_sync {
 	u64 delta_jiffies;		/* Time to be added to the current timeout to keep the connection alive */
 };
 
+struct sfe_fls {
+	sfe_fls_conn_create_t create_cb;
+	sfe_fls_conn_delete_t delete_cb;
+	sfe_fls_conn_stats_update_t stats_update_cb;
+};
+
+extern struct sfe_fls sfe_fls_info;
+
 /*
  * Expose the hook for the receive processing.
  */

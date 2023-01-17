@@ -277,6 +277,8 @@ struct sfe_ipv4_connection_match {
 
 	struct net_device *top_interface_dev;	/* Used by tun6rd to store decap VLAN netdevice.*/
 
+	void *fls_conn;
+
 	bool sawf_valid;		/* Indicates mark has valid SAWF information */
 	bool ingress_trustsec_valid;	/* Indicates trustsec header is valid */
 };
@@ -519,6 +521,7 @@ struct sfe_ipv4_debug_xml_write_state {
 typedef int (*sfe_ipv4_debug_xml_write_method_t)(struct sfe_ipv4 *si, char *buffer, char *msg, size_t length,
 						  int *total_read, struct sfe_ipv4_debug_xml_write_state *ws);
 
+void sfe_ipv4_fls_clear(void);
 u16 sfe_ipv4_gen_ip_csum(struct iphdr *iph);
 bool sfe_ipv4_service_class_stats_get(uint8_t sid, uint64_t *bytes, uint64_t *packets);
 void sfe_ipv4_service_class_stats_inc(struct sfe_ipv4 *si, uint8_t sid, uint64_t bytes);

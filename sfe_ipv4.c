@@ -761,6 +761,7 @@ static void sfe_ipv4_free_connection_rcu(struct rcu_head *head)
 	struct sfe_ipv4_connection *c;
 	struct udp_sock *up;
 	struct sock *sk;
+	sfe_fls_conn_delete_t delete_cb;
 
 	/*
 	 * We dont need spin lock as the connection is already removed from link list
@@ -770,6 +771,22 @@ static void sfe_ipv4_free_connection_rcu(struct rcu_head *head)
 	BUG_ON(!c->removed);
 
 	DEBUG_TRACE("%px: connecton has been deleted\n", c);
+
+	/*
+	 * Delete flow statistics information.
+	 */
+	rcu_read_lock();
+	delete_cb = rcu_dereference(sfe_fls_info.delete_cb);
+	if (c->original_match->fls_conn && delete_cb) {
+		delete_cb(c->original_match->fls_conn);
+		c->original_match->fls_conn = NULL;
+	}
+
+	if (c->reply_match && c->reply_match->fls_conn && delete_cb) {
+		delete_cb(c->reply_match->fls_conn);
+		c->reply_match->fls_conn = NULL;
+	}
+	rcu_read_unlock();
 
 	/*
 	 * Decrease the refcount taken in function sfe_ipv4_create_rule(),
@@ -811,6 +828,27 @@ static void sfe_ipv4_free_connection_rcu(struct rcu_head *head)
 
 	kfree(c->original_match);
 	kfree(c);
+}
+
+/*
+ * sfe_ipv4_fls_clear()
+ *	Clear all flow stats connection pointers.
+ */
+void sfe_ipv4_fls_clear(void)
+{
+	struct sfe_ipv4 *si = &__si;
+	uint32_t i;
+	struct sfe_ipv4_connection_match *cm = NULL;
+	rcu_read_lock();
+	for (i = 0; i < SFE_IPV4_CONNECTION_HASH_SIZE; i++) {
+		struct hlist_head *lhead = &si->hlist_conn_match_hash_head[i];
+
+		hlist_for_each_entry_rcu(cm, lhead, hnode) {
+			cm->fls_conn = NULL;
+		}
+		break;
+	}
+	rcu_read_unlock();
 }
 
 /*
@@ -1973,6 +2011,8 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	struct net_device *dest_dev;
 	struct net_device *src_dev;
 	struct sfe_ipv4_5tuple *tuple = &msg->tuple;
+	void *orig_conn;
+	void *reply_conn;
 	s32 flow_interface_num = msg->conn_rule.flow_top_interface_num;
 	s32 return_interface_num = msg->conn_rule.return_top_interface_num;
 	struct net *net;
@@ -1980,6 +2020,7 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	unsigned int src_if_idx;
 	u32 flow_sawf_tag;
 	u32 return_sawf_tag;
+	sfe_fls_conn_create_t create_cb;
 
 	/*
 	 * When Qdisc rule is invalid i.e either there is no qdisc present or there are multiple qdisc
@@ -2878,6 +2919,28 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 		reply_cm->xlate_src_port = 0;
 		break;
 	}
+
+	rcu_read_lock();
+	create_cb = rcu_dereference(sfe_fls_info.create_cb);
+	if (create_cb) {
+		create_cb(4, original_cm->match_protocol,
+				&original_cm->match_src_ip,
+				original_cm->match_src_port,
+				&original_cm->match_dest_ip,
+				original_cm->match_dest_port,
+				&reply_cm->match_src_ip,
+				reply_cm->match_src_port,
+				&reply_cm->match_dest_ip,
+				reply_cm->match_dest_port,
+				&orig_conn,
+				&reply_conn);
+
+		if (orig_conn && reply_conn) {
+			original_cm->fls_conn = orig_conn;
+			reply_cm->fls_conn = reply_conn;
+		}
+	}
+	rcu_read_unlock();
 
 	/*
 	 * Fill in the ipv4_connection object.
