@@ -160,6 +160,7 @@ int sfe_ipv4_recv_udp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 	bool fast_xmit;
 	netdev_features_t features;
 	u8 ingress_flags = 0;
+	sfe_fls_conn_stats_update_t update_cb;
 
 	/*
 	 * Is our packet too short to contain a valid UDP header?
@@ -231,6 +232,11 @@ int sfe_ipv4_recv_udp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 		sfe_ipv4_exception_stats_inc(si, SFE_IPV4_EXCEPTION_EVENT_INVALID_SRC_IFACE);
 		DEBUG_TRACE("exception the packet on source interface check failure\n");
 		return 0;
+	}
+
+	update_cb = rcu_dereference(sfe_fls_info.stats_update_cb);
+	if (cm->fls_conn && update_cb) {
+		update_cb(cm->fls_conn, skb);
 	}
 
 	/*

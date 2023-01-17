@@ -551,6 +551,7 @@ static void sfe_ipv6_insert_connection(struct sfe_ipv6 *si, struct sfe_ipv6_conn
  */
 bool sfe_ipv6_remove_connection(struct sfe_ipv6 *si, struct sfe_ipv6_connection *c)
 {
+	sfe_fls_conn_delete_t delete_cb;
 
 	lockdep_assert_held(&si->lock);
 	if (c->removed) {
@@ -572,6 +573,12 @@ bool sfe_ipv6_remove_connection(struct sfe_ipv6 *si, struct sfe_ipv6_connection 
 		if (c->reply_match->qdisc_xmit_dev) {
 			dev_put(c->reply_match->xmit_dev);
 		}
+		rcu_read_lock();
+		delete_cb = rcu_dereference(sfe_fls_info.delete_cb);
+		if (c->reply_match->fls_conn && delete_cb) {
+			delete_cb(c->reply_match->fls_conn);
+		}
+		rcu_read_unlock();
 
 		sfe_ipv6_remove_connection_match(si, c->reply_match);
 	}
@@ -582,6 +589,13 @@ bool sfe_ipv6_remove_connection(struct sfe_ipv6 *si, struct sfe_ipv6_connection 
 	if (c->original_match->qdisc_xmit_dev) {
 		dev_put(c->original_match->xmit_dev);
 	}
+
+	rcu_read_lock();
+	delete_cb = rcu_dereference(sfe_fls_info.delete_cb);
+	if (c->original_match->fls_conn && delete_cb) {
+		delete_cb(c->original_match->fls_conn);
+	}
+	rcu_read_unlock();
 
 	sfe_ipv6_remove_connection_match(si, c->original_match);
 
@@ -762,6 +776,28 @@ static void sfe_ipv6_free_sfe_ipv6_connection_rcu(struct rcu_head *head)
 
 	kfree(c->original_match);
 	kfree(c);
+}
+
+/*
+ * sfe_ipv6_fls_clear()
+ *	Clear all flow statistics connection pointers.
+ */
+void sfe_ipv6_fls_clear(void)
+{
+	struct sfe_ipv6 *si6 = &__si6;
+	uint32_t i;
+	struct sfe_ipv6_connection_match *cm = NULL;
+
+	rcu_read_lock();
+	for (i = 0; i < SFE_IPV6_CONNECTION_HASH_SIZE; i++) {
+		struct hlist_head *lhead = &si6->hlist_conn_match_hash_head[i];
+
+		hlist_for_each_entry_rcu(cm, lhead, hnode) {
+			cm->fls_conn = NULL;
+		}
+		break;
+	}
+	rcu_read_unlock();
 }
 
 /*
@@ -1889,6 +1925,9 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 	struct sock *sk;
 	struct net *net;
 	unsigned int src_if_idx;
+	void *orig_conn;
+	void *reply_conn;
+	sfe_fls_conn_create_t create_cb;
 
 	s32 flow_interface_num = msg->conn_rule.flow_top_interface_num;
 	s32 return_interface_num = msg->conn_rule.return_top_interface_num;
@@ -2349,6 +2388,28 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 	reply_cm->match_src_port = (msg->rule_flags & SFE_RULE_CREATE_FLAG_NO_SRC_IDENT) ? 0 : tuple->return_ident;
 
 	reply_cm->xmit_dev = src_dev;
+
+	rcu_read_lock();
+	create_cb = rcu_dereference(sfe_fls_info.create_cb);
+	if (create_cb) {
+		create_cb(6, original_cm->match_protocol,
+					(uint32_t *)original_cm->match_src_ip,
+					original_cm->match_src_port,
+					(uint32_t *)original_cm->match_dest_ip,
+					original_cm->match_dest_port,
+					(uint32_t *)reply_cm->match_src_ip,
+					reply_cm->match_src_port,
+					(uint32_t *)reply_cm->match_dest_ip,
+					reply_cm->match_dest_port,
+					&orig_conn,
+					&reply_conn);
+
+		if (orig_conn && reply_conn) {
+			original_cm->fls_conn = orig_conn;
+			reply_cm->fls_conn = reply_conn;
+		}
+	}
+	rcu_read_unlock();
 
 	/*
 	 * Enable qdisc fast xmit path if single qdisc is present on non-bottom interface.

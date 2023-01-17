@@ -1103,6 +1103,70 @@ void sfe_ipv6_mark_rule_update(struct sfe_connection_mark *mark);
 sfe_pppoe_br_accel_mode_t sfe_pppoe_get_br_accel_mode(void);
 
 /**
+ * Flow statistics connection create callback.
+ *
+ * @param	ip_version	The IP version of the connection, must equal 4 for IPv4 or 6 for IPv6.
+ * @param	protocol	The protocol number of the connection.
+ * @param	orig_src_ip	A pointer to the source IP in the original direction. If IPv6, a pointer to an array of length 4.
+ * @param	orig_src_port	Source port number in the original direcion.
+ * @param	orig_dst_ip	A pointer to the destination IP address in the original direction. If IPv6, a pointer to an array of length 4.
+ * @param	orig_dst_port	Destination port number in the original direcion.
+ * @param	repl_src_ip	A pointer to the source IP address in the reply direction. If IPv6, a pointer to an array of length 4.
+ * @param	repl_src_port	Source port number in the reply direcion.
+ * @param	repl_dst_ip	A pointer to the destination IP address in the reply direction. If IPv6, a pointer to an array of length 4.
+ * @param	repl_dst_port	Destination port number in the reply direcion.
+ * @param	orig_conn	Pointer to where the original direction connection entry pointer will be written.
+ * @param	repl_conn	Pointer to where the reply direction connection entry pointer will be written.
+ */
+typedef void (*sfe_fls_conn_create_t)(uint8_t ip_version,
+					uint8_t protocol,
+					uint32_t *orig_src_ip,
+					uint16_t orig_src_port,
+					uint32_t *orig_dest_ip,
+					uint16_t orig_dest_port,
+					uint32_t *repl_src_ip,
+					uint16_t repl_src_port,
+					uint32_t *repl_dest_ip,
+					uint16_t repl_dest_port,
+					void **orig_conn,
+					void **repl_conn);
+
+/**
+ * Flow statistics connection delete callback.
+ *
+ * @param	conn	The entry to be deleted.
+ */
+typedef void (*sfe_fls_conn_delete_t)(void *conn);
+
+/**
+ * Flow statisticics connection statistics update callback.
+ *
+ * @param	conn	The entry to be updated.
+ * @param	skb	The sk_buff to use for statistics.
+ */
+typedef void (*sfe_fls_conn_stats_update_t)(void *conn, struct sk_buff *skb);
+
+/**
+ * Registers flow statistics methods with SFE.
+ *
+ * @param	create_cb		Create connection callback.
+ * @param	delete_cb		Delete connection callback.
+ * @param	stats_update_cb		Update statistics callback.
+ *
+ * @return
+ * None.
+ */
+void sfe_fls_register(sfe_fls_conn_create_t create_cb, sfe_fls_conn_delete_t delete_cb, sfe_fls_conn_stats_update_t stats_update_cb);
+
+/**
+ * Unregisters flow statistics methods from SFE.
+ *
+ * @return
+ * None.
+ */
+void sfe_fls_unregister(void);
+
+/**
  * @}
  */
 

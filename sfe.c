@@ -132,6 +132,8 @@ struct sfe_ctx_instance_internal {
 
 static struct sfe_ctx_instance_internal __sfe_ctx;
 
+struct sfe_fls sfe_fls_info;
+
 /*
  * Convert public SFE context to internal context
  */
@@ -2339,6 +2341,37 @@ static ssize_t sfe_set_pppoe_br_accel_mode(struct device *dev,
 
 static const struct device_attribute sfe_pppoe_br_accel_mode_attr =
 	__ATTR(pppoe_br_accel_mode, 0644, sfe_get_pppoe_br_accel_mode, sfe_set_pppoe_br_accel_mode);
+
+/*
+ * sfe_fls_register()
+ *	Register flow statistics functions with SFE.
+ */
+void sfe_fls_register(sfe_fls_conn_create_t create_cb, sfe_fls_conn_delete_t delete_cb, sfe_fls_conn_stats_update_t stats_update_cb)
+{
+	if (sfe_fls_info.create_cb || sfe_fls_info.delete_cb || sfe_fls_info.stats_update_cb) {
+		return;
+	}
+
+	rcu_assign_pointer(sfe_fls_info.create_cb, create_cb);
+	rcu_assign_pointer(sfe_fls_info.delete_cb, delete_cb);
+	rcu_assign_pointer(sfe_fls_info.stats_update_cb, stats_update_cb);
+}
+EXPORT_SYMBOL(sfe_fls_register);
+
+/*
+ * sfe_fls_unregister()
+ *	Clear all flow statistics functions.
+ */
+void sfe_fls_unregister(void)
+{
+	rcu_assign_pointer(sfe_fls_info.create_cb, NULL);
+	rcu_assign_pointer(sfe_fls_info.delete_cb, NULL);
+	rcu_assign_pointer(sfe_fls_info.stats_update_cb, NULL);
+	synchronize_rcu();
+	sfe_ipv4_fls_clear();
+	sfe_ipv6_fls_clear();
+}
+EXPORT_SYMBOL(sfe_fls_unregister);
 
 /*
  * sfe_init_if()
