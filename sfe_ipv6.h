@@ -50,6 +50,17 @@ struct sfe_ipv6_tcp_connection_match {
 	u32 max_end;		/* Sequence number of the last byte to ack */
 };
 
+#ifdef SFE_BRIDGE_VLAN_FILTERING_ENABLE
+/*
+ * Bridge VLAN Filter connection match rule structure.
+ */
+struct sfe_ipv6_vlan_filter_connection_match {
+	u32 ingress_vlan_tag;	/**< VLAN tag for ingress packets. */
+	u8 ingress_flags;	/**< VLAN flags at ingress. */
+	u8 reserved[3];		/**< reserved. */
+};
+#endif
+
 /*
  * Bit flags for IPv6 connection matching entry.
  */
@@ -204,6 +215,13 @@ struct sfe_ipv6_connection_match {
 	 */
 	struct sfe_vlan_hdr ingress_vlan_hdr[SFE_MAX_VLAN_DEPTH];
 	struct sfe_vlan_hdr egress_vlan_hdr[SFE_MAX_VLAN_DEPTH];
+
+#ifdef SFE_BRIDGE_VLAN_FILTERING_ENABLE
+	/*
+	 * Bridge VLAN Filter information per connection match entry.
+	 */
+	struct sfe_ipv6_vlan_filter_connection_match vlan_filter_rule;
+#endif
 
 	/*
 	 * trustsec headers

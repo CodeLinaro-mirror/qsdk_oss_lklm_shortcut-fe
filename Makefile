@@ -43,4 +43,8 @@ ifdef SFE_PROCESS_LOCAL_OUT
 ccflags-y += -DSFE_PROCESS_LOCAL_OUT
 endif
 
+ifdef SFE_BRIDGE_VLAN_FILTERING_ENABLE
+ccflags-y += -DSFE_BRIDGE_VLAN_FILTERING_ENABLE
+endif
+
 ccflags-y += -Werror -Wall -Iexports/

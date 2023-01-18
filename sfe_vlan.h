@@ -138,10 +138,13 @@ static inline void sfe_vlan_undo_parse(struct sk_buff *skb, struct sfe_l2_info *
 
 /*
  * sfe_vlan_validate_ingress_tag()
- *      Validate ingress packet's VLAN tag
+ * 	Validates ingress packet VLAN tag.
+ * 	Returns:
+ * 	TRUE if validation is successful and we can accept the packet.
+ * 	FALSE if packet is not valid and sfe cannot process the packet.
  */
 static inline bool sfe_vlan_validate_ingress_tag(
-		struct sk_buff *skb, u8 count, struct sfe_vlan_hdr *vlan_hdr, struct sfe_l2_info *l2_info)
+		struct sk_buff *skb, u8 count, struct sfe_vlan_hdr *vlan_hdr, struct sfe_l2_info *l2_info, u8 vlan_filter_flags)
 {
 	u8 i;
 
@@ -150,10 +153,20 @@ static inline bool sfe_vlan_validate_ingress_tag(
 	}
 
 	if (unlikely(count != l2_info->vlan_hdr_cnt)) {
+#ifdef SFE_BRIDGE_VLAN_FILTERING_ENABLE
+		/*
+		 * Check if default PVID is enabled at ingress, using Bridge VLAN Filter rule.
+		 * If yes, then we may accept the packet if one less ingress VLAN tag is found.
+		 */
+		if (!((vlan_filter_flags & SFE_VLAN_FILTER_FLAG_INGRESS_PVID) && (count == l2_info->vlan_hdr_cnt+1))) {
+			return false;
+		}
+#else
 		return false;
+#endif
 	}
 
-	for (i = 0; i < count; i++) {
+	for (i = 0; i < l2_info->vlan_hdr_cnt; i++) {
 		if (unlikely(vlan_hdr[i].tpid != l2_info->vlan_hdr[i].tpid)) {
 			return false;
 		}

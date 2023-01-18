@@ -40,6 +40,17 @@ struct sfe_ipv4_tcp_connection_match {
 	u32 max_end;		/* Sequence number of the last byte to ack */
 };
 
+#ifdef SFE_BRIDGE_VLAN_FILTERING_ENABLE
+/*
+ * Bridge VLAN Filter connection match rule structure.
+ */
+struct sfe_ipv4_vlan_filter_connection_match {
+	u32 ingress_vlan_tag;	/**< VLAN tag for ingress packets. */
+	u8 ingress_flags;	/**< VLAN flags at ingress. */
+	u8 reserved[3];		/**< reserved. */
+};
+#endif
+
 /*
  * Bit flags for IPv4 connection matching entry.
  */
@@ -203,6 +214,13 @@ struct sfe_ipv4_connection_match {
 	struct sfe_vlan_hdr ingress_vlan_hdr[SFE_MAX_VLAN_DEPTH];
 	struct sfe_vlan_hdr egress_vlan_hdr[SFE_MAX_VLAN_DEPTH];
 
+#ifdef SFE_BRIDGE_VLAN_FILTERING_ENABLE
+	/*
+	 * Bridge VLAN Filter information per connection match entry.
+	 */
+	struct sfe_ipv4_vlan_filter_connection_match vlan_filter_rule;
+#endif
+
 	/*
 	 * trustsec headers
 	 */
@@ -231,7 +249,6 @@ struct sfe_ipv4_connection_match {
 	u32 priority;
 	u32 dscp;
 	u32 mark;			/* mark for outgoing packet */
-
 
 	u8 ingress_vlan_hdr_cnt;        /* Ingress active vlan headers count */
 	u8 egress_vlan_hdr_cnt;         /* Egress active vlan headers count */

@@ -159,6 +159,7 @@ int sfe_ipv4_recv_udp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 	int ret;
 	bool fast_xmit;
 	netdev_features_t features;
+	u8 ingress_flags = 0;
 
 	/*
 	 * Is our packet too short to contain a valid UDP header?
@@ -260,7 +261,10 @@ int sfe_ipv4_recv_udp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 	/*
 	 * Do we expect an ingress VLAN tag for this flow?
 	 */
-	if (unlikely(!sfe_vlan_validate_ingress_tag(skb, cm->ingress_vlan_hdr_cnt, cm->ingress_vlan_hdr, l2_info))) {
+#ifdef SFE_BRIDGE_VLAN_FILTERING_ENABLE
+	ingress_flags = cm->vlan_filter_rule.ingress_flags;
+#endif
+	if (unlikely(!sfe_vlan_validate_ingress_tag(skb, cm->ingress_vlan_hdr_cnt, cm->ingress_vlan_hdr, l2_info, ingress_flags))) {
 		rcu_read_unlock();
 		sfe_ipv4_exception_stats_inc(si, SFE_IPV4_EXCEPTION_EVENT_INGRESS_VLAN_TAG_MISMATCH);
 		DEBUG_TRACE("VLAN tag mismatch. skb=%px\n", skb);
