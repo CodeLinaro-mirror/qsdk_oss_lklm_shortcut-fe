@@ -2,7 +2,7 @@
  * sfe_ipv6_tunipip6.c
  *	Shortcut forwarding engine file for IPv6 TUNIPIP6
  *
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -46,6 +46,7 @@ int sfe_ipv6_recv_tunipip6(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_
 	unsigned int ihl_tmp = sizeof(struct ipv6hdr);
 	struct sfe_ipv6_connection_match *cm;
 	bool non_dst = false;
+	bool passthrough;
 	u8 next_hdr;
 
 	DEBUG_TRACE("%px: sfe: sfe_ipv6_recv_tunipip6 called.\n", skb);
@@ -113,6 +114,22 @@ int sfe_ipv6_recv_tunipip6(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_
 		DEBUG_TRACE("%px: Sync on find\n", skb);
 
 		return 0;
+	}
+
+	/*
+	 * In the passthrough case, the packet needs to decrement hop_limit.
+	 */
+	passthrough = cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_PASSTHROUGH;
+	if (passthrough) {
+		if (iph->hop_limit < 2) {
+			sfe_ipv6_sync_status(si, cm->connection, SFE_SYNC_REASON_STATS);
+			rcu_read_unlock();
+
+			sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_TUNIPIP6_SMALL_TTL);
+			DEBUG_TRACE("%px: hop_limit too low\n", skb);
+			return 0;
+		}
+		iph->hop_limit--;
 	}
 
 	/*
