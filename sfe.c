@@ -2071,6 +2071,10 @@ int sfe_recv(struct sk_buff *skb)
 		DEBUG_TRACE("No IPv6 address for device: %s skb=%px\n", dev->name, skb);
 		return 0;
 
+	case ETH_P_MAP:
+		DEBUG_TRACE("No need to further progress MAP packets: %s skb=%px\n", dev->name, skb);
+		return 0;
+
 	default:
 		break;
 	}
