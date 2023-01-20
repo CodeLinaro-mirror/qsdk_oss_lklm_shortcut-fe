@@ -31,6 +31,7 @@
 #include "sfe_ipv6.h"
 #include "sfe_pppoe.h"
 #include "sfe_vlan.h"
+#include "sfe_trustsec.h"
 
 /*
  * sfe_ipv6_recv_gre()
@@ -97,6 +98,16 @@ int sfe_ipv6_recv_gre(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 	}
 
 	/*
+	 * Do we expect a trustsec header for this flow ?
+	 */
+	if (unlikely(!sfe_trustsec_validate_ingress_sgt(skb, cm->ingress_trustsec_valid, &cm->ingress_trustsec_hdr, l2_info))) {
+		rcu_read_unlock();
+		sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_INGRESS_TRUSTSEC_SGT_MISMATCH);
+		DEBUG_TRACE("Trustsec SGT mismatch. skb=%px\n", skb);
+		return 0;
+	}
+
+	/*
 	 * Source interface validate.
 	 */
 	if (unlikely((cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_SRC_INTERFACE_CHECK) && (cm->match_dev != dev))) {
@@ -151,21 +162,22 @@ int sfe_ipv6_recv_gre(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 	}
 
 	/*
-	 * Check if skb was cloned. If it was, unshare it. Because
+	 * Check if skb was cloned. If it was, unclone it. Because
 	 * the data area is going to be written in this path and we don't want to
 	 * change the cloned skb's data section.
 	 */
 	if (unlikely(skb_cloned(skb))) {
 		DEBUG_TRACE("%px: skb is a cloned skb\n", skb);
-		skb = skb_unshare(skb, GFP_ATOMIC);
-		if (!skb) {
-			DEBUG_WARN("Failed to unshare the cloned skb\n");
+
+		if (unlikely(skb_shared(skb)) || unlikely(skb_unclone(skb, GFP_ATOMIC))) {
 			rcu_read_unlock();
-			return 1;
+			DEBUG_WARN("Failed to unclone the cloned skb\n");
+			sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_UNCLONE_FAILED);
+			return 0;
 		}
 
 		/*
-		 * Update the iph and udph pointers with the unshared skb's data area.
+		 * Update the iph and udph pointers with the uncloned skb's data area.
 		 */
 		iph = (struct ipv6hdr *)skb->data;
 	}
@@ -296,6 +308,13 @@ int sfe_ipv6_recv_gre(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 	if (unlikely(cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_PPPOE_ENCAP)) {
 		sfe_pppoe_add_header(skb, cm->pppoe_session_id, PPP_IPV6);
 		this_cpu_inc(si->stats_pcpu->pppoe_encap_packets_forwarded64);
+	}
+
+	/*
+	 * For trustsec flows, add trustsec header before L2 header is added.
+	 */
+	if (unlikely(cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_INSERT_EGRESS_TRUSTSEC_SGT)) {
+		sfe_trustsec_add_sgt(skb, &cm->egress_trustsec_hdr);
 	}
 
 	/*

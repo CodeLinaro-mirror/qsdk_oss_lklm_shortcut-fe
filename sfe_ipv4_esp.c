@@ -30,6 +30,7 @@
 #include "sfe_ipv4.h"
 #include "sfe_ipv4_esp.h"
 #include "sfe_vlan.h"
+#include "sfe_trustsec.h"
 
 /*
  * sfe_ipv4_recv_esp()
@@ -126,19 +127,30 @@ int sfe_ipv4_recv_esp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 	}
 
 	/*
-	 * Check if skb was cloned. If it was, unshare it.
+	 * Do we expect a trustsec header for this flow ?
+	 */
+	if (unlikely(!sfe_trustsec_validate_ingress_sgt(skb, cm->ingress_trustsec_valid, &cm->ingress_trustsec_hdr, l2_info))) {
+		rcu_read_unlock();
+		sfe_ipv4_exception_stats_inc(si, SFE_IPV4_EXCEPTION_EVENT_INGRESS_TRUSTSEC_SGT_MISMATCH);
+		DEBUG_TRACE("Trustsec SGT mismatch. skb=%px\n", skb);
+		return 0;
+	}
+
+	/*
+	 * Check if skb was cloned. If it was, unclone it.
 	 */
 	if (unlikely(skb_cloned(skb))) {
 		DEBUG_TRACE("%px: skb is a cloned skb\n", skb);
-		skb = skb_unshare(skb, GFP_ATOMIC);
-		if (!skb) {
-			DEBUG_WARN("Failed to unshare the cloned skb\n");
+
+		if (unlikely(skb_shared(skb)) || unlikely(skb_unclone(skb, GFP_ATOMIC))) {
 			rcu_read_unlock();
+			DEBUG_WARN("Failed to unclone the cloned skb\n");
+			sfe_ipv4_exception_stats_inc(si, SFE_IPV4_EXCEPTION_EVENT_UNCLONE_FAILED);
 			return 0;
 		}
 
 		/*
-		 * Update the iphdr pointer with the unshared skb's data area.
+		 * Update the iphdr pointer with the uncloned skb's data area.
 		 */
 		iph = (struct iphdr *)skb->data;
 	}

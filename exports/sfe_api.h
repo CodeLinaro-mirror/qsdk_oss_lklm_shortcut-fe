@@ -39,6 +39,7 @@
 #define SFE_INVALID_SERVICE_CLASS_ID 0xff	/**< Service class ID not valid. */
 #define SFE_SERVICE_CLASS_STATS_MAX_RETRY 100	/**< Maximum retries for fetching service class statistics. */
 #define SFE_INVALID_MSDUQ 0xff			/**< Invalid MAC Service Data Unit Queue. */
+#define SFE_MC_IF_MAX 16
 
 #define SFE_SPECIAL_INTERFACE_BASE 0x7f00	/**< Special interface base number. */
 #define SFE_SPECIAL_INTERFACE_IPV4 (SFE_SPECIAL_INTERFACE_BASE + 1)	/**< Interface number for IPv4. */
@@ -72,8 +73,8 @@
 #define SFE_RULE_CREATE_FLAG_FLOW_SRC_INTERFACE_CHECK  (1<<10)  /**< Check source interface on the flow direction. */
 #define SFE_RULE_CREATE_FLAG_RETURN_SRC_INTERFACE_CHECK  (1<<11)
 								/**< Check source interface on the return direction. */
-#define SFE_RULE_CREATE_FLAG_FLOW_TRANSMIT_FAST (1<<12) 	/**< Original flow can be transmitted fast. */
-#define SFE_RULE_CREATE_FLAG_RETURN_TRANSMIT_FAST (1<<13) 	/**< Return flow can be transmitted fast. */
+#define SFE_RULE_CREATE_FLAG_FLOW_TRANSMIT_FAST (1<<12)		/**< Original flow can be transmitted fast. */
+#define SFE_RULE_CREATE_FLAG_RETURN_TRANSMIT_FAST (1<<13)	/**< Return flow can be transmitted fast. */
 #define SFE_RULE_CREATE_FLAG_FLOW_SRC_INTERFACE_CHECK_NO_FLUSH  (1<<14)
 								/**< Check source interface on the flow direction but do not flush the connection. */
 #define SFE_RULE_CREATE_FLAG_RETURN_SRC_INTERFACE_CHECK_NO_FLUSH  (1<<15)
@@ -94,6 +95,54 @@
 #define SFE_RULE_CREATE_SRC_MAC_VALID      (1<<9)	/**< Source MAC address is valid. */
 #define SFE_RULE_CREATE_MARK_VALID         (1<<10)	/**< SKB marking fields are valid. */
 #define SFE_RULE_CREATE_NO_SRC_IDENT       (1<<11)	/**< Zero out the src ident. */
+#define SFE_RULE_CREATE_TRUSTSEC_VALID     (1<<12)	/**< trustsec fields are valid. */
+#define SFE_RULE_CREATE_QDISC_RULE_VALID   (1<<13)	/**< Qdisc rule is valid. */
+
+/*
+ * Multicast rule flags
+ */
+#define SFE_MC_RULE_CREATE_FLAG_MC_UPDATE	(1<<0)	/**< Multicast rule update. */
+#define SFE_MC_RULE_CREATE_FLAG_MC_EMESH_SP	(1<<1)
+		/**< Mark multicast rule as E-MESH Service Prioritization valid. */
+
+/*
+ * Multicast rule validity flags
+ */
+#define SFE_MC_RULE_CREATE_FLAG_QOS_VALID		(1<<0)
+		/**< QoS fields are valid. */
+#define SFE_MC_RULE_CREATE_FLAG_DSCP_MARKING_VALID	(1<<1)
+		/**< DSCP fields are valid. */
+#define SFE_MC_RULE_CREATE_FLAG_INGRESS_VLAN_VALID	(1<<2)
+		/**< Ingress VLAN fields are valid. */
+#define SFE_MC_RULE_CREATE_FLAG_INGRESS_PPPOE		(1<<3)
+		/**< Ingress PPPoE fields are valid. */
+#define SFE_MC_RULE_CREATE_FLAG_IGS_VALID		(1<<4)
+		/**< Ingress shaping fields are valid. */
+
+/*
+ * Per-interface rule flags for a multicast connection (to be used with the rule_flags
+ * field of sfe_ipv4_mc_if_rule structure).
+ */
+#define SFE_MC_RULE_CREATE_IF_FLAG_BRIDGE_FLOW 0x01
+		/**< Multicast connection rule is created for a bridge flow. */
+#define SFE_MC_RULE_CREATE_IF_FLAG_ROUTED_FLOW 0x02
+		/**< Multicast connection rule is created for a routed flow. */
+#define SFE_MC_RULE_CREATE_IF_FLAG_JOIN 0x04
+		/**< Interface has joined the flow. */
+#define SFE_MC_RULE_CREATE_IF_FLAG_LEAVE 0x08
+		/**< Interface has left the flow. */
+
+/*
+ * Per-interface valid flags for a multicast connection (to be used with the valid_flags
+ * field of sfe_ipv4_mc_if_rule structure).
+ */
+#define SFE_MC_RULE_CREATE_IF_FLAG_VLAN_VALID 0x01
+		/**< VLAN fields are valid. */
+#define SFE_MC_RULE_CREATE_IF_FLAG_PPPOE_VALID 0x02
+		/**< PPPoE fields are valid. */
+#define SFE_MC_RULE_CREATE_IF_FLAG_NAT_VALID 0x4
+		/**< Interface is configured with the source NAT. */
+
 
 /*
  * Source MAC address validity flags; used with the mac_valid_flags field in the sfe_ipv4_src_mac_rule structure.
@@ -102,6 +151,21 @@
 		/**< MAC address for the flow interface is valid. */
 #define SFE_SRC_MAC_RETURN_VALID 0x02
 		/**< MAC address for the return interface is valid. */
+
+/*
+ * Ingress/egress trustsec validity flags; used with the CREATE_TRUSTSEC_VALID and sfe_trustsec_rule.
+ */
+#define SFE_TRUSTSEC_INGRESS_SGT_VALID 0x01
+		/**< Ingress SGT for the flow interface is valid. */
+#define SFE_TRUSTSEC_EGRESS_SGT_VALID 0x02
+
+/*
+ * Qdisc interface validity flags; used with the qdisc_valid_flags  field in the sfe_qdisc_rule structure.
+ */
+#define SFE_QDISC_RULE_FLOW_VALID 0x01
+		/**< Qdisc interface for the flow interface is valid. */
+#define SFE_QDISC_RULE_RETURN_VALID 0x02
+		/**< Qdisc interface for the return interface is valid. */
 
 /**
  * @}
@@ -169,6 +233,8 @@ enum sfe_message_types {
 	SFE_RX_CONN_STATS_SYNC_MSG,	/**< IPv4/IPv6 connection statistics synchronize message. */
 	SFE_TX_CONN_STATS_SYNC_MANY_MSG,/**< IPv4/IPv6 connection statistics synchronize many message. */
 	SFE_TUN6RD_ADD_UPDATE_PEER,	/**< Add/update peer for 6RD tunnel. */
+	SFE_TX_CREATE_MULTICAST_RULE_MSG,	/**< IPv4/IPv6 create multicast rule message. */
+	SFE_TX_DESTROY_MULTICAST_RULE_MSG,     /**< IPv4/IPv6 destroy multicast rule message. */
 	SFE_MAX_MSG_TYPES,		/**< IPv4/IPv6 message max type number. */
 };
 
@@ -307,6 +373,15 @@ struct sfe_vlan_rule {
 };
 
 /**
+ * Trustsec connection rule structure.
+ */
+struct sfe_trustsec_rule {
+	u16 ingress_sgt;	/**< Trustsec SGT for ingress packets. */
+	u16 egress_sgt;		/**< Trustsec SGT for egress packets. */
+	u8 sgt_valid_flags;	/**< SGT validity flags. */
+};
+
+/**
  * Acceleration direction rule structure.
  * Sometimes it is useful to accelerate traffic in one direction and not in another.
  */
@@ -317,11 +392,24 @@ struct sfe_acceleration_direction_rule {
 };
 
 /**
- *	Service class rule information in both directions.
+ * Service class rule information in both directions.
  */
 struct sfe_service_class_rule {
 	uint32_t flow_mark;		/**< Service class information in flow direction. */
 	uint32_t return_mark;		/**< Service class information in return direction. */
+};
+
+/**
+ * Qdisc information for both the directions.
+ *
+ * In case of a single qdisc applied by user in the flow or return interface hierarchy, use this rule to
+ * indicate the netdev on which the qdisc is applied. This enables full SFE offload for the direction including
+ * the qdisc processing.
+ */
+struct sfe_qdisc_rule {
+	uint32_t valid_flags;       	/**< Qdisc interface validity flags. */
+	s32 flow_qdisc_interface;	/**< Netdevice for flow direction on which qdisc is applied. */
+	s32 return_qdisc_interface;	/**< Netdevice for return direction on which qdisc is applied. */
 };
 
 /**
@@ -343,6 +431,8 @@ struct sfe_ipv4_rule_create_msg {
 	struct sfe_dscp_rule dscp_rule;			/**< DSCP-related acceleration parameters. */
 	struct sfe_vlan_rule vlan_primary_rule;		/**< Primary VLAN-related acceleration parameters. */
 	struct sfe_vlan_rule vlan_secondary_rule;	/**< Secondary VLAN-related acceleration parameters. */
+	struct sfe_trustsec_rule trustsec_rule;		/**< Trustsec-related acceleration parameters. */
+
 #ifdef CONFIG_XFRM
 	struct sfe_acceleration_direction_rule direction_rule;
 							/**< Direction related acceleration parameters. */
@@ -350,6 +440,7 @@ struct sfe_ipv4_rule_create_msg {
 	/* Response */
 	struct sfe_service_class_rule sawf_rule;
 							/**< Service class related information */
+	struct sfe_qdisc_rule qdisc_rule;		/**< Qdisc indication per direction */
 	u32 index;					/**< Slot ID for cache statistics to host OS. */
 };
 
@@ -358,6 +449,61 @@ struct sfe_ipv4_rule_create_msg {
  */
 struct sfe_ipv4_rule_destroy_msg {
 	struct sfe_ipv4_5tuple tuple;	/**< Holds values of 5-tuple. */
+};
+
+/*
+ * Multicast destination interface entry
+ */
+struct sfe_ipv4_mc_device_entry {
+	uint16_t rule_flags;		/**< Bit flag of rules indicating PPPOE session, Vlan. */
+	uint16_t valid_flags;		/**< Valid Bit flags associated with the rule of vlan/pppoe. */
+	uint32_t xlate_src_ip;		/**< nated source ip address. */
+	uint32_t xlate_src_ident;	/**< nated source port number. */
+	uint32_t egress_vlan_tag[SFE_MAX_VLAN_DEPTH]; /**< VLAN tag stack for the ingress packets. */
+	uint32_t if_mtu;                        /**< Interface MTU */
+	uint16_t if_mac[3];                     /**< Interface MAC address */
+	u16 pppoe_session_id;			/**< PPPOE header offset */
+	u8 pppoe_remote_mac[ETH_ALEN];		/**< PPPoE remote mac address. */
+	u8 egress_vlan_hdr_cnt;			/**< vlan header number. */
+	u8  reserved[1];			/**< Reserved; padding for alignment. */
+	uint32_t if_num;			/**< Dest interface number (virtual or physical). */
+	struct sfe_qdisc_rule qdisc_rule;		/**< Qdisc indication per direction */
+};
+
+/**
+ * sfe_ipv4_mc_rule_create_msg
+ *      IPv4 multicast rule for creating sub-messages.
+ */
+struct sfe_ipv4_mc_rule_create_msg {
+	/* Request */
+	u16 valid_flags;				/**< Bit flags associated with paramater validity. */
+	u16 rule_flags;					/**< Bit flags associated with the rule. */
+
+	struct sfe_ipv4_5tuple tuple;           /**< Holds values of the 5 tuple. */
+	struct sfe_ipv4_connection_rule conn_rule;	/**< Basic connection-specific data. */
+	struct sfe_pppoe_rule pppoe_rule;		/**< PPPoE-related acceleration parameters. */
+	struct sfe_qos_rule qos_rule;			/**< QoS-related acceleration parameters. */
+	struct sfe_src_mac_rule src_mac_rule;		/**< Source MAC address rule. */
+	struct sfe_mark_rule mark_rule;			/**< SKB mark-related acceleration parameters. */
+	struct sfe_dscp_rule dscp_rule;			/**< DSCP-related acceleration parameters. */
+	struct sfe_vlan_rule vlan_primary_rule;		/**< Primary VLAN-related acceleration parameters. */
+	struct sfe_vlan_rule vlan_secondary_rule;	/**< Secondary VLAN-related acceleration parameters. */
+#ifdef CONFIG_XFRM
+	struct sfe_acceleration_direction_rule direction_rule;
+							/**< Direction related acceleration parameters. */
+#endif
+	struct sfe_service_class_rule sawf_rule;	/**< Service class related information. */
+	uint16_t dest_mac[3];                   /**< Destination multicast MAC address. */
+	uint16_t if_cnt;                      /**< Number of destination interfaces. */
+	struct sfe_ipv4_mc_device_entry if_rule[SFE_MC_IF_MAX];	/**< Per-interface information. */
+};
+
+/**
+ * sfe_ipv4_mc_rule_destroy_msg
+ *      IPv4 multicast rule for destroy sub-messages.
+ */
+struct sfe_ipv4_mc_rule_destroy_msg {
+	struct sfe_ipv4_5tuple tuple;           /**< Holds values of the 5 tuple. */
 };
 
 /**
@@ -429,6 +575,8 @@ struct sfe_ipv4_msg {
 		struct sfe_ipv4_conn_sync conn_stats;		/**< Connection statistics synchronization message. */
 		struct sfe_ipv4_conn_sync_many_msg conn_stats_many;
 					/**< Many connections' statistics synchronization message. */
+		struct sfe_ipv4_mc_rule_create_msg mc_rule_create;/**< MC rule create message. */
+		struct sfe_ipv4_mc_rule_destroy_msg mc_rule_destroy; /**<MC rule destroy message. */
 	} msg;							/**< IPv4 message. */
 };
 
@@ -500,6 +648,8 @@ struct sfe_ipv6_rule_create_msg {
 	struct sfe_dscp_rule dscp_rule;			/**< DSCP-related acceleration parameters. */
 	struct sfe_vlan_rule vlan_primary_rule;		/**< VLAN-related acceleration parameters. */
 	struct sfe_vlan_rule vlan_secondary_rule;	/**< VLAN-related acceleration parameters. */
+	struct sfe_trustsec_rule trustsec_rule;		/**< Trustsec-related acceleration parameters. */
+
 #ifdef CONFIG_XFRM
 	struct sfe_acceleration_direction_rule direction_rule;
 							/**< Direction-related acceleration parameters. */
@@ -508,6 +658,7 @@ struct sfe_ipv6_rule_create_msg {
 	 * Response
 	 */
 	struct sfe_service_class_rule sawf_rule;	/**< Service class related information. */
+	struct sfe_qdisc_rule qdisc_rule;		/**< Qdisc indication per direction */
 	u32 index;					/**< Slot ID for cache statistics to host OS. */
 };
 
@@ -516,6 +667,61 @@ struct sfe_ipv6_rule_create_msg {
  */
 struct sfe_ipv6_rule_destroy_msg {
 	struct sfe_ipv6_5tuple tuple;	/**< Holds values of the sfe_ipv6_5tuple tuple */
+};
+
+/*
+ * Multicast destination interface entry
+ */
+struct sfe_ipv6_mc_device_entry {
+	uint16_t rule_flags;		/**< Bit flag of rules indicating PPPOE session, Vlan. */
+	uint16_t valid_flags;		/**< Valid Bit flags associated with the rule of vlan/pppoe. */
+
+	uint32_t egress_vlan_tag[SFE_MAX_VLAN_DEPTH]; /**< VLAN tag stack for the ingress packets. */
+	uint32_t if_mtu;                        /* Interface MTU */
+	uint32_t if_num;		/**< Dest interface number (virtual or physical). */
+	uint16_t if_mac[3];                     /* Interface MAC address */
+	u16 pppoe_session_id;			/* PPPOE header offset */
+	u8 pppoe_remote_mac[ETH_ALEN];
+	u8 egress_vlan_hdr_cnt;
+	u8  reserved[1];			/**< Reserved; padding for alignment. */
+	struct sfe_qdisc_rule qdisc_rule;		/**< Qdisc indication per direction */
+};
+
+/**
+ * sfe_ipv6_mc_rule_create_msg
+ *      IPv6 multicast rule for creating sub-messages.
+ */
+struct sfe_ipv6_mc_rule_create_msg {
+	/* Request */
+	u16 valid_flags;				/**< Bit flags associated with paramater validity. */
+	u16 rule_flags;					/**< Bit flags associated with the rule. */
+
+	struct sfe_ipv6_5tuple tuple;           /**< Holds values of the 5 tuple. */
+	struct sfe_ipv6_connection_rule conn_rule;	/**< Basic connection-specific data. */
+	struct sfe_pppoe_rule pppoe_rule;		/**< PPPoE-related acceleration parameters. */
+	struct sfe_qos_rule qos_rule;			/**< QoS-related acceleration parameters. */
+	struct sfe_src_mac_rule src_mac_rule;		/**< Source MAC address rule. */
+	struct sfe_mark_rule mark_rule;			/**< SKB mark-related acceleration parameters. */
+	struct sfe_dscp_rule dscp_rule;			/**< DSCP-related acceleration parameters. */
+	struct sfe_vlan_rule vlan_primary_rule;		/**< Primary VLAN-related acceleration parameters. */
+	struct sfe_vlan_rule vlan_secondary_rule;	/**< Secondary VLAN-related acceleration parameters. */
+#ifdef CONFIG_XFRM
+	struct sfe_acceleration_direction_rule direction_rule;
+							/**< Direction-related acceleration parameters. */
+#endif
+	struct sfe_service_class_rule sawf_rule;	/**< Service class related information. */
+	uint16_t dest_mac[3];                   /**< Destination multicast MAC address. */
+	uint16_t if_cnt;                      /**< Number of destination interfaces. */
+	struct sfe_ipv6_mc_device_entry if_rule[SFE_MC_IF_MAX];	/**< Per-interface information. */
+
+};
+
+/**
+ * sfe_ipv6_mc_rule_destroy_msg
+ *      IPv6 multicast rule for destroy sub-messages.
+ */
+struct sfe_ipv6_mc_rule_destroy_msg {
+	struct sfe_ipv6_5tuple tuple;           /**< Holds values of the 5 tuple. */
 };
 
 /**
@@ -585,6 +791,9 @@ struct sfe_ipv6_msg {
 					/**< Statistics synchronization message. */
 		struct sfe_ipv6_conn_sync_many_msg conn_stats_many;
 					/**< Many Connections' statistics synchronizaion message. */
+		struct sfe_ipv6_mc_rule_create_msg mc_rule_create;/**< MC rule create message. */
+		struct sfe_ipv6_mc_rule_destroy_msg mc_rule_destroy; /**<MC rule destroy message. */
+
 	} msg;				/**< IPv6 message. */
 };
 

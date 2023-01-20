@@ -3,7 +3,7 @@
  *     API for shortcut forwarding engine.
  *
  * Copyright (c) 2015,2016, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -36,6 +36,7 @@
 #include "sfe_pppoe.h"
 #include "sfe_pppoe_mgr.h"
 #include "sfe_vlan.h"
+#include "sfe_trustsec.h"
 #include "sfe_ipv4.h"
 #include "sfe_ipv6.h"
 
@@ -157,7 +158,7 @@ static inline void sfe_incr_exceptions(sfe_exception_t except)
 
 /*
  * sfe_dev_is_layer_3_interface()
- * 	Check if a network device is ipv4 or ipv6 layer 3 interface
+ *	Check if a network device is ipv4 or ipv6 layer 3 interface
  *
  * @param dev network device to check
  * @param check_v4 check ipv4 layer 3 interface(which have ipv4 address) or ipv6 layer 3 interface(which have ipv6 address)
@@ -295,8 +296,21 @@ bool sfe_dev_has_hw_csum(struct net_device *dev)
 }
 
 /*
+ * sfe_dev_is_ipip6()
+ *      return true if it is IPIP6 devices.
+ */
+bool sfe_dev_is_ipip6(struct net_device *dev)
+{
+        if (dev->rtnl_link_ops && !strcmp(dev->rtnl_link_ops->kind, "ip6tnl")) {
+                return true;
+        }
+
+	return false;
+}
+
+/*
  * sfe_clean_response_msg_by_type()
- * 	clean response message in queue when ECM exit
+ *	clean response message in queue when ECM exit
  *
  * @param sfe_ctx SFE context
  * @param msg_type message type, ipv4 or ipv6
@@ -325,7 +339,7 @@ static void sfe_clean_response_msg_by_type(struct sfe_ctx_instance_internal *sfe
 
 /*
  * sfe_process_response_msg()
- * 	Send all pending response message to ECM by calling callback function included in message
+ *	Send all pending response message to ECM by calling callback function included in message
  *
  * @param work work structure
  */
@@ -338,7 +352,6 @@ static void sfe_process_response_msg(struct work_struct *work)
 	while ((response = list_first_entry_or_null(&sfe_ctx->msg_queue, struct sfe_response_msg, node))) {
 		list_del(&response->node);
 		spin_unlock_bh(&sfe_ctx->lock);
-		rcu_read_lock();
 
 		/*
 		 * Send response message back to caller
@@ -357,7 +370,6 @@ static void sfe_process_response_msg(struct work_struct *work)
 			}
 		}
 
-		rcu_read_unlock();
 		/*
 		 * Free response message
 		 */
@@ -369,7 +381,7 @@ static void sfe_process_response_msg(struct work_struct *work)
 
 /*
  * sfe_alloc_response_msg()
- * 	Alloc and construct new response message
+ *	Alloc and construct new response message
  *
  * @param type message type
  * @param msg used to construct response message if not NULL
@@ -451,7 +463,7 @@ bool sfe_fast_xmit_check(struct sk_buff *skb, netdev_features_t features)
 
 /*
  * sfe_enqueue_msg()
- * 	Queue response message
+ *	Queue response message
  *
  * @param sfe_ctx SFE context
  * @param response response message to be queue
@@ -586,7 +598,7 @@ void sfe_ipv4_stats_convert(struct sfe_ipv4_conn_sync *sync_msg, struct sfe_conn
 static void sfe_ipv4_stats_one_sync_callback(struct sfe_connection_sync *sis)
 {
 	struct sfe_ctx_instance_internal *sfe_ctx = &__sfe_ctx;
-	struct sfe_ipv4_msg msg;
+	struct sfe_ipv4_msg *msg;
 	struct sfe_ipv4_conn_sync *sync_msg;
 	sfe_ipv4_msg_callback_t sync_cb;
 
@@ -598,10 +610,14 @@ static void sfe_ipv4_stats_one_sync_callback(struct sfe_connection_sync *sis)
 		return;
 	}
 
-	sync_msg = &msg.msg.conn_stats;
+	msg = kzalloc(sizeof(struct sfe_ipv4_msg), GFP_ATOMIC);
+	if (!msg) {
+		DEBUG_ERROR("Can't allocate the sync msg\n");
+		return;
+	}
+	sync_msg = &(msg->msg.conn_stats);
 
-	memset(&msg, 0, sizeof(msg));
-	sfe_cmn_msg_init(&msg.cm, 0, SFE_RX_CONN_STATS_SYNC_MSG,
+	sfe_cmn_msg_init(&msg->cm, 0, SFE_RX_CONN_STATS_SYNC_MSG,
 			sizeof(struct sfe_ipv4_conn_sync), NULL, NULL);
 
 	sfe_ipv4_stats_convert(sync_msg, sis);
@@ -609,7 +625,9 @@ static void sfe_ipv4_stats_one_sync_callback(struct sfe_connection_sync *sis)
 	/*
 	 * SFE sync calling is excuted in a timer, so we can redirect it to ECM directly.
 	 */
-	sync_cb(sfe_ctx->ipv4_stats_sync_data, &msg);
+	sync_cb(sfe_ctx->ipv4_stats_sync_data, msg);
+
+	kfree(msg);
 }
 
 #if defined(SFE_RFS_SUPPORTED)
@@ -701,6 +719,20 @@ static bool sfe_recv_parse_l2(struct net_device *dev, struct sk_buff *skb, struc
 	}
 
 	/*
+	 * Parse only trustsec packets
+	 */
+	if (htons(ETH_P_TRSEC) == skb->protocol) {
+		if (!sfe_trustsec_check_and_parse_sgt(skb, l2_info)) {
+
+			/*
+			 * For exception from trustsec return from here without modifying the skb->data
+			 * This includes non-IPv4/v6 cases also.
+			 */
+			return false;
+		}
+	}
+
+	/*
 	 * Parse only PPPoE session packets
 	 */
 	if (htons(ETH_P_PPP_SES) == skb->protocol) {
@@ -727,6 +759,11 @@ static void sfe_recv_undo_parse_l2(struct net_device *dev, struct sk_buff *skb, 
 	sfe_pppoe_undo_parse(skb, l2_info);
 
 	/*
+	 * Trustsec undo
+	 */
+	sfe_trustsec_undo_parse(skb, l2_info);
+
+	/*
 	 * VLAN undo
 	 */
 	sfe_vlan_undo_parse(skb, l2_info);
@@ -738,8 +775,154 @@ static void sfe_recv_undo_parse_l2(struct net_device *dev, struct sk_buff *skb, 
 }
 
 /*
+ * sfe_destroy_ipv4_mc_rule_msg()
+ * 	Convert mc destroy message format from ecm to sfe
+ *
+ * @param sfe_ctx SFE context
+ * @param msg The IPv4 message
+ *
+ * @return sfe_tx_status_t The status of the Tx operation
+ */
+sfe_tx_status_t sfe_destroy_ipv4_mc_rule_msg(struct sfe_ctx_instance_internal *sfe_ctx, struct sfe_ipv4_msg *msg)
+{
+	struct sfe_response_msg *response;
+
+	response = sfe_alloc_response_msg(SFE_MSG_TYPE_IPV4, msg);
+	if (!response) {
+		sfe_incr_exceptions(SFE_EXCEPTION_ENQUEUE_FAILED);
+		return SFE_TX_FAILURE_QUEUE;
+	}
+
+	/*
+	 * TO DO destroy mc rule.
+	 */
+	sfe_ipv4_destroy_mc_rule(&(msg->msg.mc_rule_destroy));
+	DEBUG_TRACE("%p: Received a MC destroy rule msg\n", msg);
+
+	/*
+	 * Try to queue response message
+	 */
+	((struct sfe_ipv4_msg *)response->msg)->cm.response = msg->cm.response = SFE_CMN_RESPONSE_ACK;
+	sfe_enqueue_msg(sfe_ctx, response);
+
+	return SFE_TX_SUCCESS;
+}
+
+/*
+ * sfe_create_ipv4_mc_rule_msg()
+ * 	Convert create mc message format from ecm to sfe
+ *
+ * @param sfe_ctx SFE context
+ * @param msg The IPv4 message
+ *
+ * @return sfe_tx_status_t The status of the Tx operation
+ */
+sfe_tx_status_t sfe_create_ipv4_mc_rule_msg(struct sfe_ctx_instance_internal *sfe_ctx, struct sfe_ipv4_msg *msg)
+{
+	struct net_device *src_dev = NULL;
+	struct sfe_response_msg *response;
+	enum sfe_cmn_response ret = SFE_CMN_RESPONSE_ACK;
+	bool is_routed = true;
+
+	response = sfe_alloc_response_msg(SFE_MSG_TYPE_IPV4, msg);
+	if (!response) {
+		sfe_incr_exceptions(SFE_EXCEPTION_ENQUEUE_FAILED);
+		return SFE_TX_FAILURE_QUEUE;
+	}
+
+	if (!(msg->msg.rule_create.valid_flags & SFE_RULE_CREATE_CONN_VALID)) {
+		DEBUG_TRACE("%p: SFE_RULE_CREATE_CONN_VALID \n", msg);
+		ret = SFE_CMN_RESPONSE_EMSG;
+		sfe_incr_exceptions(SFE_EXCEPTION_CONNECTION_INVALID);
+		goto failed_ret;
+	}
+
+	/*
+	 * Bridge flows are accelerated if L2 feature is enabled.
+	 */
+	if (msg->msg.rule_create.rule_flags & SFE_RULE_CREATE_FLAG_BRIDGE_FLOW) {
+		if (!sfe_is_l2_feature_enabled()) {
+			ret = SFE_CMN_RESPONSE_EINTERFACE;
+			sfe_incr_exceptions(SFE_EXCEPTION_NOT_SUPPORT_BRIDGE);
+			goto failed_ret;
+		}
+		is_routed = false;
+	}
+
+	src_dev = dev_get_by_index(&init_net, msg->msg.mc_rule_create.conn_rule.flow_top_interface_num);
+	if (!src_dev || !sfe_routed_dev_allow(src_dev, is_routed, true)) {
+		if (!src_dev) {
+			DEBUG_TRACE("%p: No src dev found\n", msg);
+		} else {
+			DEBUG_TRACE("%p: routed not allowed\n", msg);
+		}
+		ret = SFE_CMN_RESPONSE_EINTERFACE;
+		sfe_incr_exceptions(SFE_EXCEPTION_SRC_DEV_NOT_L3);
+		goto failed_ret;
+	}
+
+	DEBUG_TRACE("%p: Received a MC create rule msg\n", msg);
+
+	if (!sfe_ipv4_create_mc_rule(&msg->msg.mc_rule_create)) {
+		/* success */
+		ret = SFE_CMN_RESPONSE_ACK;
+#if defined(SFE_RFS_SUPPORTED)
+		if (sfe_is_ppe_rfs_feature_enabled()) {
+			struct ppe_rfs_ipv4_rule_create_msg pr4rc;
+			struct sfe_ipv4_rule_create_msg *rule_create = &msg->msg.rule_create;
+
+			pr4rc.valid_flags = rule_create->valid_flags;
+			pr4rc.rule_flags = rule_create->rule_flags;
+
+			pr4rc.tuple.flow_ip = ntohl(rule_create->tuple.flow_ip);
+			pr4rc.tuple.flow_ident = ntohs(rule_create->tuple.flow_ident);
+			pr4rc.tuple.return_ip = ntohl(rule_create->tuple.return_ip);
+			pr4rc.tuple.return_ident = ntohs(rule_create->tuple.return_ident);
+			pr4rc.tuple.protocol = rule_create->tuple.protocol;
+			pr4rc.conn_rule.flow_mtu = rule_create->conn_rule.flow_mtu;
+			pr4rc.conn_rule.return_mtu = rule_create->conn_rule.return_mtu;
+			pr4rc.conn_rule.flow_ip_xlate = ntohl(rule_create->conn_rule.flow_ip_xlate);
+			pr4rc.conn_rule.flow_ident_xlate = ntohs(rule_create->conn_rule.flow_ident_xlate);
+			pr4rc.conn_rule.return_ip_xlate = ntohl(rule_create->conn_rule.return_ip_xlate);
+			pr4rc.conn_rule.return_ident_xlate = ntohs(rule_create->conn_rule.return_ident_xlate);
+			pr4rc.conn_rule.flow_interface_num = rule_create->conn_rule.flow_interface_num;
+			pr4rc.conn_rule.return_interface_num = rule_create->conn_rule.return_interface_num;
+
+			if (rule_create->rule_flags & SFE_RULE_CREATE_FLAG_BRIDGE_FLOW) {
+				pr4rc.rule_flags |= PPE_RFS_V4_RULE_FLAG_BRIDGE_FLOW;
+			}
+
+			pr4rc.rule_flags |= PPE_RFS_V4_RULE_FLAG_RETURN_VALID | PPE_RFS_V4_RULE_FLAG_FLOW_VALID;
+
+			if (ppe_rfs_ipv4_rule_create(&pr4rc) != PPE_RFS_RET_SUCCESS) {
+				DEBUG_TRACE("%p: Error in pushing PPE RFS rules\n", msg);
+			}
+		}
+#endif
+	} else {
+		/* Failed */
+		ret = SFE_CMN_RESPONSE_EMSG;
+		sfe_incr_exceptions(SFE_EXCEPTION_CREATE_FAILED);
+	}
+
+
+failed_ret:
+	if (src_dev) {
+		dev_put(src_dev);
+	}
+
+	/*
+	 * Try to queue response message
+	 */
+	((struct sfe_ipv4_msg *)response->msg)->cm.response = msg->cm.response = ret;
+	sfe_enqueue_msg(sfe_ctx, response);
+
+	return SFE_TX_SUCCESS;
+
+}
+/*
  * sfe_create_ipv4_rule_msg()
- * 	Convert create message format from ecm to sfe
+ *	Convert create message format from ecm to sfe
  *
  * @param sfe_ctx SFE context
  * @param msg The IPv4 message
@@ -918,7 +1101,7 @@ failed_ret:
 
 /*
  * sfe_destroy_ipv4_rule_msg()
- * 	Convert destroy message format from ecm to sfe
+ *	Convert destroy message format from ecm to sfe
  *
  * @param sfe_ctx SFE context
  * @param msg The IPv4 message
@@ -970,7 +1153,7 @@ sfe_tx_status_t sfe_destroy_ipv4_rule_msg(struct sfe_ctx_instance_internal *sfe_
 
 /*
  * sfe_sync_ipv4_stats_many_msg()
- * 	sync con stats msg from the ecm
+ *	sync con stats msg from the ecm
  *
  * @param sfe_ctx SFE context
  * @param msg The IPv4 message
@@ -990,7 +1173,7 @@ sfe_tx_status_t sfe_sync_ipv4_stats_many_msg(struct sfe_ctx_instance_internal *s
 
 /*
  * sfe_ipv4_tx()
- * 	Transmit an IPv4 message to the sfe
+ *	Transmit an IPv4 message to the sfe
  *
  * @param sfe_ctx SFE context
  * @param msg The IPv4 message
@@ -1005,7 +1188,11 @@ sfe_tx_status_t sfe_ipv4_tx(struct sfe_ctx_instance *sfe_ctx, struct sfe_ipv4_ms
 	case SFE_TX_DESTROY_RULE_MSG:
 		return sfe_destroy_ipv4_rule_msg(SFE_CTX_TO_PRIVATE(sfe_ctx), msg);
 	case SFE_TX_CONN_STATS_SYNC_MANY_MSG:
-		return sfe_sync_ipv4_stats_many_msg(SFE_CTX_TO_PRIVATE(sfe_ctx),msg);
+		return sfe_sync_ipv4_stats_many_msg(SFE_CTX_TO_PRIVATE(sfe_ctx), msg);
+	case SFE_TX_CREATE_MULTICAST_RULE_MSG:
+		return sfe_create_ipv4_mc_rule_msg(SFE_CTX_TO_PRIVATE(sfe_ctx), msg);
+	case SFE_TX_DESTROY_MULTICAST_RULE_MSG:
+		return sfe_destroy_ipv4_mc_rule_msg(SFE_CTX_TO_PRIVATE(sfe_ctx), msg);
 	default:
 		sfe_incr_exceptions(SFE_EXCEPTION_IPV4_MSG_UNKNOW);
 		return SFE_TX_FAILURE_NOT_ENABLED;
@@ -1026,7 +1213,7 @@ EXPORT_SYMBOL(sfe_ipv4_msg_init);
 
 /*
  * sfe_ipv4_max_conn_count()
- * 	Return maximum number of entries SFE supported
+ *	Return maximum number of entries SFE supported
  */
 int sfe_ipv4_max_conn_count(void)
 {
@@ -1036,7 +1223,7 @@ EXPORT_SYMBOL(sfe_ipv4_max_conn_count);
 
 /*
  * sfe_ipv4_notify_register()
- * 	Register a notifier callback for IPv4 messages from SFE
+ *	Register a notifier callback for IPv4 messages from SFE
  *
  * @param cb The callback pointer
  * @param app_data The application context for this message
@@ -1072,7 +1259,7 @@ EXPORT_SYMBOL(sfe_ipv4_notify_register);
 
 /*
  * sfe_ipv4_notify_unregister()
- * 	Un-Register the notifier callback for IPv4 messages from SFE
+ *	Un-Register the notifier callback for IPv4 messages from SFE
  */
 void sfe_ipv4_notify_unregister(void)
 {
@@ -1203,13 +1390,134 @@ void sfe_ipv6_stats_convert(struct sfe_ipv6_conn_sync *sync_msg, struct sfe_conn
 }
 
 /*
+ * sfe_create_ipv6_mc_rule_msg()
+ * 	convert create message format from ecm to sfe
+ *
+ * @param sfe_ctx SFE context
+ * @param msg The IPv6 message
+ *
+ * @return sfe_tx_status_t The status of the Tx operation
+ */
+sfe_tx_status_t sfe_create_ipv6_mc_rule_msg(struct sfe_ctx_instance_internal *sfe_ctx, struct sfe_ipv6_msg *msg)
+{
+	struct net_device *src_dev = NULL;
+	struct sfe_response_msg *response;
+	enum sfe_cmn_response ret = SFE_TX_SUCCESS;
+	bool is_routed = true;
+	bool cfg_err;
+
+	response = sfe_alloc_response_msg(SFE_MSG_TYPE_IPV6, msg);
+	if (!response) {
+		sfe_incr_exceptions(SFE_EXCEPTION_ENQUEUE_FAILED);
+		return SFE_TX_FAILURE_QUEUE;
+	}
+
+	if (!(msg->msg.rule_create.valid_flags & SFE_RULE_CREATE_CONN_VALID)) {
+		ret = SFE_CMN_RESPONSE_EMSG;
+		sfe_incr_exceptions(SFE_EXCEPTION_CONNECTION_INVALID);
+		goto failed_ret;
+	}
+
+	/*
+	 * Bridge flows are accelerated if L2 feature is enabled.
+	 */
+	if (msg->msg.rule_create.rule_flags & SFE_RULE_CREATE_FLAG_BRIDGE_FLOW) {
+		if (!sfe_is_l2_feature_enabled()) {
+			ret = SFE_CMN_RESPONSE_EINTERFACE;
+			sfe_incr_exceptions(SFE_EXCEPTION_NOT_SUPPORT_BRIDGE);
+			goto failed_ret;
+		}
+		is_routed = false;
+	}
+
+	/*
+	 * Does our input device support IP processing?
+	 */
+	src_dev = dev_get_by_index(&init_net, msg->msg.rule_create.conn_rule.flow_top_interface_num);
+	if (!src_dev || !sfe_routed_dev_allow(src_dev, is_routed, false)) {
+		ret = SFE_CMN_RESPONSE_EINTERFACE;
+		sfe_incr_exceptions(SFE_EXCEPTION_SRC_DEV_NOT_L3);
+		goto failed_ret;
+	}
+
+	/*
+	 * Check whether L2 feature is disabled and rule flag is configured to use bottom interface
+	 */
+	cfg_err = (msg->msg.rule_create.rule_flags & SFE_RULE_CREATE_FLAG_USE_FLOW_BOTTOM_INTERFACE) && !sfe_is_l2_feature_enabled();
+	if (cfg_err) {
+		ret = SFE_CMN_RESPONSE_EMSG;
+		sfe_incr_exceptions(SFE_EXCEPTION_CFG_ERR);
+		goto failed_ret;
+	}
+
+	if (!sfe_ipv6_create_mc_rule(&msg->msg.mc_rule_create)) {
+		/* SFE success */
+		ret = SFE_CMN_RESPONSE_ACK;
+#if defined(SFE_RFS_SUPPORTED)
+		if (sfe_is_ppe_rfs_feature_enabled()) {
+			struct ppe_rfs_ipv6_rule_create_msg pr6rc;
+			struct sfe_ipv6_rule_create_msg *rule_create = &msg->msg.rule_create;
+
+			pr6rc.valid_flags = rule_create->valid_flags;
+			pr6rc.rule_flags = rule_create->rule_flags;
+			pr6rc.tuple.flow_ip[0] = ntohl(rule_create->tuple.flow_ip[3]);
+			pr6rc.tuple.flow_ip[1] = ntohl(rule_create->tuple.flow_ip[2]);
+			pr6rc.tuple.flow_ip[2] = ntohl(rule_create->tuple.flow_ip[1]);
+			pr6rc.tuple.flow_ip[3] = ntohl(rule_create->tuple.flow_ip[0]);
+			pr6rc.tuple.flow_ident = ntohs(rule_create->tuple.flow_ident);
+			pr6rc.tuple.return_ip[0] = ntohl(rule_create->tuple.return_ip[3]);
+			pr6rc.tuple.return_ip[1] = ntohl(rule_create->tuple.return_ip[2]);
+			pr6rc.tuple.return_ip[2] = ntohl(rule_create->tuple.return_ip[1]);
+			pr6rc.tuple.return_ip[3] = ntohl(rule_create->tuple.return_ip[0]);
+			pr6rc.tuple.return_ident = ntohs(rule_create->tuple.return_ident);
+			pr6rc.tuple.protocol = rule_create->tuple.protocol;
+			pr6rc.conn_rule.flow_mtu = rule_create->conn_rule.flow_mtu;
+			pr6rc.conn_rule.return_mtu = rule_create->conn_rule.return_mtu;
+			pr6rc.conn_rule.flow_interface_num = rule_create->conn_rule.flow_interface_num;
+			pr6rc.conn_rule.return_interface_num = rule_create->conn_rule.flow_interface_num;
+
+			if (rule_create->rule_flags & SFE_RULE_CREATE_FLAG_BRIDGE_FLOW) {
+				pr6rc.rule_flags |= PPE_RFS_V6_RULE_FLAG_BRIDGE_FLOW;
+			}
+
+			pr6rc.rule_flags |= PPE_RFS_V6_RULE_FLAG_RETURN_VALID | PPE_RFS_V6_RULE_FLAG_FLOW_VALID;
+
+			if (ppe_rfs_ipv6_rule_create(&pr6rc) != PPE_RFS_RET_SUCCESS) {
+				DEBUG_TRACE("%p: Error in pushing PPE RFS rules\n", msg);
+			}
+		}
+#endif
+	} else {
+		/* Failed */
+		ret = SFE_CMN_RESPONSE_EMSG;
+		sfe_incr_exceptions(SFE_EXCEPTION_CREATE_FAILED);
+	}
+
+	/*
+	 * Fall through
+	 */
+failed_ret:
+	if (src_dev) {
+		dev_put(src_dev);
+	}
+
+	/*
+	 * Try to queue response message
+	 */
+	((struct sfe_ipv6_msg *)response->msg)->cm.response = msg->cm.response = ret;
+	sfe_enqueue_msg(sfe_ctx, response);
+
+	return SFE_TX_SUCCESS;
+}
+
+/*
  * sfe_ipv6_stats_sync_callback()
  *	Synchronize a connection's state.
  */
 static void sfe_ipv6_stats_sync_callback(struct sfe_connection_sync *sis)
 {
 	struct sfe_ctx_instance_internal *sfe_ctx = &__sfe_ctx;
-	struct sfe_ipv6_msg msg;
+	struct sfe_ipv6_msg *msg;
 	struct sfe_ipv6_conn_sync *sync_msg;
 	sfe_ipv6_msg_callback_t sync_cb;
 
@@ -1221,10 +1529,15 @@ static void sfe_ipv6_stats_sync_callback(struct sfe_connection_sync *sis)
 		return;
 	}
 
-	sync_msg = &msg.msg.conn_stats;
+	msg = kzalloc(sizeof(struct sfe_ipv6_msg), GFP_ATOMIC);
+	if (!msg) {
+		DEBUG_ERROR("Can't allocate the sync msg\n");
+		return;
+	}
 
-	memset(&msg, 0, sizeof(msg));
-	sfe_cmn_msg_init(&msg.cm, 0, SFE_RX_CONN_STATS_SYNC_MSG,
+	sync_msg = &msg->msg.conn_stats;
+
+	sfe_cmn_msg_init(&msg->cm, 0, SFE_RX_CONN_STATS_SYNC_MSG,
 			sizeof(struct sfe_ipv6_conn_sync), NULL, NULL);
 
 	sfe_ipv6_stats_convert(sync_msg, sis);
@@ -1232,12 +1545,14 @@ static void sfe_ipv6_stats_sync_callback(struct sfe_connection_sync *sis)
 	/*
 	 * SFE sync calling is excuted in a timer, so we can redirect it to ECM directly.
 	 */
-	sync_cb(sfe_ctx->ipv6_stats_sync_data, &msg);
+	sync_cb(sfe_ctx->ipv6_stats_sync_data, msg);
+
+	kfree(msg);
 }
 
 /*
  * sfe_create_ipv6_rule_msg()
- * 	convert create message format from ecm to sfe
+ *	convert create message format from ecm to sfe
  *
  * @param sfe_ctx SFE context
  * @param msg The IPv6 message
@@ -1417,8 +1732,66 @@ failed_ret:
 }
 
 /*
+ * sfe_destroy_ipv6_mc_rule_msg()
+ * 	Convert mc destroy message format from ecm to sfe
+ *
+ * @param sfe_ctx SFE context
+ * @param msg The IPv6 message
+ *
+ * @return sfe_tx_status_t The status of the Tx operation
+ */
+sfe_tx_status_t sfe_destroy_ipv6_mc_rule_msg(struct sfe_ctx_instance_internal *sfe_ctx, struct sfe_ipv6_msg *msg)
+{
+	struct sfe_response_msg *response;
+
+	response = sfe_alloc_response_msg(SFE_MSG_TYPE_IPV6, msg);
+	if (!response) {
+		sfe_incr_exceptions(SFE_EXCEPTION_ENQUEUE_FAILED);
+		return SFE_TX_FAILURE_QUEUE;
+	}
+
+#if defined(SFE_RFS_SUPPORTED)
+	if (sfe_is_ppe_rfs_feature_enabled()) {
+		struct ppe_rfs_ipv6_rule_destroy_msg pr6rd;
+		struct sfe_ipv6_rule_destroy_msg *rule_destroy = &msg->msg.rule_destroy;
+
+		pr6rd.tuple.flow_ip[0] = ntohl(rule_destroy->tuple.flow_ip[3]);
+		pr6rd.tuple.flow_ip[1] = ntohl(rule_destroy->tuple.flow_ip[2]);
+		pr6rd.tuple.flow_ip[2] = ntohl(rule_destroy->tuple.flow_ip[1]);
+		pr6rd.tuple.flow_ip[3] = ntohl(rule_destroy->tuple.flow_ip[0]);
+		pr6rd.tuple.flow_ident = ntohs(rule_destroy->tuple.flow_ident);
+		pr6rd.tuple.return_ip[0] = ntohl(rule_destroy->tuple.return_ip[3]);
+		pr6rd.tuple.return_ip[1] = ntohl(rule_destroy->tuple.return_ip[2]);
+		pr6rd.tuple.return_ip[2] = ntohl(rule_destroy->tuple.return_ip[1]);
+		pr6rd.tuple.return_ip[3] = ntohl(rule_destroy->tuple.return_ip[0]);
+		pr6rd.tuple.return_ident = ntohs(rule_destroy->tuple.return_ident);
+		pr6rd.tuple.protocol = rule_destroy->tuple.protocol;
+
+		sfe_ipv6_fill_connection_dev(rule_destroy, &pr6rd.original_dev, &pr6rd.reply_dev);
+		if (!pr6rd.original_dev || !pr6rd.reply_dev) {
+			DEBUG_INFO("%p: NULL dev while destroying PPE RFS rule\n", &pr6rd);
+		} else {
+			if (ppe_rfs_ipv6_rule_destroy(&pr6rd) != PPE_RFS_RET_SUCCESS) {
+				DEBUG_INFO("%p: Error while deleting PPE RFS IPv6 rule\n", &pr6rd);
+			}
+		}
+	}
+#endif
+
+	sfe_ipv6_destroy_mc_rule(&msg->msg.mc_rule_destroy);
+
+	/*
+	 * Try to queue response message
+	 */
+	((struct sfe_ipv6_msg *)response->msg)->cm.response = msg->cm.response = SFE_CMN_RESPONSE_ACK;
+	sfe_enqueue_msg(sfe_ctx, response);
+
+	return SFE_TX_SUCCESS;
+}
+
+/*
  * sfe_destroy_ipv6_rule_msg()
- * 	Convert destroy message format from ecm to sfe
+ *	Convert destroy message format from ecm to sfe
  *
  * @param sfe_ctx SFE context
  * @param msg The IPv6 message
@@ -1476,7 +1849,7 @@ sfe_tx_status_t sfe_destroy_ipv6_rule_msg(struct sfe_ctx_instance_internal *sfe_
 
 /*
  * sfe_sync_ipv6_stats_many_msg()
- * 	sync con stats msg from the ecm
+ *	sync con stats msg from the ecm
  *
  * @param sfe_ctx SFE context
  * @param msg The IPv6 message
@@ -1496,7 +1869,7 @@ sfe_tx_status_t sfe_sync_ipv6_stats_many_msg(struct sfe_ctx_instance_internal *s
 
 /*
  * sfe_ipv6_tx()
- * 	Transmit an IPv6 message to the sfe
+ *	Transmit an IPv6 message to the sfe
  *
  * @param sfe_ctx SFE context
  * @param msg The IPv6 message
@@ -1512,6 +1885,10 @@ sfe_tx_status_t sfe_ipv6_tx(struct sfe_ctx_instance *sfe_ctx, struct sfe_ipv6_ms
 		return sfe_destroy_ipv6_rule_msg(SFE_CTX_TO_PRIVATE(sfe_ctx), msg);
 	case SFE_TX_CONN_STATS_SYNC_MANY_MSG:
 		return sfe_sync_ipv6_stats_many_msg(SFE_CTX_TO_PRIVATE(sfe_ctx), msg);
+	case SFE_TX_CREATE_MULTICAST_RULE_MSG:
+		return sfe_create_ipv6_mc_rule_msg(SFE_CTX_TO_PRIVATE(sfe_ctx), msg);
+	case SFE_TX_DESTROY_MULTICAST_RULE_MSG:
+		return sfe_destroy_ipv6_mc_rule_msg(SFE_CTX_TO_PRIVATE(sfe_ctx), msg);
 	default:
 		sfe_incr_exceptions(SFE_EXCEPTION_IPV6_MSG_UNKNOW);
 		return SFE_TX_FAILURE_NOT_ENABLED;
@@ -1532,7 +1909,7 @@ EXPORT_SYMBOL(sfe_ipv6_msg_init);
 
 /*
  * sfe_ipv6_max_conn_count()
- * 	Return maximum number of entries SFE supported
+ *	Return maximum number of entries SFE supported
  */
 int sfe_ipv6_max_conn_count(void)
 {
@@ -1542,7 +1919,7 @@ EXPORT_SYMBOL(sfe_ipv6_max_conn_count);
 
 /*
  * sfe_ipv6_notify_register()
- * 	Register a notifier callback for IPv6 messages from SFE
+ *	Register a notifier callback for IPv6 messages from SFE
  *
  * @param one_rule_cb The callback pointer of one rule sync
  * @param many_rule_cb The callback pointer of many rule sync
@@ -1579,7 +1956,7 @@ EXPORT_SYMBOL(sfe_ipv6_notify_register);
 
 /*
  * sfe_ipv6_notify_unregister()
- * 	Un-Register a notifier callback for IPv6 messages from SFE
+ *	Un-Register a notifier callback for IPv6 messages from SFE
  */
 void sfe_ipv6_notify_unregister(void)
 {
@@ -1618,7 +1995,7 @@ EXPORT_SYMBOL(sfe_ipv6_notify_unregister);
 
 /*
  * sfe_tun6rd_tx()
- * 	Transmit a tun6rd message to sfe engine
+ *	Transmit a tun6rd message to sfe engine
  */
 sfe_tx_status_t sfe_tun6rd_tx(struct sfe_ctx_instance *sfe_ctx, struct sfe_tun6rd_msg *msg)
 {
@@ -1694,6 +2071,10 @@ int sfe_recv(struct sk_buff *skb)
 		DEBUG_TRACE("No IPv6 address for device: %s skb=%px\n", dev->name, skb);
 		return 0;
 
+	case ETH_P_MAP:
+		DEBUG_TRACE("No need to further progress MAP packets: %s skb=%px\n", dev->name, skb);
+		return 0;
+
 	default:
 		break;
 	}
@@ -1738,7 +2119,7 @@ int sfe_recv(struct sk_buff *skb)
 	DEBUG_TRACE("Non-IP(%x) %s skb=%px skb_vlan:%x/%x/%x skb_proto=%x\n",
 			l2_info.protocol, dev->name, skb,
 			ntohs(skb->vlan_proto), skb->vlan_tci, skb_vlan_tag_present(skb),
-		       	htons(skb->protocol));
+			htons(skb->protocol));
 
 send_to_linux:
 	/*
@@ -1841,12 +2222,12 @@ ssize_t sfe_get_l2_feature(struct device *dev,
  *	Enable or disable l2 features flag.
  */
 ssize_t sfe_set_l2_feature(struct device *dev, struct device_attribute *attr,
-                         const char *buf, size_t count)
+			 const char *buf, size_t count)
 {
-        unsigned long val;
+	unsigned long val;
 	struct sfe_ctx_instance_internal *sfe_ctx = &__sfe_ctx;
 	int ret;
-        ret = sscanf(buf, "%lu", &val);
+	ret = sscanf(buf, "%lu", &val);
 
 	if (ret != 1) {
 		pr_err("Wrong input, %s\n", buf);
@@ -1925,10 +2306,10 @@ static ssize_t sfe_set_pppoe_br_accel_mode(struct device *dev,
 				const char *buf,
 				size_t count)
 {
-        uint32_t val;
+	uint32_t val;
 	int ret;
 
-        ret = sscanf(buf, "%u", &val);
+	ret = sscanf(buf, "%u", &val);
 	if (ret != 1) {
 		DEBUG_ERROR("Unable to write the mode\n");
 		return -EINVAL;

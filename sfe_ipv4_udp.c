@@ -31,6 +31,8 @@
 #include "sfe_ipv4.h"
 #include "sfe_pppoe.h"
 #include "sfe_vlan.h"
+#include "sfe_trustsec.h"
+#include "sfe_ipv4_multicast.h"
 
 /*
  * sfe_ipv4_udp_sk_deliver()
@@ -265,6 +267,16 @@ int sfe_ipv4_recv_udp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 		return 0;
 	}
 
+	/*
+	 * Do we expect a trustsec header for this flow ?
+	 */
+	if (unlikely(!sfe_trustsec_validate_ingress_sgt(skb, cm->ingress_trustsec_valid, &cm->ingress_trustsec_hdr, l2_info))) {
+		rcu_read_unlock();
+		sfe_ipv4_exception_stats_inc(si, SFE_IPV4_EXCEPTION_EVENT_INGRESS_TRUSTSEC_SGT_MISMATCH);
+		DEBUG_TRACE("Trustsec SGT mismatch. skb=%px\n", skb);
+		return 0;
+	}
+
 	bridge_flow = !!(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_BRIDGE_FLOW);
 
 	/*
@@ -295,21 +307,22 @@ int sfe_ipv4_recv_udp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 	}
 
 	/*
-	 * Check if skb was cloned. If it was, unshare it. Because
+	 * Check if skb was cloned. If it was, unclone it. Because
 	 * the data area is going to be written in this path and we don't want to
 	 * change the cloned skb's data section.
 	 */
 	if (unlikely(skb_cloned(skb))) {
 		DEBUG_TRACE("%px: skb is a cloned skb\n", skb);
-		skb = skb_unshare(skb, GFP_ATOMIC);
-		if (!skb) {
-			DEBUG_WARN("%px: Failed to unshare the cloned skb\n", skb);
+
+		if (unlikely(skb_shared(skb)) || unlikely(skb_unclone(skb, GFP_ATOMIC))) {
 			rcu_read_unlock();
+			DEBUG_WARN("Failed to unclone the cloned skb\n");
+			sfe_ipv4_exception_stats_inc(si, SFE_IPV4_EXCEPTION_EVENT_UNCLONE_FAILED);
 			return 0;
 		}
 
 		/*
-		 * Update the iph and udph pointers with the unshared skb's data area.
+		 * Update the iph and udph pointers with the uncloned skb's data area.
 		 */
 		iph = (struct iphdr *)skb->data;
 		udph = (struct udphdr *)(skb->data + ihl);
@@ -379,6 +392,16 @@ int sfe_ipv4_recv_udp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 	/*
 	 * From this point on we're good to modify the packet.
 	 */
+
+	/*
+	 * Multicast share the same check with unicast, from this point, they are going to
+	 * divert.
+	 */
+	if (unlikely(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_MULTICAST)) {
+		sfe_ipv4_recv_multicast(si, skb, ihl, len, cm, l2_info, tun_outer);
+		rcu_read_unlock();
+		return 1;
+	}
 
 	/*
 	 * For PPPoE flows, add PPPoE header before L2 header is added.
@@ -523,6 +546,13 @@ int sfe_ipv4_recv_udp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 	skb->dev = xmit_dev;
 
 	/*
+	 * For trustsec flows, add trustsec header before L2 header is added.
+	 */
+	if (unlikely(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_INSERT_EGRESS_TRUSTSEC_SGT)) {
+		sfe_trustsec_add_sgt(skb, &cm->egress_trustsec_hdr);
+	}
+
+	/*
 	 * Check to see if we need to add VLAN tags
 	 */
 	if (unlikely(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_INSERT_EGRESS_VLAN_TAG)) {
@@ -608,8 +638,15 @@ int sfe_ipv4_recv_udp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 	skb->fast_forwarded = 1;
 
 	/*
-	 * Send the packet on its way.
+	 * check if fast qdisc xmit is enabled and send the packet on its way.
 	 */
+	if (cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_FAST_QDISC_XMIT) {
+		if (likely(dev_fast_xmit_qdisc(skb, xmit_dev, cm->qdisc_xmit_dev))) {
+			this_cpu_inc(si->stats_pcpu->packets_fast_qdisc_xmited64);
+			return 1;
+		}
+	}
+
 	dev_queue_xmit(skb);
 
 	return 1;

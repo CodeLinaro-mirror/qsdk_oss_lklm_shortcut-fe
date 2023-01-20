@@ -3,7 +3,7 @@
  *	Shortcut forwarding engine.
  *
  * Copyright (c) 2013-2016, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -32,7 +32,8 @@
 #define SFE_MAX_CONNECTION_NUM 4096
 #endif
 
-#define SFE_L2_PARSE_FLAGS_PPPOE_INGRESS 0x01	/* Indicates presence of a valid PPPoE header */
+#define SFE_L2_PARSE_FLAGS_PPPOE_INGRESS 0x01		/* Indicates presence of a valid PPPoE header */
+#define SFE_L2_PARSE_FLAGS_TRUSTSEC_INGRESS 0x02	/* Indicates presence of a valid trustsec header */
 
 /**
  * SAWF_metadata information placement in mark field.
@@ -78,12 +79,20 @@ struct sfe_vlan_hdr {
 };
 
 /*
+ * trustsec header
+ */
+struct sfe_trustsec_hdr {
+	u16 sgt;		/* Tag Protocol Identifier */
+};
+
+/*
  * Structure used to store L2 information
  */
 struct sfe_l2_info {
 	u16 parse_flags;	/* Flags indicating L2.5 headers presence */
 	u16 pppoe_session_id;	/* PPPOE header offset */
 	u16 protocol;		/* L3 Protocol */
+	u16 trustsec_sgt;	/* trustsec SGT value */
 	struct sfe_vlan_hdr vlan_hdr[SFE_MAX_VLAN_DEPTH];
 				/* VLAN tag(s) of ingress packet */
 	u8 vlan_hdr_cnt;        /* Number of VLAN tags in the ingress packet */
@@ -167,9 +176,12 @@ int sfe_ipv4_recv(struct net_device *dev, struct sk_buff *skb, struct sfe_l2_inf
 int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg);
 void sfe_ipv4_destroy_rule(struct sfe_ipv4_rule_destroy_msg *msg);
 void sfe_ipv4_destroy_all_rules_for_dev(struct net_device *dev);
+int sfe_ipv4_create_mc_rule(struct sfe_ipv4_mc_rule_create_msg *msg);
+void sfe_ipv4_destroy_mc_rule(struct sfe_ipv4_mc_rule_destroy_msg *msg);
 void sfe_ipv4_register_sync_rule_callback(sfe_sync_rule_callback_t callback);
 void sfe_ipv4_update_rule(struct sfe_ipv4_rule_create_msg *msg);
 bool sfe_dev_has_hw_csum(struct net_device *dev);
+bool sfe_dev_is_ipip6(struct net_device *dev);
 
 bool sfe_ipv4_sync_invoke(uint16_t index);
 void sfe_ipv4_register_many_sync_callback(sfe_ipv4_many_sync_callback_t cb);
@@ -182,6 +194,8 @@ int sfe_ipv6_recv(struct net_device *dev, struct sk_buff *skb, struct sfe_l2_inf
 int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg);
 void sfe_ipv6_destroy_rule(struct sfe_ipv6_rule_destroy_msg *msg);
 void sfe_ipv6_destroy_all_rules_for_dev(struct net_device *dev);
+int sfe_ipv6_create_mc_rule(struct sfe_ipv6_mc_rule_create_msg *msg);
+void sfe_ipv6_destroy_mc_rule(struct sfe_ipv6_mc_rule_destroy_msg *msg);
 void sfe_ipv6_register_sync_rule_callback(sfe_sync_rule_callback_t callback);
 void sfe_ipv6_update_rule(struct sfe_ipv6_rule_create_msg *msg);
 bool sfe_ipv6_sync_invoke(uint16_t index);
@@ -204,6 +218,16 @@ static inline void sfe_ipv6_destroy_rule(struct sfe_ipv6_rule_destroy_msg *msg)
 }
 
 static inline void sfe_ipv6_destroy_all_rules_for_dev(struct net_device *dev)
+{
+	return;
+}
+
+static inline int sfe_ipv6_create_mc_rule(struct sfe_ipv6_mc_rule_create_msg *msg)
+{
+	return 0;
+}
+
+static inline int sfe_ipv6_destroy_mc__rule(struct sfe_ipv6_mc_rule_destroy_msg *msg)
 {
 	return;
 }
@@ -330,6 +354,24 @@ static inline u16 sfe_l2_protocol_get(struct sfe_l2_info *l2_info)
 static inline void sfe_l2_protocol_set(struct sfe_l2_info *l2_info, u16 proto)
 {
 	l2_info->protocol = proto;
+}
+
+/*
+ * sfe_l2_trustsec_sgt_get()
+ *	Get trustsec SGT from l2_info
+ */
+static inline u16 sfe_l2_trustsec_sgt_get(struct sfe_l2_info *l2_info)
+{
+	return l2_info->trustsec_sgt;
+}
+
+/*
+ * sfe_l2_trustsec_sgt_set()
+ *	Set trustsec SGT to l2_info
+ */
+static inline void sfe_l2_trustsec_sgt_set(struct sfe_l2_info *l2_info, u16 sgt)
+{
+	l2_info->trustsec_sgt = sgt;
 }
 
 int sfe_init_if(void);
