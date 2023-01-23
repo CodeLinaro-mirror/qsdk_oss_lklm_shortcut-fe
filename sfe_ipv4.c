@@ -1246,12 +1246,41 @@ void sfe_ipv4_mark_rule_update(struct sfe_connection_mark *mark)
 		DEBUG_WARN("%px: connection not found for mark update\n", mark);
 		return;
 	}
-	c->original_match->mark = mark->mark;
-	if(c->reply_match) {
-		c->reply_match->mark = mark->mark;
+
+	switch (mark->type) {
+	case SFE_CONNECTION_MARK_TYPE_CONNMARK:
+		c->original_match->mark = mark->flow_mark;
+		if (c->reply_match) {
+			c->reply_match->mark = mark->return_mark;
+		}
+		spin_unlock_bh(&si->lock);
+		break;
+
+	case SFE_CONNECTION_MARK_TYPE_SAWFMARK:
+		if (mark->flags & SFE_SAWF_MARK_FLOW_VALID) {
+			c->original_match->mark = mark->flow_mark;
+			c->original_match->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_MARK;
+			c->original_match->sawf_valid = true;
+		}
+
+		if (c->reply_match) {
+			if (mark->flags & SFE_SAWF_MARK_RETURN_VALID) {
+				c->reply_match->mark = mark->return_mark;
+				c->reply_match->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_MARK;
+				c->reply_match->sawf_valid = true;
+			}
+		}
+		spin_unlock_bh(&si->lock);
+		break;
+
+	default:
+		spin_unlock_bh(&si->lock);
+		DEBUG_WARN("%px: unsupported mark type: %d\n", mark, mark->type);
+		break;
 	}
-	spin_unlock_bh(&si->lock);
-	DEBUG_TRACE("%px: connection mark updated with %d\n", mark, mark->mark);
+
+	DEBUG_TRACE("%px: flow/return mark updated with %x/%x\n",
+			c, mark->flow_mark, mark->return_mark);
 }
 EXPORT_SYMBOL(sfe_ipv4_mark_rule_update);
 

@@ -43,10 +43,31 @@
 
 #define SFE_SPECIAL_INTERFACE_BASE 0x7f00	/**< Special interface base number. */
 #define SFE_SPECIAL_INTERFACE_IPV4 (SFE_SPECIAL_INTERFACE_BASE + 1)	/**< Interface number for IPv4. */
-#define SFE_SPECIAL_INTERFACE_IPV6 (SFE_SPECIAL_INTERFACE_BASE + 2)	/**< Interface enumber fo IPv6. */
+#define SFE_SPECIAL_INTERFACE_IPV6 (SFE_SPECIAL_INTERFACE_BASE + 2)	/**< Interface number for IPv6. */
 #define SFE_SPECIAL_INTERFACE_IPSEC (SFE_SPECIAL_INTERFACE_BASE + 3)	/**< Interface number for IPSec. */
 #define SFE_SPECIAL_INTERFACE_L2TP (SFE_SPECIAL_INTERFACE_BASE + 4)	/**< Interface number for L2TP. */
 #define SFE_SPECIAL_INTERFACE_PPTP (SFE_SPECIAL_INTERFACE_BASE + 5)	/**< Interface number for PPTP. */
+
+/**
+ * SAWF_metadata information placement in mark field.
+ */
+#define SFE_SAWF_VALID_TAG              0xAA    /**< Valid SAWF tag value. */
+#define SFE_SAWF_TAG_SHIFT              24      /**< Number of bit shifts for SAWF tag. */
+#define SFE_SAWF_SERVICE_CLASS_SHIFT    16      /**< Number of bit shifts for SAWF service class ID. */
+#define SFE_SAWF_SERVICE_CLASS_MASK     0xff    /**< Mask for SAWF service class ID. */
+#define SFE_SAWF_MSDUQ_MASK             0xffff  /**< Mask for SAWF msduq. */
+
+/**
+ * SAWF_metadata extraction.
+ */
+#define SFE_GET_SAWF_TAG(sawf_meta)             (sawf_meta >> SFE_SAWF_TAG_SHIFT)
+				/**< Get tag field in SAWF meta. */
+#define SFE_GET_SAWF_SERVICE_CLASS(sawf_meta)   ((sawf_meta >> SFE_SAWF_SERVICE_CLASS_SHIFT) & SFE_SAWF_SERVICE_CLASS_MASK)
+				/**< Get service class ID field in SAWF meta. */
+#define SFE_GET_SAWF_MSDUQ(sawf_meta)           (sawf_meta & SFE_SAWF_MSDUQ_MASK)
+				/**< Get msduq field in SAWF meta. */
+#define SFE_SAWF_TAG_IS_VALID(tag)              ((tag == SFE_SAWF_VALID_TAG) ? true : false)
+				/**< Check if tag is a valid SAWF tag. */
 
 /**
 * @}
@@ -177,6 +198,14 @@
 #define SFE_VLAN_FILTER_FLAG_INGRESS_PVID 	(1<<1)	/**< Add VLAN header at ingress for untagged packets. */
 #define SFE_VLAN_FILTER_FLAG_EGRESS_UNTAGGED	(1<<2)	/**< Strip VLAN header associated with this VID at egress. */
 
+/*
+ * SAWF mark validity flags
+ */
+#define SFE_SAWF_MARK_FLOW_VALID        (1<<0)
+		/**< SAWF mark in the flow direction is valid. */
+#define SFE_SAWF_MARK_RETURN_VALID      (1<<1)
+		/**< SAWF mark in the return direction is valid. */
+
 /**
  * @}
  */
@@ -248,16 +277,28 @@ enum sfe_message_types {
 	SFE_MAX_MSG_TYPES,		/**< IPv4/IPv6 message max type number. */
 };
 
+/*
+ * Connection mark types.
+ */
+enum sfe_connection_mark_type {
+	SFE_CONNECTION_MARK_TYPE_CONNMARK,      /**< Conntrack mark. */
+	SFE_CONNECTION_MARK_TYPE_SAWFMARK,      /**< SAWF mark. */
+	SFE_CONNECTION_MARK_TYPE_MAX            /**< Indicates the last item. */
+};
+
 /**
  * Connection mark structure.
  */
 struct sfe_connection_mark {
-	int protocol;		/**< Protocol number. */
-	__be32 src_ip[4];	/**< Source IP address. */
-	__be32 dest_ip[4];	/**< Destination IP address. */
-	__be16 src_port;	/**< Source port number. */
-	__be16 dest_port;	/**< Destination port number. */
-	u32 mark;		/**< Mark value to be updated. */
+	int protocol;                           /**< Protocol number. */
+	__be32 src_ip[4];                       /**< Source IP address. */
+	__be32 dest_ip[4];                      /**< Destination IP address. */
+	__be16 src_port;                        /**< Source port number. */
+	__be16 dest_port;                       /**< Destination port number. */
+	u32 flow_mark;                          /**< Mark to be updated for the flow direction. */
+	u32 return_mark;                        /**< Mark to be updated for the return direction. */
+	u32 flags;                              /**< State of marks. */
+	enum sfe_connection_mark_type type;     /**< Type of the marking. */
 };
 
 /**

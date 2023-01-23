@@ -42,23 +42,6 @@
 #define SFE_L2_PARSE_FLAGS_PPPOE_INGRESS 0x01		/* Indicates presence of a valid PPPoE header */
 #define SFE_L2_PARSE_FLAGS_TRUSTSEC_INGRESS 0x02	/* Indicates presence of a valid trustsec header */
 
-/**
- * SAWF_metadata information placement in mark field.
- */
-#define SFE_SAWF_VALID_TAG 0xAA
-#define SFE_SAWF_TAG_SHIFT 0x18
-#define SFE_SAWF_SERVICE_CLASS_SHIFT 0x10
-#define SFE_SAWF_SERVICE_CLASS_MASK 0xff
-#define SFE_SAWF_MSDUQ_MASK 0xffff
-
-/**
- * SAWF_metadata extraction.
- */
-#define SFE_GET_SAWF_TAG(x) (x>>SFE_SAWF_TAG_SHIFT)
-#define SFE_GET_SAWF_SERVICE_CLASS(x) ((x>>SFE_SAWF_SERVICE_CLASS_SHIFT) & SFE_SAWF_SERVICE_CLASS_MASK)
-#define SFE_GET_SAWF_MSDUQ(x) (x & SFE_SAWF_MSDUQ_MASK)
-#define SFE_SAWF_TAG_IS_VALID(x) ((x == SFE_SAWF_VALID_TAG) ? true : false)
-
 /*
  * IPv6 address structure
  */
