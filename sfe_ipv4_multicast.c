@@ -2,7 +2,7 @@
  * sfe_ipv4_multicast.c
  *	Shortcut forwarding engine file for IPv4 multicast
  *
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -225,6 +225,13 @@ int sfe_ipv4_recv_multicast(struct sfe_ipv4 *si, struct sk_buff *skb,
 	 */
 	if (unlikely(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_PRIORITY_REMARK)) {
 		skb->priority = cm->priority;
+	}
+
+	/*
+	 * Set SKB packet type to PACKET_HOST
+	 */
+	if (unlikely(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_PACKET_HOST)) {
+		skb->pkt_type = PACKET_HOST;
 	}
 
 	/*

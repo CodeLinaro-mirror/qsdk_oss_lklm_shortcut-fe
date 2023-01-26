@@ -226,6 +226,13 @@ int sfe_ipv6_recv_tunipip6(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_
 	}
 
 	/*
+	 * Set SKB packet type to PACKET_HOST
+	 */
+	if (unlikely(cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_PACKET_HOST)) {
+		skb->pkt_type = PACKET_HOST;
+	}
+
+	/*
 	 * Update traffic stats.
 	 */
 	atomic_inc(&cm->rx_packet_count);

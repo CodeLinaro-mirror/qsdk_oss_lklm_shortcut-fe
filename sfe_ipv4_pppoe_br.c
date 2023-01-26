@@ -107,6 +107,13 @@ int sfe_ipv4_recv_pppoe_bridge(struct sfe_ipv4 *si, struct sk_buff *skb, struct 
 	}
 
 	/*
+	 * Set SKB packet type to PACKET_HOST
+	 */
+	if (unlikely(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_PACKET_HOST)) {
+		skb->pkt_type = PACKET_HOST;
+	}
+
+	/*
 	 * Restore PPPoE header back
 	 */
 	__skb_push(skb, PPPOE_SES_HLEN);

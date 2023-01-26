@@ -202,6 +202,13 @@ int sfe_ipv4_recv_tun6rd(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_de
 	}
 
 	/*
+	 * Set SKB packet type to PACKET_HOST
+	 */
+	if (unlikely(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_PACKET_HOST)) {
+		skb->pkt_type = PACKET_HOST;
+	}
+
+	/*
 	 * Update traffic stats.
 	 */
 	atomic_inc(&cm->rx_packet_count);
