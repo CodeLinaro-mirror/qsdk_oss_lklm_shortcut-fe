@@ -2,7 +2,7 @@
  * sfe_ipv4_gre.c
  *	Shortcut forwarding engine file for IPv4 GRE
  *
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -324,6 +324,13 @@ int sfe_ipv4_recv_gre(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 		sfe_ipv4_exception_stats_inc(si, SFE_IPV4_EXCEPTION_EVENT_GRE_NEEDS_FRAGMENTATION);
 		DEBUG_TRACE("%px: sfe: larger than MTU\n", cm);
 		return 0;
+	}
+
+	/*
+	 * Set SKB packet type to PACKET_HOST
+	 */
+	if (unlikely(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_PACKET_HOST)) {
+		skb->pkt_type = PACKET_HOST;
 	}
 
 	/*

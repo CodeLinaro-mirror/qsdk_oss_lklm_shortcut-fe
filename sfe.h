@@ -381,6 +381,23 @@ static inline void sfe_l2_trustsec_sgt_set(struct sfe_l2_info *l2_info, u16 sgt)
 	l2_info->trustsec_sgt = sgt;
 }
 
+/*
+ * sfe_dev_is_bridge()
+ *	Check if the net device is any kind of bridge
+ */
+static inline bool sfe_dev_is_bridge(struct net_device *dev)
+{
+	if (!dev) {
+		return false;
+	}
+
+	if ((dev->priv_flags & IFF_EBRIDGE) || (dev->priv_flags & IFF_OPENVSWITCH)) {
+		return true;
+	}
+
+	return false;
+}
+
 int sfe_init_if(void);
 void sfe_exit_if(void);
 

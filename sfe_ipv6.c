@@ -2232,6 +2232,19 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 		original_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_SRC_INTERFACE_CHECK_NO_FLUSH;
 	}
 
+	if (sfe_is_l2_feature_enabled() && !(msg->rule_flags & SFE_RULE_CREATE_FLAG_BRIDGE_FLOW)) {
+		if (msg->rule_flags & SFE_RULE_CREATE_FLAG_USE_FLOW_BOTTOM_INTERFACE) {
+			if (sfe_dev_is_bridge(original_cm->top_interface_dev)) {
+				original_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_PACKET_HOST;
+			}
+		}
+		if (msg->rule_flags & SFE_RULE_CREATE_FLAG_USE_RETURN_BOTTOM_INTERFACE) {
+			if (sfe_dev_is_bridge(reply_cm->top_interface_dev)) {
+				reply_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_PACKET_HOST;
+			}
+		}
+	}
+
 	/*
 	 * Disable HW CSUM Offload for connection with trustsec header
 	 */

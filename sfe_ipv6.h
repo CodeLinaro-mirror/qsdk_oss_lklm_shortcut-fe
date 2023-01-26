@@ -112,6 +112,8 @@ struct sfe_ipv6_vlan_filter_connection_match {
 					/* Multicast flow changed the data */
 #define SFE_IPV6_CONNECTION_MATCH_FLAG_TSO_ENABLE (1<<23)
 					/* TSO enabled for dest dev */
+#define SFE_IPV6_CONNECTION_MATCH_FLAG_PACKET_HOST (1<<24)
+	                                /* Set to send connection to Host */
 
 /*
  * IPv6 multicast destination structure

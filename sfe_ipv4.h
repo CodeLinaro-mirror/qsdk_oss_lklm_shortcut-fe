@@ -102,6 +102,8 @@ struct sfe_ipv4_vlan_filter_connection_match {
 					/* Multicast flow changed the data */
 #define SFE_IPV4_CONNECTION_MATCH_FLAG_TSO_ENABLE (1<<23)
 					/* TSO enabled for dest dev */
+#define SFE_IPV4_CONNECTION_MATCH_FLAG_PACKET_HOST (1<<24)
+					/* Packet Host Type Set */
 
 /*
  * IPv4 multicast destination structure

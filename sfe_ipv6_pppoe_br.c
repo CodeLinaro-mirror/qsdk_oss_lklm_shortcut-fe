@@ -110,6 +110,13 @@ int sfe_ipv6_recv_pppoe_bridge(struct sfe_ipv6 *si, struct sk_buff *skb, struct 
 	}
 
 	/*
+	 * Set SKB packet type to PACKET_HOST
+	 */
+	if (unlikely(cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_PACKET_HOST)) {
+		skb->pkt_type = PACKET_HOST;
+	}
+
+	/*
 	 * Restore PPPoE header back
 	 */
 	__skb_push(skb, PPPOE_SES_HLEN);
