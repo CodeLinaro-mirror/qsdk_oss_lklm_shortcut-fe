@@ -186,11 +186,15 @@
 		/**< Qdisc interface for the flow interface is valid. */
 #define SFE_QDISC_RULE_RETURN_VALID 0x02
 		/**< Qdisc interface for the return interface is valid. */
+#define SFE_QDISC_RULE_FLOW_PPE_QDISC_FAST_XMIT 0x04
+		/**< Fast transmit via PPE Qdisc for the flow interface is valid. */
+#define SFE_QDISC_RULE_RETURN_PPE_QDISC_FAST_XMIT 0x08
+		/**< Fast transmit via PPE Qdisc for the return interface is valid. */
 
 /*
- * Bridge VLAN Filter flags; used with SFE_RULE_CREATE_VLAN_FILTER_VALID and sfe_vlan_filter_rule structure.
+ * Bridge VLAN filter flags; used with SFE_RULE_CREATE_VLAN_FILTER_VALID and sfe_vlan_filter_rule structure.
  */
-#define SFE_VLAN_FILTER_FLAG_VALID 		(1<<0) 	/**< VLAN Filter is valid in the rule.  */
+#define SFE_VLAN_FILTER_FLAG_VALID 		(1<<0) 	/**< VLAN filter is valid in the rule.  */
 #define SFE_VLAN_FILTER_FLAG_INGRESS_PVID 	(1<<1)	/**< Add VLAN header at ingress for untagged packets. */
 #define SFE_VLAN_FILTER_FLAG_EGRESS_UNTAGGED	(1<<2)	/**< Strip VLAN header associated with this VID at egress. */
 
@@ -392,6 +396,8 @@ struct sfe_src_mac_rule {
 struct sfe_qos_rule {
 	u32 flow_qos_tag;	/**< QoS tag associated with this rule for flow direction. */
 	u32 return_qos_tag;	/**< QoS tag associated with this rule for return direction. */
+	u8 flow_int_pri;	/**< PPE INT_PRI corresponding to flow direction when PPE Qdisc is configured. */
+	u8 return_int_pri;	/**< PPE INT_PRI corresponding to return direction when PPE Qdisc is configured. */
 };
 
 /**
