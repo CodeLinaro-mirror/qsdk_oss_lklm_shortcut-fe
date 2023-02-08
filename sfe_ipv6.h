@@ -247,7 +247,9 @@ struct sfe_ipv6_connection_match {
 	 */
 	u32 priority;
 	u32 dscp;
-
+#if defined(SFE_PPE_QOS_SUPPORTED)
+	u8 int_pri;			/* INT_PRI value of PPE QDISC */
+#endif
 
 	u8 ingress_vlan_hdr_cnt;        /* Ingress active vlan headers count */
 	u8 egress_vlan_hdr_cnt;         /* Egress active vlan headers count */

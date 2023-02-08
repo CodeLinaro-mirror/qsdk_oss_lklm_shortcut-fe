@@ -249,6 +249,9 @@ struct sfe_ipv4_connection_match {
 	u32 priority;
 	u32 dscp;
 	u32 mark;			/* mark for outgoing packet */
+#if defined(SFE_PPE_QOS_SUPPORTED)
+	u8 int_pri;			/* INT_PRI value of PPE QDISC */
+#endif
 
 	u8 ingress_vlan_hdr_cnt;        /* Ingress active vlan headers count */
 	u8 egress_vlan_hdr_cnt;         /* Egress active vlan headers count */
