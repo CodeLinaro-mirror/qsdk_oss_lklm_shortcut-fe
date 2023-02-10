@@ -2899,57 +2899,65 @@ static void sfe_ipv6_periodic_sync(struct work_struct *work)
  * sfe_ipv6_debug_dev_read_start()
  *	Generate part of the XML output.
  */
-static bool sfe_ipv6_debug_dev_read_start(struct sfe_ipv6 *si, char *buffer, char *msg, size_t *length,
+static int sfe_ipv6_debug_dev_read_start(struct sfe_ipv6 *si, char *buffer, char *msg, size_t length,
 					  int *total_read, struct sfe_ipv6_debug_xml_write_state *ws)
 {
 	int bytes_read;
 
 	si->debug_read_seq++;
 
-	bytes_read = snprintf(msg, CHAR_DEV_MSG_SIZE, "<sfe_ipv6>\n");
-	if (copy_to_user(buffer + *total_read, msg, CHAR_DEV_MSG_SIZE)) {
-		return false;
+	bytes_read = snprintf(msg, length, "<sfe_ipv6>\n");
+
+	if ((bytes_read + *total_read) >= length) {
+		return -ENOMEM;
 	}
 
-	*length -= bytes_read;
+	if (copy_to_user(buffer + *total_read, msg, bytes_read)) {
+		return -EFAULT;
+	}
+
 	*total_read += bytes_read;
 
 	ws->state++;
-	return true;
+	return 0;
 }
 
 /*
  * sfe_ipv6_debug_dev_read_connections_start()
  *	Generate part of the XML output.
  */
-static bool sfe_ipv6_debug_dev_read_connections_start(struct sfe_ipv6 *si, char *buffer, char *msg, size_t *length,
+static int sfe_ipv6_debug_dev_read_connections_start(struct sfe_ipv6 *si, char *buffer, char *msg, size_t length,
 						      int *total_read, struct sfe_ipv6_debug_xml_write_state *ws)
 {
 	int bytes_read;
 
-	bytes_read = snprintf(msg, CHAR_DEV_MSG_SIZE, "\t<connections>\n");
-	if (copy_to_user(buffer + *total_read, msg, CHAR_DEV_MSG_SIZE)) {
-		return false;
+	bytes_read = snprintf(msg, length, "\t<connections>\n");
+
+	if ((bytes_read + *total_read) >= length) {
+		return -ENOMEM;
 	}
 
-	*length -= bytes_read;
+	if (copy_to_user(buffer + *total_read, msg, bytes_read)) {
+		return -EFAULT;
+	}
+
 	*total_read += bytes_read;
 
 	ws->state++;
-	return true;
+	return 0;
 }
 
 /*
  * sfe_ipv6_debug_dev_read_connections_connection()
  *	Generate part of the XML output.
  */
-static bool sfe_ipv6_debug_dev_read_connections_connection(struct sfe_ipv6 *si, char *buffer, char *msg, size_t *length,
+static int sfe_ipv6_debug_dev_read_connections_connection(struct sfe_ipv6 *si, char *buffer, char *msg, size_t length,
 							   int *total_read, struct sfe_ipv6_debug_xml_write_state *ws)
 {
 	struct sfe_ipv6_connection *c;
 	struct sfe_ipv6_connection_match *original_cm;
 	struct sfe_ipv6_connection_match *reply_cm;
-	int bytes_read;
+	int bytes_read = 0;
 	int protocol;
 	struct net_device *src_dev;
 	struct sfe_ipv6_addr src_ip;
@@ -2982,7 +2990,6 @@ static bool sfe_ipv6_debug_dev_read_connections_connection(struct sfe_ipv6 *si, 
 
 	for (c = si->all_connections_head; c; c = c->all_connections_next) {
 		if (c->debug_read_seq < si->debug_read_seq) {
-			c->debug_read_seq = si->debug_read_seq;
 			break;
 		}
 	}
@@ -3064,7 +3071,7 @@ static bool sfe_ipv6_debug_dev_read_connections_connection(struct sfe_ipv6 *si, 
 #endif
 	spin_unlock_bh(&si->lock);
 
-	bytes_read = snprintf(msg, CHAR_DEV_MSG_SIZE, "\t\t<connection "
+	bytes_read = snprintf(msg, length - bytes_read, "\t\t<connection "
 				"protocol=\"%u\" "
 				"src_dev=\"%s\" "
 				"src_ip=\"%pI6\" src_ip_xlate=\"%pI6\" "
@@ -3104,18 +3111,30 @@ static bool sfe_ipv6_debug_dev_read_connections_connection(struct sfe_ipv6 *si, 
 #endif
 				last_sync_jiffies);
 
+	if ((length - bytes_read) <= 0) {
+		return -ENOMEM;
+	}
+
 	if (original_cm_flags &= (SFE_IPV6_CONNECTION_MATCH_FLAG_PPPOE_DECAP | SFE_IPV6_CONNECTION_MATCH_FLAG_PPPOE_ENCAP)) {
-		bytes_read += snprintf(msg + bytes_read, CHAR_DEV_MSG_SIZE, "pppoe_session_id=\"%u\" pppoe_server_MAC=\"%pM\" ",
+		bytes_read += snprintf(msg + bytes_read, length - bytes_read, "pppoe_session_id=\"%u\" pppoe_server_MAC=\"%pM\" ",
 			pppoe_session_id, pppoe_remote_mac);
 	}
 
+	if ((length - bytes_read) <= 0) {
+		return -ENOMEM;
+	}
+
 	if (original_cm_sawf_valid) {
-		bytes_read += snprintf(msg + bytes_read, CHAR_DEV_MSG_SIZE, "flow_service_class=\"%d\" flow_msduq= \"0x%x\" ",
+		bytes_read += snprintf(msg + bytes_read, length - bytes_read, "flow_service_class=\"%d\" flow_msduq= \"0x%x\" ",
 			flow_service_class, flow_msduq);
 	}
 
+	if ((length - bytes_read) <= 0) {
+		return -ENOMEM;
+	}
+
 	if (reply_cm_sawf_valid) {
-		bytes_read += snprintf(msg + bytes_read, CHAR_DEV_MSG_SIZE, "return_service_class=\"%d\" return_msduq= \"0x%x\" ",
+		bytes_read += snprintf(msg + bytes_read, length - bytes_read, "return_service_class=\"%d\" return_msduq= \"0x%x\" ",
 			return_service_class, return_msduq);
 	}
 
@@ -3126,8 +3145,13 @@ static bool sfe_ipv6_debug_dev_read_connections_connection(struct sfe_ipv6 *si, 
 		list_for_each_entry_rcu(mc_xmit_dev, &original_cm->mc_list, list) {
 			 fast_xmit = mc_xmit_dev->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_FAST_XMIT;
 			 vlan_hdr_cnt = mc_xmit_dev->egress_vlan_hdr_cnt;
+
+			 if ((length - bytes_read) <= 0) {
+				 return -ENOMEM;
+			 }
+
 			 bytes_read += snprintf(msg + bytes_read,
-					 CHAR_DEV_MSG_SIZE, "mc_dev=\"%s\" mc_dmac=\"%pM\" mc_smac=\"%pM\" fast_xmit=\"%s\" vlan_hdr_cnt=\"%d\"",
+					  length - bytes_read, "mc_dev=\"%s\" mc_dmac=\"%pM\" mc_smac=\"%pM\" fast_xmit=\"%s\" vlan_hdr_cnt=\"%d\"",
 					 mc_xmit_dev->xmit_dev->name,
 					 mc_xmit_dev->xmit_dest_mac,
 					 mc_xmit_dev->xmit_src_mac,
@@ -3136,73 +3160,81 @@ static bool sfe_ipv6_debug_dev_read_connections_connection(struct sfe_ipv6 *si, 
 		 }
 	}
 
-	bytes_read += snprintf(msg + bytes_read, CHAR_DEV_MSG_SIZE, "/>\n");
-
-	if (copy_to_user(buffer + *total_read, msg, CHAR_DEV_MSG_SIZE)) {
-		return false;
+	if ((length - bytes_read) <= 0) {
+		return -ENOMEM;
 	}
 
-	*length -= bytes_read;
+	bytes_read += snprintf(msg + bytes_read, length - bytes_read, "/>\n");
+
+	if ((bytes_read + *total_read) >= length) {
+		return -ENOMEM;
+	}
+
+	if (copy_to_user(buffer + *total_read, msg, bytes_read)) {
+		return -EFAULT;
+	}
+
 	*total_read += bytes_read;
 
-	/*
-	 * If the length left in current page is <= CHAR_DEV_MSG_SIZE,
-	 * 	then we want next page to be loaded when fops read is called next time.
-	 */
-	if (*length <= CHAR_DEV_MSG_SIZE) {
-		*total_read += *length;
-	}
-
-	return true;
+	c->debug_read_seq = si->debug_read_seq;
+	return 0;
 }
 
 /*
  * sfe_ipv6_debug_dev_read_connections_end()
  *	Generate part of the XML output.
  */
-static bool sfe_ipv6_debug_dev_read_connections_end(struct sfe_ipv6 *si, char *buffer, char *msg, size_t *length,
+static int sfe_ipv6_debug_dev_read_connections_end(struct sfe_ipv6 *si, char *buffer, char *msg, size_t length,
 						    int *total_read, struct sfe_ipv6_debug_xml_write_state *ws)
 {
 	int bytes_read;
 
-	bytes_read = snprintf(msg, CHAR_DEV_MSG_SIZE, "\t</connections>\n");
-	if (copy_to_user(buffer + *total_read, msg, CHAR_DEV_MSG_SIZE)) {
-		return false;
+	bytes_read = snprintf(msg, length, "\t</connections>\n");
+
+	if ((bytes_read + *total_read) >= length) {
+		return -ENOMEM;
 	}
 
-	*length -= bytes_read;
+	if (copy_to_user(buffer + *total_read, msg, bytes_read)) {
+		return -EFAULT;
+	}
+
 	*total_read += bytes_read;
 
 	ws->state++;
-	return true;
+	return 0;
 }
 
 /*
  * sfe_ipv6_debug_dev_read_exceptions_start()
  *	Generate part of the XML output.
  */
-static bool sfe_ipv6_debug_dev_read_exceptions_start(struct sfe_ipv6 *si, char *buffer, char *msg, size_t *length,
+static int sfe_ipv6_debug_dev_read_exceptions_start(struct sfe_ipv6 *si, char *buffer, char *msg, size_t length,
 						     int *total_read, struct sfe_ipv6_debug_xml_write_state *ws)
 {
 	int bytes_read;
 
-	bytes_read = snprintf(msg, CHAR_DEV_MSG_SIZE, "\t<exceptions>\n");
-	if (copy_to_user(buffer + *total_read, msg, CHAR_DEV_MSG_SIZE)) {
-		return false;
+	bytes_read = snprintf(msg, length, "\t<exceptions>\n");
+
+	if ((bytes_read + *total_read) >= length) {
+		return -ENOMEM;
 	}
 
-	*length -= bytes_read;
+	if (copy_to_user(buffer + *total_read, msg, bytes_read)) {
+		return -EFAULT;
+	}
+
 	*total_read += bytes_read;
 
 	ws->state++;
-	return true;
+	return 0;
 }
 
 /*
  * sfe_ipv6_debug_dev_read_exceptions_exception()
  *	Generate part of the XML output.
  */
-static bool sfe_ipv6_debug_dev_read_exceptions_exception(struct sfe_ipv6 *si, char *buffer, char *msg, size_t *length,
+static int sfe_ipv6_debug_dev_read_exceptions_exception(struct sfe_ipv6 *si, char *buffer, char *msg, size_t length,
 							 int *total_read, struct sfe_ipv6_debug_xml_write_state *ws)
 {
 	int i;
@@ -3216,16 +3248,19 @@ static bool sfe_ipv6_debug_dev_read_exceptions_exception(struct sfe_ipv6 *si, ch
 	if (val) {
 		int bytes_read;
 
-		bytes_read = snprintf(msg, CHAR_DEV_MSG_SIZE,
+		bytes_read = snprintf(msg, length,
 				      "\t\t<exception name=\"%s\" count=\"%llu\" />\n",
 				      sfe_ipv6_exception_events_string[ws->iter_exception],
 				      val);
 
-		if (copy_to_user(buffer + *total_read, msg, CHAR_DEV_MSG_SIZE)) {
-			return false;
+		if ((bytes_read + *total_read) >= length) {
+			return -ENOMEM;
 		}
 
-		*length -= bytes_read;
+		if (copy_to_user(buffer + *total_read, msg, bytes_read)) {
+			return -EFAULT;
+		}
+
 		*total_read += bytes_read;
 	}
 
@@ -3235,36 +3270,39 @@ static bool sfe_ipv6_debug_dev_read_exceptions_exception(struct sfe_ipv6 *si, ch
 		ws->state++;
 	}
 
-	return true;
+	return 0;
 }
 
 /*
  * sfe_ipv6_debug_dev_read_exceptions_end()
  *	Generate part of the XML output.
  */
-static bool sfe_ipv6_debug_dev_read_exceptions_end(struct sfe_ipv6 *si, char *buffer, char *msg, size_t *length,
+static int sfe_ipv6_debug_dev_read_exceptions_end(struct sfe_ipv6 *si, char *buffer, char *msg, size_t length,
 						   int *total_read, struct sfe_ipv6_debug_xml_write_state *ws)
 {
 	int bytes_read;
 
-	bytes_read = snprintf(msg, CHAR_DEV_MSG_SIZE, "\t</exceptions>\n");
-	if (copy_to_user(buffer + *total_read, msg, CHAR_DEV_MSG_SIZE)) {
-		return false;
+	bytes_read = snprintf(msg, length, "\t</exceptions>\n");
+
+	if ((bytes_read + *total_read) >= length) {
+		return -ENOMEM;
 	}
 
-	*length -= bytes_read;
+	if (copy_to_user(buffer + *total_read, msg, bytes_read)) {
+		return -EFAULT;
+	}
+
 	*total_read += bytes_read;
 
 	ws->state++;
-	return true;
+	return 0;
 }
 
 /*
  * sfe_ipv6_debug_dev_read_stats()
  *	Generate part of the XML output.
  */
-static bool sfe_ipv6_debug_dev_read_stats(struct sfe_ipv6 *si, char *buffer, char *msg, size_t *length,
-					  int *total_read, struct sfe_ipv6_debug_xml_write_state *ws)
+static int sfe_ipv6_debug_dev_read_stats(struct sfe_ipv6 *si, char *buffer, char *msg, size_t length,				  int *total_read, struct sfe_ipv6_debug_xml_write_state *ws)
 {
 	int bytes_read;
 	struct sfe_ipv6_stats stats;
@@ -3276,7 +3314,7 @@ static bool sfe_ipv6_debug_dev_read_stats(struct sfe_ipv6 *si, char *buffer, cha
 	num_conn = si->num_connections;
 	spin_unlock_bh(&si->lock);
 
-	bytes_read = snprintf(msg, CHAR_DEV_MSG_SIZE, "\t<stats "
+	bytes_read = snprintf(msg, length, "\t<stats "
 			      "num_connections=\"%u\" "
 			      "pkts_dropped=\"%llu\" "
 			      "pkts_fast_xmited=\"%llu\" "
@@ -3311,36 +3349,44 @@ static bool sfe_ipv6_debug_dev_read_stats(struct sfe_ipv6 *si, char *buffer, cha
 				stats.pppoe_bridge_packets_forwarded64,
 				stats.pppoe_bridge_packets_3tuple_forwarded64,
 				stats.connection_create_requests_overflow64);
-	if (copy_to_user(buffer + *total_read, msg, CHAR_DEV_MSG_SIZE)) {
-		return false;
+
+	if ((bytes_read + *total_read) >= length) {
+		return -ENOMEM;
 	}
 
-	*length -= bytes_read;
+	if (copy_to_user(buffer + *total_read, msg, bytes_read)) {
+		return -EFAULT;
+	}
+
 	*total_read += bytes_read;
 
 	ws->state++;
-	return true;
+	return 0;
 }
 
 /*
  * sfe_ipv6_debug_dev_read_end()
  *	Generate part of the XML output.
  */
-static bool sfe_ipv6_debug_dev_read_end(struct sfe_ipv6 *si, char *buffer, char *msg, size_t *length,
+static int sfe_ipv6_debug_dev_read_end(struct sfe_ipv6 *si, char *buffer, char *msg, size_t length,
 					int *total_read, struct sfe_ipv6_debug_xml_write_state *ws)
 {
 	int bytes_read;
 
-	bytes_read = snprintf(msg, CHAR_DEV_MSG_SIZE, "</sfe_ipv6>\n");
-	if (copy_to_user(buffer + *total_read, msg, CHAR_DEV_MSG_SIZE)) {
-		return false;
+	bytes_read = snprintf(msg, length, "</sfe_ipv6>\n");
+
+	if ((bytes_read + *total_read) >= length) {
+		return -ENOMEM;
 	}
 
-	*length -= bytes_read;
+	if (copy_to_user(buffer + *total_read, msg, bytes_read)) {
+		return -EFAULT;
+	}
+
 	*total_read += bytes_read;
 
 	ws->state++;
-	return true;
+	return 0;
 }
 
 /*
@@ -3365,18 +3411,50 @@ static sfe_ipv6_debug_xml_write_method_t sfe_ipv6_debug_xml_write_methods[SFE_IP
  */
 static ssize_t sfe_ipv6_debug_dev_read(struct file *filp, char *buffer, size_t length, loff_t *offset)
 {
-	char msg[CHAR_DEV_MSG_SIZE];
-	int total_read = 0;
 	struct sfe_ipv6_debug_xml_write_state *ws;
 	struct sfe_ipv6 *si = &__si6;
+	int total_read = 0;
+	int null_fill;
+	int status = 0;
+	char *msg;
 
-	memset(msg, 0, CHAR_DEV_MSG_SIZE);
+	msg = kmalloc(length, GFP_KERNEL);
+	if (!msg) {
+		return -ENOMEM;
+	}
+
 	ws = (struct sfe_ipv6_debug_xml_write_state *)filp->private_data;
-	while ((ws->state != SFE_IPV6_DEBUG_XML_STATE_DONE) && (length > CHAR_DEV_MSG_SIZE)) {
-		if ((sfe_ipv6_debug_xml_write_methods[ws->state])(si, buffer, msg, &length, &total_read, ws)) {
+	while ((ws->state != SFE_IPV6_DEBUG_XML_STATE_DONE)) {
+		status = sfe_ipv6_debug_xml_write_methods[ws->state](si, buffer, msg, length, &total_read, ws);
+		if (!status) {
 			continue;
 		}
+
+		break;
 	}
+
+	if (status == -ENOMEM) {
+		/*
+		 * To request more buffer when we are short of it. Indicate that we have consumed whole buffer.
+		 * Since there is some unusable space left, fill them with null string to avoid
+		 * displaying junk characters.
+		 */
+		null_fill = length - total_read;
+		memset(msg, '\0', null_fill);
+
+		if (copy_to_user(buffer + total_read, msg, null_fill)) {
+			kfree(msg);
+			return -EFAULT;
+		}
+
+		total_read += null_fill;
+	}
+
+	if (status == -EFAULT) {
+		total_read = -EFAULT;
+	}
+
+	kfree(msg);
 	return total_read;
 }
 
