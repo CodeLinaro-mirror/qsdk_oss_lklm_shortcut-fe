@@ -580,9 +580,27 @@ int sfe_ipv4_recv_tcp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 	 */
 
 	/*
+	 * TSO is not supported for maple. Hence SFE_IPV4_CONNECTION_MATCH_FLAG_TSO_ENABLE will be disabled for maple.
+	 * For SFE + PPPoE flow, GSO is not supported but TSO is supported. If TSO is enabled and if the number of segments is more than 32, flush the rule so that it goes throught host.
 	 * For PPPoE flows, add PPPoE header before L2 header is added.
 	 */
 	if (unlikely(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_PPPOE_ENCAP)) {
+#if defined(SFE_TSO_MAX_SEG_LIMIT_ENABLE)
+		if (((!(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_TSO_ENABLE)) && skb_shinfo(skb)->gso_segs) ||
+			(skb_shinfo(skb)->gso_segs >= SFE_TSO_SEG_MAX)) {
+			struct sfe_ipv4_connection *c = cm->connection;
+			spin_lock_bh(&si->lock);
+			ret = sfe_ipv4_remove_connection(si, c);
+			spin_unlock_bh(&si->lock);
+			if (ret) {
+				sfe_ipv4_flush_connection(si, c, SFE_SYNC_REASON_FLUSH);
+			}
+
+			rcu_read_unlock();
+			sfe_ipv4_exception_stats_inc(si, SFE_IPV4_EXCEPTION_EVENT_TSO_SEG_MAX_NOT_SUPPORTED);
+			return 0;
+		}
+#endif
 		sfe_pppoe_add_header(skb, cm->pppoe_session_id, PPP_IP);
 		this_cpu_inc(si->stats_pcpu->pppoe_encap_packets_forwarded64);
 	}

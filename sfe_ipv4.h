@@ -3,7 +3,7 @@
  *	Shortcut forwarding engine header file for IPv4.
  *
  * Copyright (c) 2013-2016, 2019-2020, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -89,6 +89,8 @@ struct sfe_ipv4_tcp_connection_match {
 					/* Multicast flow*/
 #define SFE_IPV4_CONNECTION_MATCH_FLAG_MULTICAST_CHANGED (1<<22)
 					/* Multicast flow changed the data */
+#define SFE_IPV4_CONNECTION_MATCH_FLAG_TSO_ENABLE (1<<23)
+					/* TSO enabled for dest dev */
 
 /*
  * IPv4 multicast destination structure
@@ -357,6 +359,8 @@ enum sfe_ipv4_exception_events {
 	SFE_IPV4_EXCEPTION_EVENT_ESP_NEEDS_FRAGMENTATION,
 	SFE_IPV4_EXCEPTION_EVENT_ESP_SMALL_TTL,
 	SFE_IPV4_EXCEPTION_EVENT_INGRESS_TRUSTSEC_SGT_MISMATCH,
+	SFE_IPV4_EXCEPTION_EVENT_GSO_NOT_SUPPORTED,
+	SFE_IPV4_EXCEPTION_EVENT_TSO_SEG_MAX_NOT_SUPPORTED,
 	SFE_IPV4_EXCEPTION_EVENT_LAST
 };
 
@@ -489,7 +493,7 @@ struct sfe_ipv4_debug_xml_write_state {
 	int iter_exception;		/* Next exception iterator */
 };
 
-typedef bool (*sfe_ipv4_debug_xml_write_method_t)(struct sfe_ipv4 *si, char *buffer, char *msg, size_t *length,
+typedef int (*sfe_ipv4_debug_xml_write_method_t)(struct sfe_ipv4 *si, char *buffer, char *msg, size_t length,
 						  int *total_read, struct sfe_ipv4_debug_xml_write_state *ws);
 
 u16 sfe_ipv4_gen_ip_csum(struct iphdr *iph);

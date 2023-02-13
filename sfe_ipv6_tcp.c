@@ -446,8 +446,8 @@ int sfe_ipv6_recv_tcp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 			if (ret) {
 				sfe_ipv6_flush_connection(si, c, SFE_SYNC_REASON_FLUSH);
 			}
-			rcu_read_unlock();
 
+			rcu_read_unlock();
 			sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_TCP_ACK_EXCEEDS_RIGHT_EDGE);
 			return 0;
 		}
@@ -570,7 +570,6 @@ int sfe_ipv6_recv_tcp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 			DEBUG_TRACE("%px: CME doesn't contain PPPoE flag but packet has PPPoE header\n", skb);
 			sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_PPPOE_NOT_SET_IN_CME);
 			return 0;
-
 		}
 
 		/*
@@ -585,9 +584,27 @@ int sfe_ipv6_recv_tcp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 	 */
 
 	/*
+	 * TSO is not supported for maple. Hence SFE_IPV6_CONNECTION_MATCH_FLAG_TSO_ENABLE will be disabled for maple.
+	 * For SFE + PPPoE flow, GSO is not supported but TSO is supported. If TSO is enabled and if the number of segments is more than 32, flush the rule so that it goes throught host.
 	 * For PPPoE flows, add PPPoE header before L2 header is added.
 	 */
 	if (unlikely(cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_PPPOE_ENCAP)) {
+#if defined(SFE_TSO_MAX_SEG_LIMIT_ENABLE)
+		if (((!(cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_TSO_ENABLE)) && skb_shinfo(skb)->gso_segs) ||
+			(skb_shinfo(skb)->gso_segs >= SFE_TSO_SEG_MAX)) {
+			struct sfe_ipv6_connection *c = cm->connection;
+			spin_lock_bh(&si->lock);
+			ret = sfe_ipv6_remove_connection(si, c);
+			spin_unlock_bh(&si->lock);
+			if (ret) {
+				sfe_ipv6_flush_connection(si, c, SFE_SYNC_REASON_FLUSH);
+			}
+
+			rcu_read_unlock();
+			sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_TSO_SEG_MAX_NOT_SUPPORTED);
+			return 0;
+		}
+#endif
 		sfe_pppoe_add_header(skb, cm->pppoe_session_id, PPP_IPV6);
 		this_cpu_inc(si->stats_pcpu->pppoe_encap_packets_forwarded64);
 	}

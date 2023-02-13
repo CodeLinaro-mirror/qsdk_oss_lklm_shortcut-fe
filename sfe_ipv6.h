@@ -3,7 +3,7 @@
  *	Shortcut forwarding engine header file for IPv6.
  *
  * Copyright (c) 2015-2016, 2019-2020, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -20,8 +20,6 @@
 
 #ifndef __SFE_IPV6_H
 #define __SFE_IPV6_H
-
-#define CHAR_DEV_MSG_SIZE 768
 
 #define SFE_IPV6_DSCP_MASK 0xf03f
 #define SFE_IPV6_DSCP_SHIFT 2
@@ -101,6 +99,8 @@ struct sfe_ipv6_tcp_connection_match {
 					/* Multicast flow*/
 #define SFE_IPV6_CONNECTION_MATCH_FLAG_MULTICAST_CHANGED (1<<22)
 					/* Multicast flow changed the data */
+#define SFE_IPV6_CONNECTION_MATCH_FLAG_TSO_ENABLE (1<<23)
+					/* TSO enabled for dest dev */
 
 /*
  * IPv6 multicast destination structure
@@ -360,6 +360,8 @@ enum sfe_ipv6_exception_events {
 	SFE_IPV6_EXCEPTION_EVENT_ESP_NEEDS_FRAGMENTATION,
 	SFE_IPV6_EXCEPTION_EVENT_ESP_SMALL_TTL,
 	SFE_IPV6_EXCEPTION_EVENT_INGRESS_TRUSTSEC_SGT_MISMATCH,
+	SFE_IPV6_EXCEPTION_EVENT_GSO_NOT_SUPPORTED,
+	SFE_IPV6_EXCEPTION_EVENT_TSO_SEG_MAX_NOT_SUPPORTED,
 	SFE_IPV6_EXCEPTION_EVENT_LAST
 };
 
@@ -492,7 +494,7 @@ struct sfe_ipv6_debug_xml_write_state {
 	int iter_exception;		/* Next exception iterator */
 };
 
-typedef bool (*sfe_ipv6_debug_xml_write_method_t)(struct sfe_ipv6 *si, char *buffer, char *msg, size_t *length,
+typedef int (*sfe_ipv6_debug_xml_write_method_t)(struct sfe_ipv6 *si, char *buffer, char *msg, size_t length,
 						  int *total_read, struct sfe_ipv6_debug_xml_write_state *ws);
 
 /*
