@@ -104,6 +104,7 @@ static char *sfe_ipv4_exception_events_string[SFE_IPV4_EXCEPTION_EVENT_LAST] = {
 	"TUN6RD_NO_CONNECTION",
 	"TUN6RD_NEEDS_FRAGMENTATION",
 	"TUN6RD_SYNC_ON_FIND",
+	"TUN6RD_SMALL_TTL",
 	"GRE_HEADER_INCOMPLETE",
 	"GRE_NO_CONNECTION",
 	"GRE_IP_OPTIONS_OR_INITIAL_FRAGMENT",
@@ -2238,7 +2239,7 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	}
 #endif
 
-	if (((IPPROTO_GRE == tuple->protocol) || (IPPROTO_ESP == tuple->protocol)) &&
+	if (((IPPROTO_IPV6 == tuple->protocol) || (IPPROTO_GRE == tuple->protocol) || (IPPROTO_ESP == tuple->protocol)) &&
 					!sfe_ipv4_is_local_ip(si, original_cm->match_dest_ip)) {
 		original_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_PASSTHROUGH;
 	}
@@ -2458,7 +2459,7 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 		reply_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_FAST_XMIT_DEV_ADMISSION;
 	}
 
-	if (((IPPROTO_GRE == tuple->protocol) || (IPPROTO_ESP == tuple->protocol)) &&
+	if (((IPPROTO_IPV6 == tuple->protocol) || (IPPROTO_GRE == tuple->protocol) || (IPPROTO_ESP == tuple->protocol)) &&
 					!sfe_ipv4_is_local_ip(si, reply_cm->match_dest_ip)) {
 		reply_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_PASSTHROUGH;
 	}
@@ -2628,7 +2629,7 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	}
 #endif
 
-	if (IPPROTO_IPV6 == tuple->protocol) {
+	if (IPPROTO_IPV6 == tuple->protocol && !(reply_cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_PASSTHROUGH)) {
 		original_cm->proto = NULL;
 		rcu_read_lock();
 		reply_cm->proto = rcu_dereference(inet_protos[IPPROTO_IPV6]);
