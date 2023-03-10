@@ -1115,46 +1115,58 @@ sfe_ipv6_update_protocol_state(struct sfe_ipv6_connection *c,
 /*
  * sfe_ipv6_match_entry_set_vlan_hdr()
  */
-static void sfe_ipv6_match_entry_set_vlan_hdr(u8 *vlan_hdr_cnt, struct sfe_vlan_hdr *vlan_hdr,
-		u32 primary_egress_vlan_tag, u32 secondary_egress_vlan_tag) {
+static bool sfe_ipv6_match_entry_set_vlan_hdr(u8 *vlan_hdr_cnt, struct sfe_vlan_hdr *vlan_hdr,
+		u32 primary_vlan_tag, u32 secondary_vlan_tag) {
 	u16 tpid;
-	/*
-	 * Prevent stacking header counts when updating.
-	 */
-	*vlan_hdr_cnt = 0;
-	memset(vlan_hdr, 0, sizeof(struct sfe_vlan_hdr) * SFE_MAX_VLAN_DEPTH);
 
-	if ((primary_egress_vlan_tag & VLAN_VID_MASK) != SFE_VLAN_ID_NOT_CONFIGURED) {
-		tpid = (u16)(primary_egress_vlan_tag >> 16);
-		vlan_hdr[0].tpid = ntohs(tpid);
-		vlan_hdr[0].tci = (u16)primary_egress_vlan_tag;
+	u8 idx = (*vlan_hdr_cnt);
+	if ((primary_vlan_tag & VLAN_VID_MASK) != SFE_VLAN_ID_NOT_CONFIGURED) {
+		if (idx == SFE_MAX_VLAN_DEPTH) {
+			DEBUG_TRACE("%px: vlan_hdr_cnt overflow while filling vlan_tag=%d\n", vlan_hdr, (u16)primary_vlan_tag);
+			return false;
+		}
+
+		tpid = (u16)(primary_vlan_tag >> 16);
+		vlan_hdr[idx].tpid = ntohs(tpid);
+		vlan_hdr[idx].tci = (u16)primary_vlan_tag;
 		(*vlan_hdr_cnt)++;
 	}
 
-	if ((secondary_egress_vlan_tag & VLAN_VID_MASK) != SFE_VLAN_ID_NOT_CONFIGURED) {
-		tpid = (u16)(primary_egress_vlan_tag >> 16);
-		vlan_hdr[1].tpid = ntohs(tpid);
-		vlan_hdr[1].tci = (u16)primary_egress_vlan_tag;
+	idx = (*vlan_hdr_cnt);
+	if ((secondary_vlan_tag & VLAN_VID_MASK) != SFE_VLAN_ID_NOT_CONFIGURED) {
+		if (idx == SFE_MAX_VLAN_DEPTH) {
+			DEBUG_TRACE("%px: vlan_hdr_cnt overflow while filling vlan_tag=%d\n", vlan_hdr, (u16)secondary_vlan_tag);
+			return false;
+		}
+
+		tpid = (u16)(secondary_vlan_tag >> 16);
+		vlan_hdr[idx].tpid = ntohs(tpid);
+		vlan_hdr[idx].tci = (u16)secondary_vlan_tag;
 		(*vlan_hdr_cnt)++;
 	}
 
+	return true;
 }
 
 /*
  * sfe_ipv6_match_entry_set_vlan()
  */
-static void sfe_ipv6_match_entry_set_vlan(
+static bool sfe_ipv6_match_entry_set_vlan(
 			struct sfe_ipv6_connection_match *cm,
 			u32 primary_ingress_vlan_tag,
 			u32 primary_egress_vlan_tag,
 			u32 secondary_ingress_vlan_tag,
 			u32 secondary_egress_vlan_tag)
 {
-	sfe_ipv6_match_entry_set_vlan_hdr(&(cm->ingress_vlan_hdr_cnt), cm->ingress_vlan_hdr,
-			primary_ingress_vlan_tag, secondary_ingress_vlan_tag);
+	if (sfe_ipv6_match_entry_set_vlan_hdr(&(cm->ingress_vlan_hdr_cnt), cm->ingress_vlan_hdr,
+			primary_ingress_vlan_tag, secondary_ingress_vlan_tag)) {
+		if (sfe_ipv6_match_entry_set_vlan_hdr(&(cm->egress_vlan_hdr_cnt), cm->egress_vlan_hdr,
+				primary_egress_vlan_tag, secondary_egress_vlan_tag)) {
+			return true;
+		}
+	}
 
-	sfe_ipv6_match_entry_set_vlan_hdr(&(cm->egress_vlan_hdr_cnt), cm->egress_vlan_hdr,
-			primary_egress_vlan_tag, secondary_egress_vlan_tag);
+	return false;
 }
 
 /*
@@ -1319,6 +1331,12 @@ struct sfe_ipv6_mc_dest *sfe_ipv6_allocate_mc_dest(struct sfe_ipv6_connection_ma
 	}
 
 	if (if_rule->valid_flags & SFE_MC_RULE_CREATE_IF_FLAG_VLAN_VALID) {
+		/*
+		 * Initialize egress VLAN information.
+		 */
+		dest->egress_vlan_hdr_cnt = 0;
+		memset(dest->egress_vlan_hdr, 0, sizeof(struct sfe_vlan_hdr) * SFE_MAX_VLAN_DEPTH);
+
 		sfe_ipv6_match_entry_set_vlan_hdr(&(dest->egress_vlan_hdr_cnt),	dest->egress_vlan_hdr,
 				if_rule->egress_vlan_tag[0],if_rule->egress_vlan_tag[1]);
 
@@ -1705,6 +1723,12 @@ update_done:
 		struct sfe_vlan_rule *vlan_primary_rule = &msg->vlan_primary_rule;
 		struct sfe_vlan_rule *vlan_secondary_rule = &msg->vlan_secondary_rule;
 
+		/*
+		 * Initialize ingress VLAN information.
+		 */
+		original_cm->ingress_vlan_hdr_cnt = 0;
+		memset(original_cm->ingress_vlan_hdr, 0, sizeof(struct sfe_vlan_hdr) * SFE_MAX_VLAN_DEPTH);
+
 		sfe_ipv6_match_entry_set_vlan_hdr(&(original_cm->ingress_vlan_hdr_cnt),
 				original_cm->ingress_vlan_hdr,
 				vlan_primary_rule->ingress_vlan_tag,
@@ -2074,6 +2098,50 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 		}
 	}
 
+#ifdef SFE_BRIDGE_VLAN_FILTERING_ENABLE
+	/*
+	 * Add Bridge VLAN Filter rule in original_cm
+	 */
+	if (msg->valid_flags & SFE_RULE_CREATE_VLAN_FILTER_VALID) {
+		DEBUG_INFO("%px: Bridge VLAN Filter rule configuration received from connection manager in original dir\n"
+				" orig_cm:  vlan_filter_ingress_tag: %x flags: %x \n"
+				" orig_cm:  vlan_filter_egress_tag:  %x flags: %x \n",
+				msg, msg->flow_vlan_filter_rule.ingress_vlan_tag, msg->flow_vlan_filter_rule.ingress_flags,
+				msg->flow_vlan_filter_rule.egress_vlan_tag, msg->flow_vlan_filter_rule.egress_flags);
+
+		/*
+		 * Populate the VLAN Filter rule in the connection match entry.
+		 */
+		original_cm->vlan_filter_rule.ingress_vlan_tag = msg->flow_vlan_filter_rule.ingress_vlan_tag;
+		original_cm->vlan_filter_rule.ingress_flags = msg->flow_vlan_filter_rule.ingress_flags;
+
+		/*
+		 * Add VLAN Filter rule for ingress validation / egress tagging.
+		 * We might be stacking Bridge VLAN Filter headers after traditional VLAN headers. (not clearing out the arry).
+		 * This might fail, when both primary and secondary traditional VLANs have been configured.
+		 */
+		if (!sfe_ipv6_match_entry_set_vlan(original_cm, msg->flow_vlan_filter_rule.ingress_vlan_tag, msg->flow_vlan_filter_rule.egress_vlan_tag,
+					SFE_VLAN_ID_NOT_CONFIGURED, SFE_VLAN_ID_NOT_CONFIGURED)) {
+			this_cpu_inc(si->stats_pcpu->connection_create_failures64);
+			spin_unlock_bh(&si->lock);
+			kfree(reply_cm);
+			kfree(original_cm);
+			kfree(c);
+			dev_put(src_dev);
+			dev_put(dest_dev);
+			DEBUG_WARN("%px: More than %d VLAN & VLAN Filter rules are not allowed\n", msg, SFE_MAX_VLAN_DEPTH);
+			return -EPERM;
+		}
+
+		if (!(msg->flow_vlan_filter_rule.egress_flags & SFE_VLAN_FILTER_FLAG_EGRESS_UNTAGGED) &&
+			(original_cm->egress_vlan_hdr_cnt > 0)) {
+			original_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_INSERT_EGRESS_VLAN_TAG;
+			original_cm->l2_hdr_size += original_cm->egress_vlan_hdr_cnt * VLAN_HLEN;
+			DEBUG_TRACE("%px: original_cm: Bridge VLAN insert egress VLAN Tag found\n", msg);
+		}
+	}
+#endif
+
 	if ((IPPROTO_GRE == tuple->protocol) && !sfe_ipv6_is_local_ip(si, (uint8_t *)original_cm->match_dest_ip)) {
 		original_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_PASSTHROUGH;
 	}
@@ -2383,6 +2451,49 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 		}
 	}
 
+#ifdef SFE_BRIDGE_VLAN_FILTERING_ENABLE
+	/*
+	 * Add Bridge VLAN Filter rule in reply_cm
+	 */
+	if (msg->valid_flags & SFE_RULE_CREATE_VLAN_FILTER_VALID) {
+		DEBUG_INFO("%px: Bridge VLAN Filter rule configuration received from connection manager in reply dir\n"
+				" reply_cm: vlan_filter_ingress_tag: %x flags: %x \n"
+				" reply_cm: vlan_filter_egress_tag:  %x flags: %x \n",
+				msg, msg->return_vlan_filter_rule.ingress_vlan_tag, msg->return_vlan_filter_rule.ingress_flags,
+				msg->return_vlan_filter_rule.egress_vlan_tag, msg->return_vlan_filter_rule.egress_flags);
+
+		/*
+		 * Populate the VLAN Filter rule in the connection match entry.
+		 */
+		reply_cm->vlan_filter_rule.ingress_vlan_tag = msg->return_vlan_filter_rule.ingress_vlan_tag;
+		reply_cm->vlan_filter_rule.ingress_flags = msg->return_vlan_filter_rule.ingress_flags;
+
+		/*
+		 * Add VLAN Filter rule.
+		 * This might fail, when both primary and secondary traditional vlan has been configured.
+		 */
+		if (!sfe_ipv6_match_entry_set_vlan(reply_cm, msg->return_vlan_filter_rule.ingress_vlan_tag, msg->return_vlan_filter_rule.egress_vlan_tag,
+					SFE_VLAN_ID_NOT_CONFIGURED, SFE_VLAN_ID_NOT_CONFIGURED)) {
+			this_cpu_inc(si->stats_pcpu->connection_create_failures64);
+			spin_unlock_bh(&si->lock);
+			kfree(reply_cm);
+			kfree(original_cm);
+			kfree(c);
+			dev_put(src_dev);
+			dev_put(dest_dev);
+			DEBUG_WARN("%px: More than %d VLAN & VLAN Filter rules are not allowed\n", msg, SFE_MAX_VLAN_DEPTH);
+			return -EPERM;
+		}
+
+		if (!(msg->return_vlan_filter_rule.egress_flags & SFE_VLAN_FILTER_FLAG_EGRESS_UNTAGGED) &&
+			(reply_cm->egress_vlan_hdr_cnt > 0)) {
+			reply_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_INSERT_EGRESS_VLAN_TAG;
+			reply_cm->l2_hdr_size += reply_cm->egress_vlan_hdr_cnt * VLAN_HLEN;
+			DEBUG_TRACE("%px: reply_cm: Bridge VLAN insert egress VLAN Tag found\n", msg);
+		}
+	}
+#endif
+
 #ifdef CONFIG_NF_FLOW_COOKIE
 	reply_cm->flow_cookie = 0;
 #endif
@@ -2625,6 +2736,10 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 		   "  s: %s:%pxM(%pxM):%pI6(%pI6):%u(%u)\n"
 		   "  d: %s:%pxM(%pxM):%pI6(%pI6):%u(%u)\n"
 		   "msg flags: valid_flags=%x rule_flags=%x\n"
+#ifdef SFE_BRIDGE_VLAN_FILTERING_ENABLE
+		   " orig_cm:  vlan_filter_ingress_tag: %x flags: %x \n"
+		   " reply_cm: vlan_filter_ingress_tag: %x flags: %x \n"
+#endif
 		   "qdisc_rule: valid=%x flow_qdisc_interface=%d return_qdisc_interface=%d",
 		   c, tuple->protocol,
 		   src_dev->name, msg->conn_rule.flow_mac, NULL,
@@ -2632,6 +2747,10 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 		   dest_dev->name, NULL, msg->conn_rule.return_mac,
 		   (void *)tuple->return_ip, (void *)tuple->return_ip, ntohs(tuple->return_ident), ntohs(tuple->return_ident),
 		   msg->valid_flags, msg->rule_flags,
+#ifdef SFE_BRIDGE_VLAN_FILTERING_ENABLE
+		   original_cm->vlan_filter_rule.ingress_vlan_tag, original_cm->vlan_filter_rule.ingress_flags,
+		   reply_cm->vlan_filter_rule.ingress_vlan_tag, reply_cm->vlan_filter_rule.ingress_flags,
+#endif
 		   msg->qdisc_rule.valid_flags, msg->qdisc_rule.flow_qdisc_interface, msg->qdisc_rule.return_qdisc_interface);
 
 	return 0;

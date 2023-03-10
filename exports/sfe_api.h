@@ -97,6 +97,7 @@
 #define SFE_RULE_CREATE_NO_SRC_IDENT       (1<<11)	/**< Zero out the src ident. */
 #define SFE_RULE_CREATE_TRUSTSEC_VALID     (1<<12)	/**< trustsec fields are valid. */
 #define SFE_RULE_CREATE_QDISC_RULE_VALID   (1<<13)	/**< Qdisc rule is valid. */
+#define SFE_RULE_CREATE_VLAN_FILTER_VALID  (1<<14)	/**< Bridge VLAN Filter rule is valid. */
 
 /*
  * Multicast rule flags
@@ -166,6 +167,13 @@
 		/**< Qdisc interface for the flow interface is valid. */
 #define SFE_QDISC_RULE_RETURN_VALID 0x02
 		/**< Qdisc interface for the return interface is valid. */
+
+/*
+ * Bridge VLAN Filter flags; used with SFE_RULE_CREATE_VLAN_FILTER_VALID and sfe_vlan_filter_rule structure.
+ */
+#define SFE_VLAN_FILTER_FLAG_VALID 		(1<<0) 	/**< VLAN Filter is valid in the rule.  */
+#define SFE_VLAN_FILTER_FLAG_INGRESS_PVID 	(1<<1)	/**< Add VLAN header at ingress for untagged packets. */
+#define SFE_VLAN_FILTER_FLAG_EGRESS_UNTAGGED	(1<<2)	/**< Strip VLAN header associated with this VID at egress. */
 
 /**
  * @}
@@ -373,6 +381,18 @@ struct sfe_vlan_rule {
 };
 
 /**
+ * VLAN Filter connection rule structure.
+ * 	TODO: Combine flow/return information into one structure.
+ */
+struct sfe_vlan_filter_rule {
+	u32 ingress_vlan_tag;	/**< VLAN tag for ingress packets. */
+	u32 egress_vlan_tag;	/**< VLAN tag for egress packets. */
+	u8 ingress_flags;	/**< VLAN flags at ingress. */
+	u8 egress_flags;	/**< VLAN flags at egress. */
+	u8 reserved[2];		/**< Reserved; padding for alignment. */
+};
+
+/**
  * Trustsec connection rule structure.
  */
 struct sfe_trustsec_rule {
@@ -441,6 +461,10 @@ struct sfe_ipv4_rule_create_msg {
 	struct sfe_service_class_rule sawf_rule;
 							/**< Service class related information */
 	struct sfe_qdisc_rule qdisc_rule;		/**< Qdisc indication per direction */
+	struct sfe_vlan_filter_rule flow_vlan_filter_rule;
+							/**< TO-direction VLAN Filter related acceleration parameters. */
+	struct sfe_vlan_filter_rule return_vlan_filter_rule;
+							/**< FROM-direction VLAN Filter related acceleration parameters. */
 	u32 index;					/**< Slot ID for cache statistics to host OS. */
 };
 
@@ -659,6 +683,10 @@ struct sfe_ipv6_rule_create_msg {
 	 */
 	struct sfe_service_class_rule sawf_rule;	/**< Service class related information. */
 	struct sfe_qdisc_rule qdisc_rule;		/**< Qdisc indication per direction */
+	struct sfe_vlan_filter_rule flow_vlan_filter_rule;
+							/**< TO-direction VLAN Filter related acceleration parameters. */
+	struct sfe_vlan_filter_rule return_vlan_filter_rule;
+							/**< FROM-direction VLAN Filter related acceleration parameters. */
 	u32 index;					/**< Slot ID for cache statistics to host OS. */
 };
 
