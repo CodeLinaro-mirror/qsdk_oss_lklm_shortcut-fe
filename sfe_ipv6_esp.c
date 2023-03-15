@@ -2,7 +2,7 @@
  * sfe_ipv6_esp.c
  *	Shortcut forwarding engine - IPv6 ESP implementation
  *
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -251,13 +251,14 @@ int sfe_ipv6_recv_esp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 	 */
 	if (likely(cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_WRITE_L2_HDR)) {
 		if (unlikely(!(cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_WRITE_FAST_ETH_HDR))) {
-			dev_hard_header(skb, xmit_dev, ETH_P_IPV6, cm->xmit_dest_mac, cm->xmit_src_mac, len);
+			dev_hard_header(skb, xmit_dev, ntohs(skb->protocol),
+					cm->xmit_dest_mac, cm->xmit_src_mac, len);
 		} else {
 			/*
 			 * For the simple case we write this really fast.
 			 */
 			struct ethhdr *eth = (struct ethhdr *)__skb_push(skb, ETH_HLEN);
-			eth->h_proto = htons(ETH_P_IPV6);
+			eth->h_proto = skb->protocol;
 			ether_addr_copy((u8 *)eth->h_dest, (u8 *)cm->xmit_dest_mac);
 			ether_addr_copy((u8 *)eth->h_source, (u8 *)cm->xmit_src_mac);
 		}
