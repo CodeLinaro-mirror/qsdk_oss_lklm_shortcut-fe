@@ -347,9 +347,10 @@ static void sfe_process_response_msg(struct work_struct *work)
 {
 	struct sfe_ctx_instance_internal *sfe_ctx = container_of(work, struct sfe_ctx_instance_internal, work);
 	struct sfe_response_msg *response;
+	int quota = 2;
 
 	spin_lock_bh(&sfe_ctx->lock);
-	while ((response = list_first_entry_or_null(&sfe_ctx->msg_queue, struct sfe_response_msg, node))) {
+	while (quota-- && (response = list_first_entry_or_null(&sfe_ctx->msg_queue, struct sfe_response_msg, node))) {
 		list_del(&response->node);
 		spin_unlock_bh(&sfe_ctx->lock);
 
@@ -377,6 +378,13 @@ static void sfe_process_response_msg(struct work_struct *work)
 		spin_lock_bh(&sfe_ctx->lock);
 	}
 	spin_unlock_bh(&sfe_ctx->lock);
+
+	/*
+	 * If having more msg in the queue, schedule it again.
+	 */
+	if (response) {
+		schedule_work(&sfe_ctx->work);
+	}
 }
 
 /*

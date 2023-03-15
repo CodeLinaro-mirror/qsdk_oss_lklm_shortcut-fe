@@ -2,7 +2,7 @@
  * sfe_ipv4_tun6rd.c
  *	Shortcut forwarding engine file for IPv4 TUN6RD
  *
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -85,6 +85,21 @@ int sfe_ipv4_recv_tun6rd(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_de
 		DEBUG_TRACE("%px: Sync on find\n", skb);
 
 		return 0;
+	}
+
+	/*
+	 * In the passthrough case, the packet needs to decrement ttl.
+	 */
+	if (cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_PASSTHROUGH) {
+		if (iph->ttl < 2) {
+			sfe_ipv4_sync_status(si, cm->connection, SFE_SYNC_REASON_STATS);
+			rcu_read_unlock();
+
+			sfe_ipv4_exception_stats_inc(si, SFE_IPV4_EXCEPTION_EVENT_TUN6RD_SMALL_TTL);
+			DEBUG_TRACE("%px: ttl too low\n", skb);
+			return 0;
+		}
+		iph->ttl--;
 	}
 
 	/*
