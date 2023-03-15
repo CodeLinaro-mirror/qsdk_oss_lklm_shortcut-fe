@@ -747,6 +747,7 @@ static void sfe_ipv4_free_mc_dest_rcu(struct rcu_head *head)
 {
 	struct sfe_ipv4_mc_dest *mc_dest;
 	mc_dest = container_of(head, struct sfe_ipv4_mc_dest, rcu);
+	dev_put(mc_dest->xmit_dev);
 	kfree(mc_dest);
 	return;
 }
@@ -794,6 +795,7 @@ static void sfe_ipv4_free_connection_rcu(struct rcu_head *head)
 		struct sfe_ipv4_mc_dest *cur, *tmp;
 		list_for_each_entry_safe(cur, tmp, &(c->original_match->mc_list), list) {
 			list_del_rcu(&cur->list);
+			dev_put(cur->xmit_dev);
 
 			/*
 			 * The connection c has been quiescent after being
@@ -1574,6 +1576,7 @@ int sfe_ipv4_create_mc_dest(struct sfe_ipv4_connection_match *cm, struct sfe_ipv
 
 		dest = sfe_ipv4_allocate_mc_dest(cm, msg, if_rule, dest_dev);
 		if (!dest) {
+			dev_put(dest_dev);
 			DEBUG_WARN("%px: Allocate multicast dest of %s failed!\n", msg, dest_dev->name);
 			return -EINVAL;
 
@@ -1864,7 +1867,6 @@ update_done:
 		this_cpu_inc(si->stats_pcpu->connection_create_failures64);
 		list_for_each_entry_safe(cur, next, &original_cm->mc_list, list) {
 			list_del_rcu(&cur->list);
-			dev_put(cur->xmit_dev);
 			call_rcu(&cur->rcu, sfe_ipv4_free_mc_dest_rcu);
 		}
 		spin_unlock_bh(&si->lock);
