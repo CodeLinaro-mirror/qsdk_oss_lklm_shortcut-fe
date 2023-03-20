@@ -1560,14 +1560,26 @@ static bool sfe_ipv4_match_entry_set_vlan(
 			u32 secondary_ingress_vlan_tag,
 			u32 secondary_egress_vlan_tag)
 {
+	DEBUG_INFO("%px: Setting primary_ingress_vlan_tag:%x, primary_egress_vlan_tag:%x, secondary_ingress_vlan_tag:%x, secondary_egress_vlan_tag:%x \n",
+			cm, primary_ingress_vlan_tag, primary_egress_vlan_tag, secondary_ingress_vlan_tag, secondary_egress_vlan_tag);
+
+	DEBUG_INFO("%px: Before filling: cm->ingress_hdr[0]:%x, cm->ingress_hdr[1]:%x, cm->egress_hdr[0]:%x, cm->egress_hdr[1]:%x",
+			cm, cm->ingress_vlan_hdr[0].tci, cm->ingress_vlan_hdr[1].tci, cm->egress_vlan_hdr[0].tci, cm->egress_vlan_hdr[1].tci);
+
 	if (sfe_ipv4_match_entry_set_vlan_hdr(&(cm->ingress_vlan_hdr_cnt), cm->ingress_vlan_hdr,
 			primary_ingress_vlan_tag, secondary_ingress_vlan_tag)) {
 		if (sfe_ipv4_match_entry_set_vlan_hdr(&(cm->egress_vlan_hdr_cnt), cm->egress_vlan_hdr,
 				primary_egress_vlan_tag, secondary_egress_vlan_tag)) {
+			DEBUG_INFO("%px: After(success): cm->ingress_hdr[0]:%x, cm->ingress_hdr[1]:%x"
+				       " cm->egress_hdr[0]:%x, cm->egress_hdr[1]:%x",
+					cm, cm->ingress_vlan_hdr[0].tci, cm->ingress_vlan_hdr[1].tci, cm->egress_vlan_hdr[0].tci, cm->egress_vlan_hdr[1].tci);
 			return true;
 		}
 	}
 
+	DEBUG_INFO("%px: After(fail): cm->ingress_hdr[0]:%x, cm->ingress_hdr[1]:%x"
+		       " cm->egress_hdr[0]:%x, cm->egress_hdr[1]:%x",
+			cm, cm->ingress_vlan_hdr[0].tci, cm->ingress_vlan_hdr[1].tci, cm->egress_vlan_hdr[0].tci, cm->egress_vlan_hdr[1].tci);
 	return false;
 }
 
@@ -2376,6 +2388,10 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	sfe_fls_conn_create_t create_cb;
 	bool disable_l2_flow = false;
 	bool disable_l2_return = false;
+#ifdef SFE_BRIDGE_VLAN_FILTERING_ENABLE
+	u32 ingress_vlan_tag;
+	u32 egress_vlan_tag;
+#endif
 
 	/*
 	 * Check if L2 features need to be disabled
@@ -2681,17 +2697,30 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 				msg->flow_vlan_filter_rule.egress_vlan_tag, msg->flow_vlan_filter_rule.egress_flags);
 
 		/*
+		 * Accelerate only if BOTTOM INTERFACE is set, or ensure we have the same interface as top and bottom.
+		 */
+		if (!((msg->rule_flags & SFE_RULE_CREATE_FLAG_USE_RETURN_BOTTOM_INTERFACE) ||
+					(msg->conn_rule.return_interface_num == msg->conn_rule.return_top_interface_num))) {
+			DEBUG_TRACE("%px: original_cm: Bridge VLAN insert egress VLAN Tag is not set, as bottom interface is not set.\n", msg);
+			return -EPERM;
+		}
+
+		/*
 		 * Populate the VLAN Filter rule in the connection match entry.
 		 */
 		original_cm->vlan_filter_rule.ingress_vlan_tag = msg->flow_vlan_filter_rule.ingress_vlan_tag;
 		original_cm->vlan_filter_rule.ingress_flags = msg->flow_vlan_filter_rule.ingress_flags;
+
+		ingress_vlan_tag = msg->flow_vlan_filter_rule.ingress_vlan_tag;
+		egress_vlan_tag = msg->flow_vlan_filter_rule.egress_flags & SFE_VLAN_FILTER_FLAG_EGRESS_UNTAGGED ?
+			SFE_VLAN_ID_NOT_CONFIGURED : msg->flow_vlan_filter_rule.egress_vlan_tag;
 
 		/*
 		 * Add VLAN Filter rule for ingress validation / egress tagging.
 		 * We might be stacking Bridge VLAN Filter headers after traditional VLAN headers. (not clearing out the arry).
 		 * This might fail, when both primary and secondary traditional VLANs have been configured.
 		 */
-		if (!sfe_ipv4_match_entry_set_vlan(original_cm, msg->flow_vlan_filter_rule.ingress_vlan_tag, msg->flow_vlan_filter_rule.egress_vlan_tag,
+		if (!sfe_ipv4_match_entry_set_vlan(original_cm, ingress_vlan_tag, egress_vlan_tag,
 					SFE_VLAN_ID_NOT_CONFIGURED, SFE_VLAN_ID_NOT_CONFIGURED)) {
 			this_cpu_inc(si->stats_pcpu->connection_create_failures64);
 			spin_unlock_bh(&si->lock);
@@ -2705,7 +2734,7 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 		}
 
 		if (!(msg->flow_vlan_filter_rule.egress_flags & SFE_VLAN_FILTER_FLAG_EGRESS_UNTAGGED) &&
-			(original_cm->egress_vlan_hdr_cnt > 0)) {
+		(original_cm->egress_vlan_hdr_cnt > 0)) {
 			original_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_INSERT_EGRESS_VLAN_TAG;
 			original_cm->l2_hdr_size += original_cm->egress_vlan_hdr_cnt * VLAN_HLEN;
 			DEBUG_TRACE("%px: original_cm: Bridge VLAN insert egress VLAN Tag found\n", msg);
@@ -3123,7 +3152,7 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	/*
 	 * Add Bridge VLAN Filter rule in reply_cm
 	 */
-	if (msg->valid_flags & SFE_RULE_CREATE_VLAN_FILTER_VALID) {
+	if ((msg->valid_flags & SFE_RULE_CREATE_VLAN_FILTER_VALID)) {
 		DEBUG_INFO("%px: Bridge VLAN Filter rule configuration received from connection manager in reply dir\n"
 				" reply_cm: vlan_filter_ingress_tag: %x flags: %x \n"
 				" reply_cm: vlan_filter_egress_tag:  %x flags: %x \n",
@@ -3131,16 +3160,29 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 				msg->return_vlan_filter_rule.egress_vlan_tag, msg->return_vlan_filter_rule.egress_flags);
 
 		/*
+		 * Accelerate only if BOTTOM INTERFACE is set, or ensure we have the same interface as top and bottom.
+		 */
+		if (!((msg->rule_flags & SFE_RULE_CREATE_FLAG_USE_FLOW_BOTTOM_INTERFACE) ||
+					(msg->conn_rule.flow_interface_num == msg->conn_rule.flow_top_interface_num))) {
+			DEBUG_TRACE("%px: reply_cm: Bridge VLAN insert egress VLAN Tag is not set, as bottom interface is not set.\n", msg);
+			return -EPERM;
+		}
+
+		/*
 		 * Populate the VLAN Filter rule in the connection match entry.
 		 */
 		reply_cm->vlan_filter_rule.ingress_vlan_tag = msg->return_vlan_filter_rule.ingress_vlan_tag;
 		reply_cm->vlan_filter_rule.ingress_flags = msg->return_vlan_filter_rule.ingress_flags;
 
+		ingress_vlan_tag = msg->return_vlan_filter_rule.ingress_vlan_tag;
+		egress_vlan_tag = msg->return_vlan_filter_rule.egress_flags & SFE_VLAN_FILTER_FLAG_EGRESS_UNTAGGED ?
+			SFE_VLAN_ID_NOT_CONFIGURED : msg->return_vlan_filter_rule.egress_vlan_tag;
+
 		/*
 		 * Add VLAN Filter rule.
 		 * This might fail, when both primary and secondary traditional vlan has been configured.
 		 */
-		if (!sfe_ipv4_match_entry_set_vlan(reply_cm, msg->return_vlan_filter_rule.ingress_vlan_tag, msg->return_vlan_filter_rule.egress_vlan_tag,
+		if (!sfe_ipv4_match_entry_set_vlan(reply_cm, ingress_vlan_tag, egress_vlan_tag,
 					SFE_VLAN_ID_NOT_CONFIGURED, SFE_VLAN_ID_NOT_CONFIGURED)) {
 			this_cpu_inc(si->stats_pcpu->connection_create_failures64);
 			spin_unlock_bh(&si->lock);
@@ -3154,7 +3196,7 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 		}
 
 		if (!(msg->return_vlan_filter_rule.egress_flags & SFE_VLAN_FILTER_FLAG_EGRESS_UNTAGGED) &&
-			(reply_cm->egress_vlan_hdr_cnt > 0)) {
+		(reply_cm->egress_vlan_hdr_cnt > 0)) {
 			reply_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_INSERT_EGRESS_VLAN_TAG;
 			reply_cm->l2_hdr_size += reply_cm->egress_vlan_hdr_cnt * VLAN_HLEN;
 			DEBUG_TRACE("%px: reply_cm: Bridge VLAN insert egress VLAN Tag found\n", msg);
@@ -3870,6 +3912,14 @@ static int sfe_ipv4_debug_dev_read_connections_connection(struct sfe_ipv4 *si, s
 	u16 pppoe_session_id;
 	u8 pppoe_remote_mac[ETH_ALEN];
 	u32 original_fast_xmit, reply_fast_xmit;
+	u32 orig_cm_flags = 0, reply_cm_flags = 0;
+	u16 orig_ingress_vlan_hdr0 = 0, orig_ingress_vlan_hdr1 = 0, orig_ingress_vlan_hdr_cnt = 0;
+	u16 orig_egress_vlan_hdr0 = 0, orig_egress_vlan_hdr1 = 0, orig_egress_vlan_hdr_cnt = 0;
+	u16 reply_ingress_vlan_hdr0 = 0, reply_ingress_vlan_hdr1 = 0, reply_ingress_vlan_hdr_cnt = 0;
+	u16 reply_egress_vlan_hdr0 = 0, reply_egress_vlan_hdr1 = 0, reply_egress_vlan_hdr_cnt = 0;
+#ifdef SFE_BRIDGE_VLAN_FILTERING_ENABLE
+	u32 orig_cm_vf_ingress_flags = 0, reply_cm_vf_ingress_flags = 0;
+#endif
 #ifdef CONFIG_NF_FLOW_COOKIE
 	int src_flow_cookie, dst_flow_cookie;
 #endif
@@ -3914,6 +3964,16 @@ static int sfe_ipv4_debug_dev_read_connections_connection(struct sfe_ipv4 *si, s
 	dest_ip_xlate = c->dest_ip_xlate;
 	dest_port = c->dest_port;
 	dest_port_xlate = c->dest_port_xlate;
+	orig_ingress_vlan_hdr0 = original_cm->ingress_vlan_hdr[0].tci & VLAN_VID_MASK;
+	orig_ingress_vlan_hdr1 = original_cm->ingress_vlan_hdr[1].tci & VLAN_VID_MASK;
+	orig_ingress_vlan_hdr_cnt = original_cm->ingress_vlan_hdr_cnt;
+	orig_egress_vlan_hdr0 = original_cm->egress_vlan_hdr[0].tci & VLAN_VID_MASK;
+	orig_egress_vlan_hdr1 = original_cm->egress_vlan_hdr[1].tci & VLAN_VID_MASK;
+	orig_egress_vlan_hdr_cnt = original_cm->egress_vlan_hdr_cnt;
+	orig_cm_flags = original_cm->flags;
+#ifdef SFE_BRIDGE_VLAN_FILTERING_ENABLE
+	orig_cm_vf_ingress_flags = original_cm->vlan_filter_rule.ingress_flags;
+#endif
 	if (reply_cm) {
 		sfe_ipv4_connection_match_update_summary_stats(reply_cm, &packet, &byte);
 		dest_priority = reply_cm->priority;
@@ -3925,6 +3985,16 @@ static int sfe_ipv4_debug_dev_read_connections_connection(struct sfe_ipv4 *si, s
 		reply_cm_sawf_valid = reply_cm->sawf_valid;
 		return_svc_id = reply_cm->svc_id;
 		return_msduq = reply_cm->mark;
+		reply_cm_flags = reply_cm->flags;
+		reply_ingress_vlan_hdr0 = reply_cm->ingress_vlan_hdr[0].tci & VLAN_VID_MASK;
+		reply_ingress_vlan_hdr1 = reply_cm->ingress_vlan_hdr[1].tci & VLAN_VID_MASK;
+		reply_ingress_vlan_hdr_cnt = reply_cm->ingress_vlan_hdr_cnt;
+		reply_egress_vlan_hdr0 = reply_cm->egress_vlan_hdr[0].tci & VLAN_VID_MASK;
+		reply_egress_vlan_hdr1 = reply_cm->egress_vlan_hdr[1].tci & VLAN_VID_MASK;
+		reply_egress_vlan_hdr_cnt = reply_cm->egress_vlan_hdr_cnt;
+#ifdef SFE_BRIDGE_VLAN_FILTERING_ENABLE
+		reply_cm_vf_ingress_flags = reply_cm->vlan_filter_rule.ingress_flags;
+#endif
 #ifdef CONFIG_NF_FLOW_COOKIE
 		dst_flow_cookie = reply_cm->flow_cookie;
 #endif
@@ -3964,6 +4034,7 @@ static int sfe_ipv4_debug_dev_read_connections_connection(struct sfe_ipv4 *si, s
 				"src_rx_pkts=\"%llu\" src_rx_bytes=\"%llu\" "
 				"src_mark=\"%08x\" "
 				"src_fast_xmit=\"%s\" "
+				"orig_cm_flags=\"%08x\" "
 				"dest_dev=\"%s\" "
 				"dest_ip=\"%pI4\" dest_ip_xlate=\"%pI4\" "
 				"dest_port=\"%u\" dest_port_xlate=\"%u\" "
@@ -3971,6 +4042,7 @@ static int sfe_ipv4_debug_dev_read_connections_connection(struct sfe_ipv4 *si, s
 				"dest_rx_pkts=\"%llu\" dest_rx_bytes=\"%llu\" "
 				"dest_mark=\"%08x\" "
 				"reply_fast_xmit=\"%s\" "
+				"reply_cm_flags=\"%08x\" "
 #ifdef CONFIG_NF_FLOW_COOKIE
 				"src_flow_cookie=\"%d\" dst_flow_cookie=\"%d\" "
 #endif
@@ -3983,6 +4055,7 @@ static int sfe_ipv4_debug_dev_read_connections_connection(struct sfe_ipv4 *si, s
 				src_rx_packets, src_rx_bytes,
 				src_mark,
 				original_fast_xmit ? "Yes" : "No",
+				original_cm_flags,
 				dest_dev->name,
 				&dest_ip, &dest_ip_xlate,
 				ntohs(dest_port), ntohs(dest_port_xlate),
@@ -3990,10 +4063,38 @@ static int sfe_ipv4_debug_dev_read_connections_connection(struct sfe_ipv4 *si, s
 				dest_rx_packets, dest_rx_bytes,
 				dest_mark,
 				reply_fast_xmit ? "Yes" : "No",
+				reply_cm_flags,
 #ifdef CONFIG_NF_FLOW_COOKIE
 				src_flow_cookie, dst_flow_cookie,
 #endif
 				last_sync_jiffies);
+
+	if (original_cm->ingress_vlan_hdr_cnt || original_cm->egress_vlan_hdr_cnt || reply_cm->ingress_vlan_hdr_cnt || reply_cm->egress_vlan_hdr_cnt) {
+		/*
+		 * VLAN Header is present in either of the original/reply rule.
+		 */
+		ws->msg_len += snprintf(ws->msg + ws->msg_len, length - ws->msg_len,
+				"orig_in_vlan_hdr0=\"%d\" orig_in_vlan_hdr1=\"%d\" orig_in_vlan_hdr_cnt=\"%d\" "
+				"orig_eg_vlan_hdr0=\"%d\" orig_eg_vlan_hdr1=\"%d\" orig_eg_vlan_hdr_cnt=\"%d\" "
+				"reply_in_vlan_hdr0=\"%d\" reply_in_vlan_hdr1=\"%d\" reply_in_vlan_hdr_cnt=\"%d\" "
+				"reply_eg_vlan_hdr0=\"%d\" reply_eg_vlan_hdr1=\"%d\" reply_eg_vlan_hdr_cnt=\"%d\" ",
+				orig_ingress_vlan_hdr0, orig_ingress_vlan_hdr1, orig_ingress_vlan_hdr_cnt,
+				orig_egress_vlan_hdr0, orig_egress_vlan_hdr1,orig_egress_vlan_hdr_cnt,
+				reply_ingress_vlan_hdr0, reply_ingress_vlan_hdr1, reply_ingress_vlan_hdr_cnt,
+				reply_egress_vlan_hdr0, reply_egress_vlan_hdr1, reply_egress_vlan_hdr_cnt);
+	}
+
+#ifdef SFE_BRIDGE_VLAN_FILTERING_ENABLE
+	if (orig_cm_vf_ingress_flags || reply_cm_vf_ingress_flags) {
+		ws->msg_len += snprintf(ws->msg + ws->msg_len, length - ws->msg_len,
+				"orig_in_vf_flags=\"%08x\" orig_eg_vf_insert_vlan_tag=\"%s\" "
+				"reply_in_vf_flags=\"%08x\" reply_eg_vf_insert_vlan_tag=\"%s\" ",
+				orig_cm_vf_ingress_flags,
+				(original_cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_INSERT_EGRESS_VLAN_TAG) ? "Yes" : "No",
+				reply_cm_vf_ingress_flags,
+				(reply_cm_flags & SFE_IPV4_CONNECTION_MATCH_FLAG_INSERT_EGRESS_VLAN_TAG) ? "Yes" : "No");
+	}
+#endif
 
 	if (original_cm_flags &= (SFE_IPV4_CONNECTION_MATCH_FLAG_PPPOE_DECAP | SFE_IPV4_CONNECTION_MATCH_FLAG_PPPOE_ENCAP)) {
 		ws->msg_len += snprintf(ws->msg + ws->msg_len, length - ws->msg_len, "pppoe_session_id=\"%u\" pppoe_server MAC=\"%pM\" ",
