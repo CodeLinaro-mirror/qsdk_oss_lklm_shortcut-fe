@@ -1347,10 +1347,14 @@ void sfe_ipv6_stats_convert(struct sfe_ipv6_conn_sync *sync_msg, struct sfe_conn
 	 */
 	sync_msg->protocol = (u8)sis->protocol;
 	sfe_ipv6_addr_copy(sis->src_ip.ip6, sync_msg->flow_ip);
+	sfe_ipv6_addr_copy(sis->src_ip_xlate.ip6, sync_msg->flow_ip_xlate);
 	sync_msg->flow_ident = sis->src_port;
+	sync_msg->flow_ident_xlate = sis->src_port_xlate;
 
 	sfe_ipv6_addr_copy(sis->dest_ip.ip6, sync_msg->return_ip);
+	sfe_ipv6_addr_copy(sis->dest_ip_xlate.ip6, sync_msg->return_ip_xlate);
 	sync_msg->return_ident = sis->dest_port;
+	sync_msg->return_ident_xlate = sis->dest_port_xlate;
 
 	/*
 	 * Fill TCP protocol specific information

@@ -370,7 +370,7 @@ static inline void sfe_ipv6_insert_connection_match(struct sfe_ipv6 *si,
 
 	hlist_add_head_rcu(&cm->hnode, &si->hlist_conn_match_hash_head[conn_match_idx]);
 #ifdef CONFIG_NF_FLOW_COOKIE
-	if (!si->flow_cookie_enable || !(cm->flags & (SFE_IPV6_CONNECTION_MATCH_FLAG_XLATE_SRC | SFE_IPV6_CONNECTION_MATCH_FLAG_XLATE_DEST)))
+	if (!si->flow_cookie_enable)
 		return;
 
 	/*
@@ -716,7 +716,6 @@ static void sfe_ipv6_free_mc_dest_rcu(struct rcu_head *head)
 {
 	struct sfe_ipv6_mc_dest *mc_dest;
 	mc_dest = container_of(head, struct sfe_ipv6_mc_dest, rcu);
-	dev_put(mc_dest->xmit_dev);
 	kfree(mc_dest);
 	return;
 }
@@ -760,7 +759,6 @@ static void sfe_ipv6_free_sfe_ipv6_connection_rcu(struct rcu_head *head)
 		struct sfe_ipv6_mc_dest *cur, *tmp;
 		list_for_each_entry_safe(cur, tmp, &(c->original_match->mc_list), list) {
 			list_del_rcu(&cur->list);
-			dev_put(cur->xmit_dev);
 
 			/*
 			 * The connection c has been quiescent after being
@@ -2086,10 +2084,10 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 	original_cm->match_dest_ip[0] = *(struct sfe_ipv6_addr *)tuple->return_ip;
 	original_cm->match_dest_port = tuple->return_ident;
 
-	original_cm->xlate_src_ip[0] = *(struct sfe_ipv6_addr *)tuple->flow_ip;
-	original_cm->xlate_src_port = tuple->flow_ident;
-	original_cm->xlate_dest_ip[0] = *(struct sfe_ipv6_addr *)tuple->return_ip;
-	original_cm->xlate_dest_port =  tuple->return_ident;
+	original_cm->xlate_src_ip[0] = *(struct sfe_ipv6_addr *)msg->conn_rule.flow_ip_xlate;
+	original_cm->xlate_src_port = msg->conn_rule.flow_ident_xlate;
+	original_cm->xlate_dest_ip[0] = *(struct sfe_ipv6_addr *)msg->conn_rule.return_ip_xlate;
+	original_cm->xlate_dest_port =  msg->conn_rule.return_ident_xlate;
 
 	original_cm->xmit_dev = dest_dev;
 
@@ -2374,9 +2372,9 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 	 */
 	reply_cm->match_dev = dest_dev;
 	reply_cm->match_protocol = tuple->protocol;
-	reply_cm->match_src_ip[0] = *(struct sfe_ipv6_addr *)tuple->return_ip;
-	reply_cm->match_dest_ip[0] = *(struct sfe_ipv6_addr *)tuple->flow_ip;
-	reply_cm->match_dest_port = tuple->flow_ident;
+	reply_cm->match_src_ip[0] = *(struct sfe_ipv6_addr *)msg->conn_rule.return_ip_xlate;
+	reply_cm->match_dest_ip[0] = *(struct sfe_ipv6_addr *)msg->conn_rule.flow_ip_xlate;
+	reply_cm->match_dest_port = msg->conn_rule.flow_ident_xlate;
 	reply_cm->xlate_src_ip[0] = *(struct sfe_ipv6_addr *)tuple->return_ip;
 	reply_cm->xlate_src_port = tuple->return_ident;
 	reply_cm->xlate_dest_ip[0] = *(struct sfe_ipv6_addr *)tuple->flow_ip;
@@ -2385,7 +2383,7 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 	/*
 	 * Keep source port as 0 for tunnels requiring 4-tuple match (eg: VxLAN).
 	 */
-	reply_cm->match_src_port = (msg->rule_flags & SFE_RULE_CREATE_FLAG_NO_SRC_IDENT) ? 0 : tuple->return_ident;
+	reply_cm->match_src_port = (msg->rule_flags & SFE_RULE_CREATE_FLAG_NO_SRC_IDENT) ? 0 : msg->conn_rule.return_ident_xlate;
 
 	reply_cm->xmit_dev = src_dev;
 
@@ -2772,9 +2770,17 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 		}
 	}
 
-	/*
-	 * No support for NAT in ipv6
-	 */
+	if ((!sfe_ipv6_addr_equal((struct sfe_ipv6_addr *)tuple->return_ip, (struct sfe_ipv6_addr *)msg->conn_rule.return_ip_xlate)) ||
+				(tuple->return_ident != msg->conn_rule.return_ident_xlate)) {
+		original_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_XLATE_DEST;
+		reply_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_XLATE_SRC;
+	}
+
+	if ((!sfe_ipv6_addr_equal((struct sfe_ipv6_addr *)tuple->flow_ip, (struct sfe_ipv6_addr *)msg->conn_rule.flow_ip_xlate)) ||
+				(tuple->flow_ident != msg->conn_rule.flow_ident_xlate)) {
+		original_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_XLATE_SRC;
+		reply_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_XLATE_DEST;
+	}
 
 	/*
 	 * Initialize the protocol-specific information that we track.
@@ -2811,16 +2817,16 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 	 */
 	c->protocol = tuple->protocol;
 	c->src_ip[0] = *(struct sfe_ipv6_addr *)tuple->flow_ip;
-	c->src_ip_xlate[0] = *(struct sfe_ipv6_addr *)tuple->flow_ip;
+	c->src_ip_xlate[0] = *(struct sfe_ipv6_addr *)msg->conn_rule.flow_ip_xlate;
 	c->src_port = tuple->flow_ident;
-	c->src_port_xlate = tuple->flow_ident;
+	c->src_port_xlate = msg->conn_rule.flow_ident_xlate;
 	c->original_dev = src_dev;
 	c->original_match = original_cm;
 
 	c->dest_ip[0] = *(struct sfe_ipv6_addr *)tuple->return_ip;
-	c->dest_ip_xlate[0] = *(struct sfe_ipv6_addr *)tuple->return_ip;
+	c->dest_ip_xlate[0] = *(struct sfe_ipv6_addr *)msg->conn_rule.return_ip_xlate;
 	c->dest_port = tuple->return_ident;
-	c->dest_port_xlate = tuple->return_ident;
+	c->dest_port_xlate = msg->conn_rule.return_ident_xlate;
 
 	c->reply_dev = dest_dev;
 	c->reply_match = reply_cm;
@@ -2848,9 +2854,9 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 		   "qdisc_rule: valid=%x flow_qdisc_interface=%d return_qdisc_interface=%d",
 		   c, tuple->protocol,
 		   src_dev->name, msg->conn_rule.flow_mac, NULL,
-		   (void *)tuple->flow_ip, (void *)tuple->flow_ip, ntohs(tuple->flow_ident), ntohs(tuple->flow_ident),
+		   (void *)tuple->flow_ip, (void *)msg->conn_rule.flow_ip_xlate, ntohs(tuple->flow_ident), ntohs(msg->conn_rule.flow_ident_xlate),
 		   dest_dev->name, NULL, msg->conn_rule.return_mac,
-		   (void *)tuple->return_ip, (void *)tuple->return_ip, ntohs(tuple->return_ident), ntohs(tuple->return_ident),
+		   (void *)tuple->return_ip, (void *)msg->conn_rule.return_ip_xlate, ntohs(tuple->return_ident), ntohs(msg->conn_rule.return_ident_xlate),
 		   msg->valid_flags, msg->rule_flags,
 #ifdef SFE_BRIDGE_VLAN_FILTERING_ENABLE
 		   original_cm->vlan_filter_rule.ingress_vlan_tag, original_cm->vlan_filter_rule.ingress_flags,

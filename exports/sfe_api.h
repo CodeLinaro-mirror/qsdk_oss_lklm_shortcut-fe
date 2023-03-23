@@ -690,6 +690,10 @@ struct sfe_ipv6_connection_rule {
 	s32 return_top_interface_num;	/**< Top return interface number. */
 	u32 flow_mtu;			/**< Flow interface's MTU. */
 	u32 return_mtu;			/**< Return interface's MTU. */
+	__be32 flow_ip_xlate[4];		/**< Translated flow IP address. */
+	__be32 return_ip_xlate[4];		/**< Translated return IP address. */
+	__be16 flow_ident_xlate;	/**< Translated flow identifier, e.g., port. */
+	__be16 return_ident_xlate;	/**< Translated return identifier, e.g., port. */
 };
 
 /**
@@ -798,7 +802,9 @@ struct sfe_ipv6_conn_sync {
 	u32 index;			/**< Slot ID for cache statistics to host OS. */
 	u8 protocol;			/**< Protocol number. */
 	__be32 flow_ip[4];		/**< Flow IP address. */
+	__be32 flow_ip_xlate[4];		/**< Translated flow IP address. */
 	__be16 flow_ident;		/**< Flow identifier, e.g., port. */
+	__be16 flow_ident_xlate;	/**< Translated flow identifier, e.g., port. */
 	u32 flow_max_window;		/**< Flow direction's largest seen window. */
 	u32 flow_end;			/**< Flow direction's largest seen sequence + segment length. */
 	u32 flow_max_end;		/**< Flow direction's largest seen ack + max(1, win). */
@@ -809,7 +815,9 @@ struct sfe_ipv6_conn_sync {
 	u16 flow_pppoe_session_id;	/**< Flow interface`s PPPoE session ID. */
 	u16 flow_pppoe_remote_mac[3];	/**< Flow interface's PPPoE remote server MAC address (if present). */
 	__be32 return_ip[4];		/**< Return IP address. */
+	__be32 return_ip_xlate[4];		/**< Translated return IP address. */
 	__be16 return_ident;		/**< Return identifer, e.g., port. */
+	__be16 return_ident_xlate;	/**< Translated return identifier, e.g., port. */
 	u32 return_max_window;		/**< Return direction's largest seen window. */
 	u32 return_end;			/**< Return direction's largest seen sequence + segment length. */
 	u32 return_max_end;		/**< Return direction's largest seen ack + max(1, win). */
