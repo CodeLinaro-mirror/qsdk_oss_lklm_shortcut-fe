@@ -1817,7 +1817,7 @@ update_done:
 	}
 
 	if (((IPPROTO_GRE == tuple->protocol) || (IPPROTO_ESP == tuple->protocol)) &&
-					!sfe_ipv4_is_local_ip(si, original_cm->match_dest_ip)) {
+					!sfe_ipv4_is_local_ip(si, original_cm->match_src_ip)) {
 		original_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_PASSTHROUGH;
 	}
 
