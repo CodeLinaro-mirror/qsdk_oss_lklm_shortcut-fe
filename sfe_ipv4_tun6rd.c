@@ -43,6 +43,7 @@ int sfe_ipv4_recv_tun6rd(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_de
 	__be32 dest_ip;
 	__be16 src_port = 0;
 	__be16 dest_port = 0;
+	bool hw_csum;
 	struct sfe_ipv4_connection_match *cm;
 
 	DEBUG_TRACE("%px: sfe: sfe_ipv4_recv_tun6rd called.\n", skb);
@@ -186,6 +187,18 @@ int sfe_ipv4_recv_tun6rd(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_de
 	 */
 	if (unlikely(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_DSCP_REMARK)) {
 		iph->tos = (iph->tos & SFE_IPV4_DSCP_MASK) | cm->dscp;
+	}
+
+	/*
+	 * If HW checksum offload is not possible, full L3 checksum and incremental L4 checksum
+	 * are used to update the packet. Setting ip_summed to CHECKSUM_UNNECESSARY ensures checksum is
+	 * not recalculated further in packet path.
+	 */
+	hw_csum = !!(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_CSUM_OFFLOAD) && (skb->ip_summed == CHECKSUM_UNNECESSARY);
+	if (likely(hw_csum)) {
+		skb->ip_summed = CHECKSUM_PARTIAL;
+	} else {
+		iph->check = sfe_ipv4_gen_ip_csum(iph);
 	}
 
 	/*
