@@ -39,6 +39,10 @@ ifdef SFE_RFS_SUPPORTED
 ccflags-y += -DSFE_RFS_SUPPORTED
 endif
 
+ifdef SFE_PPE_QOS_SUPPORTED
+ccflags-y += -DSFE_PPE_QOS_SUPPORTED
+endif
+
 ifdef SFE_PROCESS_LOCAL_OUT
 ccflags-y += -DSFE_PROCESS_LOCAL_OUT
 endif

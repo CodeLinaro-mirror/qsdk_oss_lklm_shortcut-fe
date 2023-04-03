@@ -3,7 +3,7 @@
  *	Shortcut forwarding engine file for IPv6 UDP
  *
  * Copyright (c) 2015-2016, 2019-2020, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -570,10 +570,13 @@ int sfe_ipv6_recv_udp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 	}
 
 	/*
-	 * Update priority of skb.
+	 * Update priority and int_pri of skb.
 	 */
 	if (unlikely(cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_PRIORITY_REMARK)) {
 		skb->priority = cm->priority;
+#if defined(SFE_PPE_QOS_SUPPORTED)
+		skb_set_int_pri(skb, cm->int_pri);
+#endif
 	}
 
 	/*
