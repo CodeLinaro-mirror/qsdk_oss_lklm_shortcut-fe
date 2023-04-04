@@ -2385,7 +2385,16 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 			}
 		}
 
-		ether_addr_copy((u8 *)original_cm->xmit_dest_mac, (u8 *)msg->conn_rule.return_mac);
+		/*
+		 * In route mode, the return mac address could be wrong since it
+		 * use to_nat device if destination is PPPoE device, using pppoe_remote_mac
+		 * is more safe
+		 */
+		if (original_cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_PPPOE_ENCAP) {
+			ether_addr_copy((u8 *)original_cm->xmit_dest_mac, (u8 *)original_cm->pppoe_remote_mac);
+		} else {
+			ether_addr_copy((u8 *)original_cm->xmit_dest_mac, (u8 *)msg->conn_rule.return_mac);
+		}
 
 		original_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_WRITE_L2_HDR;
 		original_cm->l2_hdr_size += ETH_HLEN;
