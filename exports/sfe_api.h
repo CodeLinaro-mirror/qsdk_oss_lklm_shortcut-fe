@@ -3,7 +3,7 @@
  *	 SFE exported function headers for SFE engine.
  *
  * Copyright (c) 2015,2016, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -64,9 +64,9 @@
 #define SFE_RULE_CREATE_FLAG_BRIDGE_FLOW  (1<<1)		/**< Rule is for a pure bridge forwarding flow. */
 #define SFE_RULE_CREATE_FLAG_ROUTED       (1<<2)		/**< Rule is for a routed connection. */
 #define SFE_RULE_CREATE_FLAG_DSCP_MARKING (1<<3)		/**< Rule has DSCP marking configured. */
-#define SFE_RULE_CREATE_FLAG_VLAN_MARKING (1<<4)		/**< Rule has VLAN marking configured. */
-#define SFE_RULE_UPDATE_FLAG_CHANGE_MTU   (1<<5)		/**< Update MTU of connection interfaces. */
-#define SFE_RULE_CREATE_FLAG_ICMP_NO_CME_FLUSH (1<<6)		/**< Rule to not flush CME on ICMP packets. */
+#define SFE_RULE_CREATE_FLAG_NO_SRC_IDENT (1<<4)		/**< Zero out the source identifier. */
+#define SFE_RULE_CREATE_FLAG_UNUSED0	  (1<<5)		/**< Rule flag unused 0. */
+#define SFE_RULE_CREATE_FLAG_UNUSED1	  (1<<6)		/**< Rule flag unused 1. */
 #define SFE_RULE_CREATE_FLAG_L2_ENCAP     (1<<7)		/**< Consists of an encapsulating protocol that carries an IPv4 payload within it. */
 #define SFE_RULE_CREATE_FLAG_USE_FLOW_BOTTOM_INTERFACE (1<<8)	/**< Use flow interface number instead of top interface. */
 #define SFE_RULE_CREATE_FLAG_USE_RETURN_BOTTOM_INTERFACE (1<<9) /**< Use return interface number instead of top interface. */
@@ -94,9 +94,9 @@
 #define SFE_RULE_CREATE_DIRECTION_VALID    (1<<8)	/**< Acceleration direction is valid. */
 #define SFE_RULE_CREATE_SRC_MAC_VALID      (1<<9)	/**< Source MAC address is valid. */
 #define SFE_RULE_CREATE_MARK_VALID         (1<<10)	/**< SKB marking fields are valid. */
-#define SFE_RULE_CREATE_NO_SRC_IDENT       (1<<11)	/**< Zero out the src ident. */
-#define SFE_RULE_CREATE_TRUSTSEC_VALID     (1<<12)	/**< trustsec fields are valid. */
-#define SFE_RULE_CREATE_QDISC_RULE_VALID   (1<<13)	/**< Qdisc rule is valid. */
+#define SFE_RULE_CREATE_TRUSTSEC_VALID     (1<<11)	/**< Trustsec fields are valid. */
+#define SFE_RULE_CREATE_QDISC_RULE_VALID   (1<<12)	/**< QDISC rule is valid. */
+#define SFE_RULE_CREATE_VLAN_FILTER_VALID  (1<<13)	/**< Bridge VLAN Filter rule is valid. */
 
 /*
  * Multicast rule flags
@@ -143,7 +143,6 @@
 #define SFE_MC_RULE_CREATE_IF_FLAG_NAT_VALID 0x4
 		/**< Interface is configured with the source NAT. */
 
-
 /*
  * Source MAC address validity flags; used with the mac_valid_flags field in the sfe_ipv4_src_mac_rule structure.
  */
@@ -166,6 +165,13 @@
 		/**< Qdisc interface for the flow interface is valid. */
 #define SFE_QDISC_RULE_RETURN_VALID 0x02
 		/**< Qdisc interface for the return interface is valid. */
+
+/*
+ * Bridge VLAN Filter flags; used with SFE_RULE_CREATE_VLAN_FILTER_VALID and sfe_vlan_filter_rule structure.
+ */
+#define SFE_VLAN_FILTER_FLAG_VALID 		(1<<0) 	/**< VLAN Filter is valid in the rule.  */
+#define SFE_VLAN_FILTER_FLAG_INGRESS_PVID 	(1<<1)	/**< Add VLAN header at ingress for untagged packets. */
+#define SFE_VLAN_FILTER_FLAG_EGRESS_UNTAGGED	(1<<2)	/**< Strip VLAN header associated with this VID at egress. */
 
 /**
  * @}
@@ -373,6 +379,18 @@ struct sfe_vlan_rule {
 };
 
 /**
+ * VLAN Filter connection rule structure.
+ * 	TODO: Combine flow/return information into one structure.
+ */
+struct sfe_vlan_filter_rule {
+	u32 ingress_vlan_tag;	/**< VLAN tag for ingress packets. */
+	u32 egress_vlan_tag;	/**< VLAN tag for egress packets. */
+	u8 ingress_flags;	/**< VLAN flags at ingress. */
+	u8 egress_flags;	/**< VLAN flags at egress. */
+	u8 reserved[2];		/**< Reserved; padding for alignment. */
+};
+
+/**
  * Trustsec connection rule structure.
  */
 struct sfe_trustsec_rule {
@@ -441,6 +459,10 @@ struct sfe_ipv4_rule_create_msg {
 	struct sfe_service_class_rule sawf_rule;
 							/**< Service class related information */
 	struct sfe_qdisc_rule qdisc_rule;		/**< Qdisc indication per direction */
+	struct sfe_vlan_filter_rule flow_vlan_filter_rule;
+							/**< TO-direction VLAN Filter related acceleration parameters. */
+	struct sfe_vlan_filter_rule return_vlan_filter_rule;
+							/**< FROM-direction VLAN Filter related acceleration parameters. */
 	u32 index;					/**< Slot ID for cache statistics to host OS. */
 };
 
@@ -659,6 +681,10 @@ struct sfe_ipv6_rule_create_msg {
 	 */
 	struct sfe_service_class_rule sawf_rule;	/**< Service class related information. */
 	struct sfe_qdisc_rule qdisc_rule;		/**< Qdisc indication per direction */
+	struct sfe_vlan_filter_rule flow_vlan_filter_rule;
+							/**< TO-direction VLAN Filter related acceleration parameters. */
+	struct sfe_vlan_filter_rule return_vlan_filter_rule;
+							/**< FROM-direction VLAN Filter related acceleration parameters. */
 	u32 index;					/**< Slot ID for cache statistics to host OS. */
 };
 
