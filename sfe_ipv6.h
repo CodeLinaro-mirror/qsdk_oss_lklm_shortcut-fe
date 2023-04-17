@@ -38,6 +38,11 @@ struct sfe_ipv6_ext_hdr {
 };
 
 /*
+ * Size of single sfe_dump msg buffer
+ */
+#define SFE_IPV6_DEBUG_MSG_SIZE 2048
+
+/*
  * Specifies the lower bound on ACK numbers carried in the TCP header
  */
 #define SFE_IPV6_TCP_MAX_ACK_WINDOW 65520
@@ -539,10 +544,13 @@ struct sfe_ipv6_debug_xml_write_state {
 	enum sfe_ipv6_debug_xml_states state;
 					/* XML output file state machine state */
 	int iter_exception;		/* Next exception iterator */
+	char *msg;			/* The message written / being returned to the reader */
+	char *msgp;                     /* Points into the msg buffer as we output it to the reader piece by piece */
+	int msg_len;                    /* Length of the msg buffer still to be written out */
 };
 
-typedef int (*sfe_ipv6_debug_xml_write_method_t)(struct sfe_ipv6 *si, char *buffer, char *msg, size_t length,
-						  int *total_read, struct sfe_ipv6_debug_xml_write_state *ws);
+typedef int (*sfe_ipv6_debug_xml_write_method_t)(struct sfe_ipv6 *si, struct sfe_ipv6_debug_xml_write_state *ws, char *buffer, size_t length,
+						  int *total_read);
 
 /*
  * sfe_ipv6_is_ext_hdr()

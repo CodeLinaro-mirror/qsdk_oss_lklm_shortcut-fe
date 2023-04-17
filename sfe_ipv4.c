@@ -3334,69 +3334,87 @@ static void sfe_ipv4_periodic_sync(struct work_struct *work)
 }
 
 /*
+ * sfe_ipv4_debug_dev_read_output()
+ *	Print XML Output
+ */
+static int sfe_ipv4_debug_dev_output(struct sfe_ipv4_debug_xml_write_state *ws, char *buffer,
+				      size_t length, int *total_read)
+{
+        int bytes_read;
+        int return_value = 0;
+
+        bytes_read = ws->msg_len;
+
+        /*
+         * Calculate total bytes read to the current buffer
+         */
+        if ((bytes_read + *total_read) >= length) {
+                bytes_read = length - *total_read;
+                return_value = -ENOMEM;
+        }
+
+        if (copy_to_user(buffer + *total_read, ws->msgp, bytes_read)) {
+                return -EFAULT;
+        }
+
+        ws->msg_len -= bytes_read;
+        ws->msgp += bytes_read;
+
+        *total_read += bytes_read;
+
+        return return_value;
+}
+
+/*
  * sfe_ipv4_debug_dev_read_start()
  *	Generate part of the XML output.
  */
-static int sfe_ipv4_debug_dev_read_start(struct sfe_ipv4 *si, char *buffer, char *msg, size_t length,
-		int *total_read, struct sfe_ipv4_debug_xml_write_state *ws)
+static int sfe_ipv4_debug_dev_read_start(struct sfe_ipv4 *si, struct sfe_ipv4_debug_xml_write_state *ws,
+					   char *buffer, size_t length, int *total_read)
 {
-	int bytes_read;
+	int status;
 
-	si->debug_read_seq++;
+        si->debug_read_seq++;
 
-	bytes_read = snprintf(msg, length, "<sfe_ipv4>\n");
+        ws->msg_len += snprintf(ws->msg, length, "<sfe_ipv4>\n");
+        ws->msgp = ws->msg;
 
-	if ((bytes_read + *total_read) >= length) {
-		return -ENOMEM;
-	}
+        status = sfe_ipv4_debug_dev_output(ws, buffer, length, total_read);
+        ws->state++;
 
-	if (copy_to_user(buffer + *total_read, msg, bytes_read)) {
-		return -EFAULT;
-	}
-
-	*total_read += bytes_read;
-
-	ws->state++;
-	return 0;
+        return status;
 }
 
 /*
  * sfe_ipv4_debug_dev_read_connections_start()
  *	Generate part of the XML output.
  */
-static int sfe_ipv4_debug_dev_read_connections_start(struct sfe_ipv4 *si, char *buffer, char *msg, size_t length,
-						      int *total_read, struct sfe_ipv4_debug_xml_write_state *ws)
+static int sfe_ipv4_debug_dev_read_connections_start(struct sfe_ipv4 *si, struct sfe_ipv4_debug_xml_write_state *ws,
+						      char *buffer, size_t length, int *total_read)
 {
-	int bytes_read;
+	int status;
 
-	bytes_read = snprintf(msg, length, "\t<connections>\n");
+        ws->msg_len += snprintf(ws->msg, length, "\t<connections>\n");
+        ws->msgp = ws->msg;
 
-	if ((bytes_read + *total_read) >= length) {
-		return -ENOMEM;
-	}
+        status = sfe_ipv4_debug_dev_output(ws, buffer, length, total_read);
+        ws->state++;
 
-	if (copy_to_user(buffer + *total_read, msg, bytes_read)) {
-		return -EFAULT;
-	}
-
-	*total_read += bytes_read;
-
-	ws->state++;
-	return 0;
+        return status;
 }
 
 /*
  * sfe_ipv4_debug_dev_read_connections_connection()
  *	Generate part of the XML output.
  */
-static int sfe_ipv4_debug_dev_read_connections_connection(struct sfe_ipv4 *si, char *buffer, char *msg, size_t length,
-							   int *total_read, struct sfe_ipv4_debug_xml_write_state *ws)
+static int sfe_ipv4_debug_dev_read_connections_connection(struct sfe_ipv4 *si, struct sfe_ipv4_debug_xml_write_state *ws,
+							    char *buffer, size_t length, int *total_read)
 {
 	struct sfe_ipv4_connection *c;
 	struct sfe_ipv4_connection_match *original_cm;
 	struct sfe_ipv4_connection_match *reply_cm;
-	int bytes_read = 0;
 	int protocol;
+	int status;
 	struct net_device *src_dev;
 	__be32 src_ip;
 	__be32 src_ip_xlate;
@@ -3505,7 +3523,7 @@ static int sfe_ipv4_debug_dev_read_connections_connection(struct sfe_ipv4 *si, c
 #endif
 	spin_unlock_bh(&si->lock);
 
-	bytes_read = snprintf(msg, length - bytes_read, "\t\t<connection "
+	ws->msg_len = snprintf(ws->msg, length, "\t\t<connection "
 				"protocol=\"%u\" "
 				"src_dev=\"%s\" "
 				"src_ip=\"%pI4\" src_ip_xlate=\"%pI4\" "
@@ -3545,30 +3563,19 @@ static int sfe_ipv4_debug_dev_read_connections_connection(struct sfe_ipv4 *si, c
 #endif
 				last_sync_jiffies);
 
-	if ((length - bytes_read) <= 0) {
-		return -ENOMEM;
-	}
-
 	if (original_cm_flags &= (SFE_IPV4_CONNECTION_MATCH_FLAG_PPPOE_DECAP | SFE_IPV4_CONNECTION_MATCH_FLAG_PPPOE_ENCAP)) {
-		bytes_read += snprintf(msg + bytes_read, length - bytes_read, "pppoe_session_id=\"%u\" pppoe_server MAC=\"%pM\" ",
+		ws->msg_len += snprintf(ws->msg + ws->msg_len, length - ws->msg_len, "pppoe_session_id=\"%u\" pppoe_server MAC=\"%pM\" ",
 				pppoe_session_id, pppoe_remote_mac);
 	}
 
-	if ((length - bytes_read) <= 0) {
-		return -ENOMEM;
-	}
-
 	if (original_cm_sawf_valid) {
-		bytes_read += snprintf(msg + bytes_read, length - bytes_read, "flow_service_class=\"%d\" flow_msduq = \"0x%x\" ",
+		ws->msg_len += snprintf(ws->msg + ws->msg_len, length - ws->msg_len, "flow_service_class=\"%d\" flow_msduq = \"0x%x\" ",
 				flow_service_class, flow_msduq);
 	}
 
-	if ((length - bytes_read) <= 0) {
-		return -ENOMEM;
-	}
 
 	if (reply_cm_sawf_valid) {
-		bytes_read += snprintf(msg + bytes_read, length - bytes_read, "return_service_class=\"%d\" return_msduq = \"0x%x\" ",
+		ws->msg_len += snprintf(ws->msg + ws->msg_len, length - ws->msg_len, "return_service_class=\"%d\" return_msduq = \"0x%x\" ",
 				return_service_class, return_msduq);
 	}
 
@@ -3579,12 +3586,8 @@ static int sfe_ipv4_debug_dev_read_connections_connection(struct sfe_ipv4 *si, c
 			 u32 fast_xmit = mc_xmit_dev->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_FAST_XMIT;
 			 vlan_hdr_cnt = mc_xmit_dev->egress_vlan_hdr_cnt;
 
-			 if ((length - bytes_read) <= 0) {
-				 return -ENOMEM;
-			 }
-
-			 bytes_read += snprintf(msg + bytes_read,
-					 length - bytes_read, "mc_dev=\"%s\" mc_dmac=\"%pM\" mc_smac=\"%pM\" fast_xmit=\"%s\" vlan_cnt=\"%d\"",
+			 ws->msg_len += snprintf(ws->msg + ws->msg_len,
+					 length - ws->msg_len, "mc_dev=\"%s\" mc_dmac=\"%pM\" mc_smac=\"%pM\" fast_xmit=\"%s\" vlan_cnt=\"%d\"",
 					 mc_xmit_dev->xmit_dev->name,
 					 mc_xmit_dev->xmit_dest_mac,
 					 mc_xmit_dev->xmit_src_mac,
@@ -3594,85 +3597,60 @@ static int sfe_ipv4_debug_dev_read_connections_connection(struct sfe_ipv4 *si, c
 
 	}
 
-	if ((length - bytes_read) <= 0) {
-		return -ENOMEM;
-	}
+        ws->msg_len += snprintf(ws->msg + ws->msg_len, length - ws->msg_len, "/>\n");
+        ws->msgp = ws->msg;
 
-	bytes_read += snprintf(msg + bytes_read, length - bytes_read, "/>\n");
-
-	if ((bytes_read + *total_read) >= length) {
-		return -ENOMEM;
-	}
-
-	if (copy_to_user(buffer + *total_read, msg, bytes_read)) {
-		return -EFAULT;
-	}
-
-	*total_read += bytes_read;
-
+        status = sfe_ipv4_debug_dev_output(ws, buffer, length, total_read);
 	c->debug_read_seq = si->debug_read_seq;
 
-	return 0;
+        return status;
 }
 
 /*
  * sfe_ipv4_debug_dev_read_connections_end()
  *	Generate part of the XML output.
  */
-static int sfe_ipv4_debug_dev_read_connections_end(struct sfe_ipv4 *si, char *buffer, char *msg, size_t length,
-						    int *total_read, struct sfe_ipv4_debug_xml_write_state *ws)
+static int sfe_ipv4_debug_dev_read_connections_end(struct sfe_ipv4 *si, struct sfe_ipv4_debug_xml_write_state *ws,
+						    char *buffer, size_t length, int *total_read)
 {
-	int bytes_read;
+	int status;
 
-	bytes_read = snprintf(msg, length, "\t</connections>\n");
+        ws->msg_len = snprintf(ws->msg, length, "\t</connections>\n");
+        ws->msgp = ws->msg;
 
-	if ((bytes_read + *total_read) >= length) {
-		return -ENOMEM;
-	}
-
-	if (copy_to_user(buffer + *total_read, msg, bytes_read)) {
-		return -EFAULT;
-	}
-
-	*total_read += bytes_read;
-
+        status = sfe_ipv4_debug_dev_output(ws, buffer, length, total_read);
 	ws->state++;
-	return 0;
+
+        return status;
 }
 
 /*
  * sfe_ipv4_debug_dev_read_exceptions_start()
  *	Generate part of the XML output.
  */
-static int sfe_ipv4_debug_dev_read_exceptions_start(struct sfe_ipv4 *si, char *buffer, char *msg, size_t length,
-						     int *total_read, struct sfe_ipv4_debug_xml_write_state *ws)
+static int sfe_ipv4_debug_dev_read_exceptions_start(struct sfe_ipv4 *si, struct sfe_ipv4_debug_xml_write_state *ws,
+						     char *buffer, size_t length, int *total_read)
 {
-	int bytes_read;
+	int status;
 
-	bytes_read = snprintf(msg, length, "\t<exceptions>\n");
+        ws->msg_len = snprintf(ws->msg, length, "\t<exceptions>\n");
+        ws->msgp = ws->msg;
 
-	if ((bytes_read + *total_read) >= length) {
-		return -ENOMEM;
-	}
+        status = sfe_ipv4_debug_dev_output(ws, buffer, length, total_read);
+        ws->state++;
 
-	if (copy_to_user(buffer + *total_read, msg, bytes_read)) {
-		return -EFAULT;
-	}
-
-	*total_read += bytes_read;
-
-	ws->state++;
-	return 0;
+	return status;
 }
 
 /*
  * sfe_ipv4_debug_dev_read_exceptions_exception()
  *	Generate part of the XML output.
  */
-static int sfe_ipv4_debug_dev_read_exceptions_exception(struct sfe_ipv4 *si, char *buffer, char *msg, size_t length,
-							 int *total_read, struct sfe_ipv4_debug_xml_write_state *ws)
+static int sfe_ipv4_debug_dev_read_exceptions_exception(struct sfe_ipv4 *si, struct sfe_ipv4_debug_xml_write_state *ws,
+							 char *buffer, size_t length, int *total_read)
 {
 	int i;
+	int status = 0;
 	u64 val = 0;
 
 	for_each_possible_cpu(i) {
@@ -3681,22 +3659,13 @@ static int sfe_ipv4_debug_dev_read_exceptions_exception(struct sfe_ipv4 *si, cha
 	}
 
 	if (val) {
-		int bytes_read;
-
-		bytes_read = snprintf(msg, length,
+		ws->msg_len = snprintf(ws->msg, length,
 				      "\t\t<exception name=\"%s\" count=\"%llu\" />\n",
 				      sfe_ipv4_exception_events_string[ws->iter_exception],
 				      val);
 
-		if ((bytes_read + *total_read) >= length) {
-			return -ENOMEM;
-		}
-
-		if (copy_to_user(buffer + *total_read, msg, bytes_read)) {
-			return -EFAULT;
-		}
-
-		*total_read += bytes_read;
+                ws->msgp = ws->msg;
+        	status = sfe_ipv4_debug_dev_output(ws, buffer, length, total_read);
 	}
 
 	ws->iter_exception++;
@@ -3705,44 +3674,37 @@ static int sfe_ipv4_debug_dev_read_exceptions_exception(struct sfe_ipv4 *si, cha
 		ws->state++;
 	}
 
-	return 0;
+	return status;
 }
 
 /*
  * sfe_ipv4_debug_dev_read_exceptions_end()
  *	Generate part of the XML output.
  */
-static int sfe_ipv4_debug_dev_read_exceptions_end(struct sfe_ipv4 *si, char *buffer, char *msg, size_t length,
-						   int *total_read, struct sfe_ipv4_debug_xml_write_state *ws)
+static int sfe_ipv4_debug_dev_read_exceptions_end(struct sfe_ipv4 *si, struct sfe_ipv4_debug_xml_write_state *ws,
+						   char *buffer, size_t length, int *total_read)
 {
-	int bytes_read;
+	int status;
 
-	bytes_read = snprintf(msg, length, "\t</exceptions>\n");
+        ws->msg_len = snprintf(ws->msg, length, "\t</exceptions>\n");
+        ws->msgp = ws->msg;
 
-	if ((bytes_read + *total_read) >= length) {
-		return -ENOMEM;
-	}
-
-	if (copy_to_user(buffer + *total_read, msg, bytes_read)) {
-		return -EFAULT;
-	}
-
-	*total_read += bytes_read;
-
+        status = sfe_ipv4_debug_dev_output(ws, buffer, length, total_read);
 	ws->state++;
-	return 0;
+
+	return status;
 }
 
 /*
  * sfe_ipv4_debug_dev_read_stats()
  *	Generate part of the XML output.
  */
-static int sfe_ipv4_debug_dev_read_stats(struct sfe_ipv4 *si, char *buffer, char *msg, size_t length,
-					  int *total_read, struct sfe_ipv4_debug_xml_write_state *ws)
+static int sfe_ipv4_debug_dev_read_stats(struct sfe_ipv4 *si, struct sfe_ipv4_debug_xml_write_state *ws,
+					  char *buffer, size_t length, int *total_read)
 {
-	int bytes_read;
 	struct sfe_ipv4_stats stats;
 	unsigned int num_conn;
+	int status;
 
 	sfe_ipv4_update_summary_stats(si, &stats);
 
@@ -3750,7 +3712,7 @@ static int sfe_ipv4_debug_dev_read_stats(struct sfe_ipv4 *si, char *buffer, char
 	num_conn = si->num_connections;
 	spin_unlock_bh(&si->lock);
 
-	bytes_read = snprintf(msg, length, "\t<stats "
+	ws->msg_len = snprintf(ws->msg, length, "\t<stats "
 			      "num_connections=\"%u\" "
 			      "pkts_dropped=\"%llu\" "
 			      "pkts_fast_xmited=\"%llu\" "
@@ -3786,43 +3748,30 @@ static int sfe_ipv4_debug_dev_read_stats(struct sfe_ipv4 *si, char *buffer, char
 				stats.pppoe_bridge_packets_3tuple_forwarded64,
 				stats.connection_create_requests_overflow64);
 
-	if ((bytes_read + *total_read) >= length) {
-		return -ENOMEM;
-	}
+        ws->msgp = ws->msg;
 
-	if (copy_to_user(buffer + *total_read, msg, bytes_read)) {
-		return -EFAULT;
-	}
-
-	*total_read += bytes_read;
-
+	status = sfe_ipv4_debug_dev_output(ws, buffer, length, total_read);
 	ws->state++;
-	return 0;
+
+	return status;
 }
 
 /*
  * sfe_ipv4_debug_dev_read_end()
  *	Generate part of the XML output.
  */
-static int sfe_ipv4_debug_dev_read_end(struct sfe_ipv4 *si, char *buffer, char *msg, size_t length,
-					int *total_read, struct sfe_ipv4_debug_xml_write_state *ws)
+static int sfe_ipv4_debug_dev_read_end(struct sfe_ipv4 *si, struct sfe_ipv4_debug_xml_write_state *ws,
+					 char *buffer, size_t length, int *total_read)
 {
-	int bytes_read;
+	int status;
 
-	bytes_read = snprintf(msg, length, "</sfe_ipv4>\n");
+        ws->msg_len = snprintf(ws->msg, length, "</sfe_ipv4>\n");
+        ws->msgp = ws->msg;
 
-	if ((bytes_read + *total_read) >= length) {
-		return -ENOMEM;
-	}
-
-	if (copy_to_user(buffer + *total_read, msg, bytes_read)) {
-		return -EFAULT;
-	}
-
-	*total_read += bytes_read;
-
+        status = sfe_ipv4_debug_dev_output(ws, buffer, length, total_read);
 	ws->state++;
-	return 0;
+
+	return status;
 }
 
 /*
@@ -3850,47 +3799,41 @@ static ssize_t sfe_ipv4_debug_dev_read(struct file *filp, char *buffer, size_t l
 	struct sfe_ipv4_debug_xml_write_state *ws;
 	struct sfe_ipv4 *si = &__si;
 	int total_read = 0;
-	int null_fill;
 	int status = 0;
-	char *msg;
-
-	msg = kmalloc(length, GFP_KERNEL);
-	if (!msg) {
-		return -ENOMEM;
-	}
 
 	ws = (struct sfe_ipv4_debug_xml_write_state *)filp->private_data;
-	while ((ws->state != SFE_IPV4_DEBUG_XML_STATE_DONE)) {
-		status = sfe_ipv4_debug_xml_write_methods[ws->state](si, buffer, msg, length, &total_read, ws);
-		if (!status) {
-			continue;
-		}
-
-		break;
+	if (!ws) {
+		return -EINVAL;
 	}
 
-	if (status == -ENOMEM) {
-		/*
-		 * To request more buffer when we are short of it. Indicate that we have consumed whole buffer.
-		 * Since there is some unusable space left, fill them with null string to avoid
-		 * displaying junk characters.
-		 */
-		null_fill = length - total_read;
-		memset(msg, '\0', null_fill);
-
-		if (copy_to_user(buffer + total_read, msg, null_fill)) {
-			kfree(msg);
-			return -EFAULT;
+	if (ws->msg_len) {
+		status = sfe_ipv4_debug_dev_output(ws, buffer, length, &total_read);
+	} else {
+		ws->msg = kmalloc(SFE_IPV4_DEBUG_MSG_SIZE, GFP_KERNEL);
+		if(!ws->msg) {
+			return -ENOMEM;
 		}
+	}
 
-		total_read += null_fill;
+	if (!status) {
+		while ((ws->state != SFE_IPV4_DEBUG_XML_STATE_DONE)) {
+			status = sfe_ipv4_debug_xml_write_methods[ws->state](si, ws, buffer, length, &total_read);
+			if (!status) {
+				continue;
+			}
+			break;
+		}
 	}
 
 	if (status == -EFAULT) {
 		total_read = -EFAULT;
 	}
 
-	kfree(msg);
+	if (!ws->msg_len && ws->msg){
+		kfree(ws->msg);
+		ws->msg = NULL;
+	}
+
 	return total_read;
 }
 
@@ -3923,13 +3866,18 @@ static int sfe_ipv4_debug_dev_release(struct inode *inode, struct file *file)
 	struct sfe_ipv4_debug_xml_write_state *ws;
 
 	ws = (struct sfe_ipv4_debug_xml_write_state *)file->private_data;
-	if (ws) {
-		/*
-		 * We've finished with our output so free the write state.
-		 */
-		kfree(ws);
-		file->private_data = NULL;
+	if (!ws) {
+		return -EINVAL;
 	}
+	if (ws->msg) {
+		kfree(ws->msg);
+		ws->msg = NULL;
+	}
+	/*
+	 * We've finished with our output so free the write state.
+	 */
+	kfree(ws);
+	file->private_data = NULL;
 
 	return 0;
 }

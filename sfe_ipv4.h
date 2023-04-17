@@ -26,6 +26,11 @@
 #include <linux/version.h>
 
 /*
+ * Size of single sfe_dump msg buffer
+ */
+#define SFE_IPV4_DEBUG_MSG_SIZE 2048
+
+/*
  * Specifies the lower bound on ACK numbers carried in the TCP header
  */
 #define SFE_IPV4_TCP_MAX_ACK_WINDOW 65520
@@ -516,10 +521,13 @@ struct sfe_ipv4_debug_xml_write_state {
 	enum sfe_ipv4_debug_xml_states state;
 					/* XML output file state machine state */
 	int iter_exception;		/* Next exception iterator */
+        char *msg;			/* The message written / being returned to the reader */
+        char *msgp;                     /* Points into the msg buffer as we output it to the reader piece by piece */
+        int msg_len;                    /* Length of the msg buffer still to be written out */
 };
 
-typedef int (*sfe_ipv4_debug_xml_write_method_t)(struct sfe_ipv4 *si, char *buffer, char *msg, size_t length,
-						  int *total_read, struct sfe_ipv4_debug_xml_write_state *ws);
+typedef int (*sfe_ipv4_debug_xml_write_method_t)(struct sfe_ipv4 *si, struct sfe_ipv4_debug_xml_write_state *ws, char *buffer, size_t length,
+						  int *total_read);
 
 void sfe_ipv4_fls_clear(void);
 u16 sfe_ipv4_gen_ip_csum(struct iphdr *iph);
