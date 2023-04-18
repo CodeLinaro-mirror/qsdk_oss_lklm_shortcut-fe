@@ -509,9 +509,9 @@ struct sfe_ipv4_rule_create_msg {
 							/**< Service class related information */
 	struct sfe_qdisc_rule qdisc_rule;		/**< Qdisc indication per direction */
 	struct sfe_vlan_filter_rule flow_vlan_filter_rule;
-							/**< TO-direction VLAN filter related acceleration parameters. */
+							/**< TO-direction VLAN Filter related acceleration parameters. */
 	struct sfe_vlan_filter_rule return_vlan_filter_rule;
-							/**< FROM-direction VLAN filter related acceleration parameters. */
+							/**< FROM-direction VLAN Filter related acceleration parameters. */
 	u32 index;					/**< Slot ID for cache statistics to host OS. */
 };
 
@@ -735,9 +735,9 @@ struct sfe_ipv6_rule_create_msg {
 	struct sfe_service_class_rule sawf_rule;	/**< Service class related information. */
 	struct sfe_qdisc_rule qdisc_rule;		/**< Qdisc indication per direction */
 	struct sfe_vlan_filter_rule flow_vlan_filter_rule;
-							/**< TO-direction VLAN filter related acceleration parameters. */
+							/**< TO-direction VLAN Filter related acceleration parameters. */
 	struct sfe_vlan_filter_rule return_vlan_filter_rule;
-							/**< FROM-direction VLAN filter related acceleration parameters. */
+							/**< FROM-direction VLAN Filter related acceleration parameters. */
 	u32 index;					/**< Slot ID for cache statistics to host OS. */
 };
 
@@ -754,6 +754,8 @@ struct sfe_ipv6_rule_destroy_msg {
 struct sfe_ipv6_mc_device_entry {
 	uint32_t rule_flags;		/**< Bit flag of rules indicating PPPOE session, Vlan. */
 	uint32_t valid_flags;		/**< Valid Bit flags associated with the rule of vlan/pppoe. */
+	uint32_t xlate_src_ip[4];	/**< nated source ip address. */
+	uint32_t xlate_src_ident;	/**< nated source port number. */
 
 	uint32_t egress_vlan_tag[SFE_MAX_VLAN_DEPTH]; /**< VLAN tag stack for the ingress packets. */
 	uint32_t if_mtu;                        /* Interface MTU */
