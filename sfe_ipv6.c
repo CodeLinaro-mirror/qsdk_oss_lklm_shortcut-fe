@@ -195,6 +195,65 @@ sfe_ipv6_find_connection_match_rcu(struct sfe_ipv6 *si, struct net_device *dev, 
 }
 
 /*
+ * sfe_ipv6_connection_mc_dest_compute_translations()
+ *	Compute port and address translations for a connection match entry.
+ */
+static void sfe_ipv6_connection_mc_dest_compute_translations(struct sfe_ipv6_connection_match *cm, struct sfe_ipv6_mc_dest *dest)
+{
+	u32 diff[9];
+	u32 *idx_32;
+	u16 *idx_16;
+
+	/*
+	 * Before we insert the entry look to see if this is tagged as doing address
+	 * translations.  If it is then work out the adjustment that we need to apply
+	 * to the transport checksum.
+	 */
+	if (dest->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_XLATE_SRC) {
+		u32 adj = 0;
+		u32 carry = 0;
+
+		/*
+		 * Precompute an incremental checksum adjustment so we can
+		 * edit packets in this stream very quickly.  The algorithm is from RFC1624.
+		 */
+		idx_32 = diff;
+		*(idx_32++) = cm->match_src_ip[0].addr[0];
+		*(idx_32++) = cm->match_src_ip[0].addr[1];
+		*(idx_32++) = cm->match_src_ip[0].addr[2];
+		*(idx_32++) = cm->match_src_ip[0].addr[3];
+
+		idx_16 = (u16 *)idx_32;
+		*(idx_16++) = cm->match_src_port;
+		*(idx_16++) = ~dest->xlate_src_ident;
+		idx_32 = (u32 *)idx_16;
+
+		*(idx_32++) = ~dest->xlate_src_ip[0];
+		*(idx_32++) = ~dest->xlate_src_ip[1];
+		*(idx_32++) = ~dest->xlate_src_ip[2];
+		*(idx_32++) = ~dest->xlate_src_ip[3];
+
+		/*
+		 * When we compute this fold it down to a 16-bit offset
+		 * as that way we can avoid having to do a double
+		 * folding of the twos-complement result because the
+		 * addition of 2 16-bit values cannot cause a double
+		 * wrap-around!
+		 */
+		for (idx_32 = diff; idx_32 < diff + 9; idx_32++) {
+			u32 w = *idx_32;
+			adj += carry;
+			adj += w;
+			carry = (w > adj);
+		}
+		adj += carry;
+		adj = (adj & 0xffff) + (adj >> 16);
+		adj = (adj & 0xffff) + (adj >> 16);
+		dest->xlate_src_csum_adjustment = (u16)adj;
+	}
+}
+
+/*
  * sfe_ipv6_connection_match_update_summary_stats()
  *	Update the summary stats for a connection match entry.
  */
@@ -1469,6 +1528,19 @@ struct sfe_ipv6_mc_dest *sfe_ipv6_allocate_mc_dest(struct sfe_ipv6_connection_ma
 
 	dest->xmit_dev = dest_dev;
 
+	if (if_rule->valid_flags & SFE_MC_RULE_CREATE_IF_FLAG_NAT_VALID) {
+
+		DEBUG_TRACE("%px: SRC nat was applied to:%s\n", msg, dest_dev->name);
+		dest->xlate_src_ip[0] = if_rule->xlate_src_ip[0];
+		dest->xlate_src_ip[1] = if_rule->xlate_src_ip[1];
+		dest->xlate_src_ip[2] = if_rule->xlate_src_ip[2];
+		dest->xlate_src_ip[3] = if_rule->xlate_src_ip[3];
+		dest->xlate_src_ident = if_rule->xlate_src_ident;
+		dest->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_XLATE_SRC;
+		sfe_ipv6_connection_mc_dest_compute_translations(cm, dest);
+		skb_changed = 1;
+	}
+
 	if (skb_changed) {
 		dest->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_MULTICAST_CHANGED;
 	}
@@ -1747,8 +1819,6 @@ update_done:
 
 	original_cm->xlate_src_ip[0] = *(struct sfe_ipv6_addr *)tuple->flow_ip;
 	original_cm->xlate_src_port = tuple->flow_ident;
-	original_cm->xlate_dest_ip[0] = *(struct sfe_ipv6_addr *)tuple->return_ip;
-	original_cm->xlate_dest_port =  tuple->return_ident;
 
 	original_cm->xmit_dev_mtu = if_min_mtu;
 
@@ -1867,15 +1937,15 @@ update_done:
 	 */
 	c->protocol = tuple->protocol;
 	c->src_ip[0] = *(struct sfe_ipv6_addr *)tuple->flow_ip;
-	c->src_ip_xlate[0] = *(struct sfe_ipv6_addr *)tuple->flow_ip;
+	c->src_ip_xlate[0] = *(struct sfe_ipv6_addr *)msg->conn_rule.flow_ip_xlate;
 	c->src_port = tuple->flow_ident;
-	c->src_port_xlate = tuple->flow_ident;
+	c->src_port_xlate = msg->conn_rule.flow_ident_xlate;
 	c->original_dev = src_dev;
 	c->original_match = original_cm;
 	c->dest_ip[0] = *(struct sfe_ipv6_addr *)tuple->return_ip;
-	c->dest_ip_xlate[0] = *(struct sfe_ipv6_addr *)tuple->return_ip;
+	c->dest_ip_xlate[0] = *(struct sfe_ipv6_addr *)msg->conn_rule.return_ip_xlate;
 	c->dest_port = tuple->return_ident;
-	c->dest_port_xlate = tuple->return_ident;
+	c->dest_port_xlate = msg->conn_rule.return_ident_xlate;
 	c->debug_read_seq = 0;
 	c->last_sync_jiffies = get_jiffies_64();
 	c->removed = false;
@@ -1892,9 +1962,9 @@ update_done:
 		   "  d: %s:%pxM(%pxM):%pI6(%pI6):%u(%u)\n",
 		   c, tuple->protocol,
 		   src_dev->name, msg->conn_rule.flow_mac, NULL,
-		   (void *)tuple->flow_ip, (void *)tuple->flow_ip, ntohs(tuple->flow_ident), ntohs(tuple->flow_ident),
+		   (void *)tuple->flow_ip, (void *)&msg->conn_rule.flow_ip_xlate, ntohs(tuple->flow_ident), ntohs(msg->conn_rule.flow_ident_xlate),
 		   dest_dev->name, NULL, msg->dest_mac,
-		   (void *)tuple->return_ip, (void *)tuple->return_ip, ntohs(tuple->return_ident), ntohs(tuple->return_ident));
+		   (void *)tuple->return_ip, (void *)&msg->conn_rule.return_ip_xlate, ntohs(tuple->return_ident), ntohs(msg->conn_rule.flow_ident_xlate));
 	return 0;
 }
 

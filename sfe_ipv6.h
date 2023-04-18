@@ -127,6 +127,10 @@ struct sfe_ipv6_mc_dest {
 	struct net_device *xmit_dev;		/* Transmit interface */
 	netdev_features_t features;		/* Device features */
 
+	uint32_t xlate_src_ip[4];			/* Translated flow IP address */
+	uint32_t xlate_src_ident;		/* Translated flow ident (e.g. port) */
+	uint32_t xlate_src_csum_adjustment;	/* Transport layer checksum adjustment after source translation */
+
 	uint16_t if_mac[3];			/* Interface MAC address */
 	u16 pppoe_session_id;			/* PPPOE header offset */
 	u8 pppoe_remote_mac[ETH_ALEN];		/* PPPOE header remote mac address */

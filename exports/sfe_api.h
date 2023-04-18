@@ -746,6 +746,8 @@ struct sfe_ipv6_rule_destroy_msg {
 struct sfe_ipv6_mc_device_entry {
 	uint16_t rule_flags;		/**< Bit flag of rules indicating PPPOE session, Vlan. */
 	uint16_t valid_flags;		/**< Valid Bit flags associated with the rule of vlan/pppoe. */
+	uint32_t xlate_src_ip[4];	/**< nated source ip address. */
+	uint32_t xlate_src_ident;	/**< nated source port number. */
 
 	uint32_t egress_vlan_tag[SFE_MAX_VLAN_DEPTH]; /**< VLAN tag stack for the ingress packets. */
 	uint32_t if_mtu;                        /* Interface MTU */
