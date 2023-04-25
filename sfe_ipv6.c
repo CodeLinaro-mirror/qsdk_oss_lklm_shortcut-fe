@@ -960,7 +960,12 @@ static bool sfe_ipv6_is_local_ip(struct sfe_ipv6 *si, uint8_t *addr)
 	struct in6_addr ip_addr;
 	memcpy(ip_addr.s6_addr, addr, 16);
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0))
 	dev = ipv6_dev_find(&init_net, &ip_addr, 1);
+#else
+	dev = ipv6_dev_find(&init_net, &ip_addr, NULL);
+#endif
+
 	if (dev) {
 		dev_put(dev);
 		return true;
