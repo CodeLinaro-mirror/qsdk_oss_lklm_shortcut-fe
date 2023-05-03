@@ -878,11 +878,10 @@ sfe_tx_status_t sfe_create_ipv4_mc_rule_msg(struct sfe_ctx_instance_internal *sf
 		ret = SFE_CMN_RESPONSE_ACK;
 #if defined(SFE_RFS_SUPPORTED)
 		if (sfe_is_ppe_rfs_feature_enabled()) {
-			struct ppe_rfs_ipv4_rule_create_msg pr4rc;
+			struct ppe_rfs_ipv4_rule_create_msg pr4rc = {0};
 			struct sfe_ipv4_rule_create_msg *rule_create = &msg->msg.rule_create;
 
 			pr4rc.valid_flags = rule_create->valid_flags;
-			pr4rc.rule_flags = rule_create->rule_flags;
 
 			pr4rc.tuple.flow_ip = ntohl(rule_create->tuple.flow_ip);
 			pr4rc.tuple.flow_ident = ntohs(rule_create->tuple.flow_ident);
@@ -897,6 +896,8 @@ sfe_tx_status_t sfe_create_ipv4_mc_rule_msg(struct sfe_ctx_instance_internal *sf
 			pr4rc.conn_rule.return_ident_xlate = ntohs(rule_create->conn_rule.return_ident_xlate);
 			pr4rc.conn_rule.flow_interface_num = rule_create->conn_rule.flow_interface_num;
 			pr4rc.conn_rule.return_interface_num = rule_create->conn_rule.return_interface_num;
+			pr4rc.conn_rule.flow_top_interface_num = rule_create->conn_rule.flow_top_interface_num;
+			pr4rc.conn_rule.return_top_interface_num = rule_create->conn_rule.return_top_interface_num;
 
 			if (rule_create->rule_flags & SFE_RULE_CREATE_FLAG_BRIDGE_FLOW) {
 				pr4rc.rule_flags |= PPE_RFS_V4_RULE_FLAG_BRIDGE_FLOW;
@@ -1051,11 +1052,10 @@ sfe_tx_status_t sfe_create_ipv4_rule_msg(struct sfe_ctx_instance_internal *sfe_c
 		ret = SFE_CMN_RESPONSE_ACK;
 #if defined(SFE_RFS_SUPPORTED)
 		if (sfe_is_ppe_rfs_feature_enabled()) {
-			struct ppe_rfs_ipv4_rule_create_msg pr4rc;
+			struct ppe_rfs_ipv4_rule_create_msg pr4rc = {0};
 			struct sfe_ipv4_rule_create_msg *rule_create = &msg->msg.rule_create;
 
 			pr4rc.valid_flags = rule_create->valid_flags;
-			pr4rc.rule_flags = rule_create->rule_flags;
 
 			pr4rc.tuple.flow_ip = ntohl(rule_create->tuple.flow_ip);
 			pr4rc.tuple.flow_ident = ntohs(rule_create->tuple.flow_ident);
@@ -1070,6 +1070,8 @@ sfe_tx_status_t sfe_create_ipv4_rule_msg(struct sfe_ctx_instance_internal *sfe_c
 			pr4rc.conn_rule.return_ident_xlate = ntohs(rule_create->conn_rule.return_ident_xlate);
 			pr4rc.conn_rule.flow_interface_num = rule_create->conn_rule.flow_interface_num;
 			pr4rc.conn_rule.return_interface_num = rule_create->conn_rule.return_interface_num;
+			pr4rc.conn_rule.flow_top_interface_num = rule_create->conn_rule.flow_top_interface_num;
+			pr4rc.conn_rule.return_top_interface_num = rule_create->conn_rule.return_top_interface_num;
 
 			if (rule_create->rule_flags & SFE_RULE_CREATE_FLAG_BRIDGE_FLOW) {
 				pr4rc.rule_flags |= PPE_RFS_V4_RULE_FLAG_BRIDGE_FLOW;
@@ -1465,11 +1467,10 @@ sfe_tx_status_t sfe_create_ipv6_mc_rule_msg(struct sfe_ctx_instance_internal *sf
 		ret = SFE_CMN_RESPONSE_ACK;
 #if defined(SFE_RFS_SUPPORTED)
 		if (sfe_is_ppe_rfs_feature_enabled()) {
-			struct ppe_rfs_ipv6_rule_create_msg pr6rc;
+			struct ppe_rfs_ipv6_rule_create_msg pr6rc = {0};
 			struct sfe_ipv6_rule_create_msg *rule_create = &msg->msg.rule_create;
 
 			pr6rc.valid_flags = rule_create->valid_flags;
-			pr6rc.rule_flags = rule_create->rule_flags;
 			pr6rc.tuple.flow_ip[0] = ntohl(rule_create->tuple.flow_ip[3]);
 			pr6rc.tuple.flow_ip[1] = ntohl(rule_create->tuple.flow_ip[2]);
 			pr6rc.tuple.flow_ip[2] = ntohl(rule_create->tuple.flow_ip[1]);
@@ -1485,6 +1486,8 @@ sfe_tx_status_t sfe_create_ipv6_mc_rule_msg(struct sfe_ctx_instance_internal *sf
 			pr6rc.conn_rule.return_mtu = rule_create->conn_rule.return_mtu;
 			pr6rc.conn_rule.flow_interface_num = rule_create->conn_rule.flow_interface_num;
 			pr6rc.conn_rule.return_interface_num = rule_create->conn_rule.flow_interface_num;
+			pr6rc.conn_rule.flow_top_interface_num = rule_create->conn_rule.flow_top_interface_num;
+			pr6rc.conn_rule.return_top_interface_num = rule_create->conn_rule.return_top_interface_num;
 
 			if (rule_create->rule_flags & SFE_RULE_CREATE_FLAG_BRIDGE_FLOW) {
 				pr6rc.rule_flags |= PPE_RFS_V6_RULE_FLAG_BRIDGE_FLOW;
@@ -1682,11 +1685,10 @@ sfe_tx_status_t sfe_create_ipv6_rule_msg(struct sfe_ctx_instance_internal *sfe_c
 		ret = SFE_CMN_RESPONSE_ACK;
 #if defined(SFE_RFS_SUPPORTED)
 		if (sfe_is_ppe_rfs_feature_enabled()) {
-			struct ppe_rfs_ipv6_rule_create_msg pr6rc;
+			struct ppe_rfs_ipv6_rule_create_msg pr6rc = {0};
 			struct sfe_ipv6_rule_create_msg *rule_create = &msg->msg.rule_create;
 
 			pr6rc.valid_flags = rule_create->valid_flags;
-			pr6rc.rule_flags = rule_create->rule_flags;
 			pr6rc.tuple.flow_ip[0] = ntohl(rule_create->tuple.flow_ip[3]);
 			pr6rc.tuple.flow_ip[1] = ntohl(rule_create->tuple.flow_ip[2]);
 			pr6rc.tuple.flow_ip[2] = ntohl(rule_create->tuple.flow_ip[1]);
@@ -1702,6 +1704,8 @@ sfe_tx_status_t sfe_create_ipv6_rule_msg(struct sfe_ctx_instance_internal *sfe_c
 			pr6rc.conn_rule.return_mtu = rule_create->conn_rule.return_mtu;
 			pr6rc.conn_rule.flow_interface_num = rule_create->conn_rule.flow_interface_num;
 			pr6rc.conn_rule.return_interface_num = rule_create->conn_rule.flow_interface_num;
+			pr6rc.conn_rule.flow_top_interface_num = rule_create->conn_rule.flow_top_interface_num;
+			pr6rc.conn_rule.return_top_interface_num = rule_create->conn_rule.return_top_interface_num;
 
 			if (rule_create->rule_flags & SFE_RULE_CREATE_FLAG_BRIDGE_FLOW) {
 				pr6rc.rule_flags |= PPE_RFS_V6_RULE_FLAG_BRIDGE_FLOW;
