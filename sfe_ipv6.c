@@ -1932,28 +1932,34 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 	s32 return_interface_num = msg->conn_rule.return_top_interface_num;
 	u32 flow_sawf_tag;
 	u32 return_sawf_tag;
+	bool disable_l2_flow = false;
+	bool disable_l2_return = false;
 
 	/*
-	 * When Qdisc rule is invalid i.e either there is no qdisc present or there are multiple qdisc
-	 * Add bottom interface and fast transmit flag for now.
-	 *
-	 * TODO: Remove this check once multiple qdisc check is added in SFE
+	 * Check if L2 features need to be disabled
 	 */
 	if (sfe_is_l2_feature_enabled()) {
-		if (!(msg->qdisc_rule.valid_flags & SFE_QDISC_RULE_FLOW_VALID)) {
-			msg->rule_flags |= SFE_RULE_CREATE_FLAG_USE_FLOW_BOTTOM_INTERFACE;
+		if ((msg->rule_flags & SFE_RULE_CREATE_FLAG_FLOW_L2_DISABLE)) {
+			disable_l2_flow = true;
+			DEBUG_TRACE("disable_l2_flow is set to true\n");
 		}
 
-		if (!(msg->qdisc_rule.valid_flags & SFE_QDISC_RULE_RETURN_VALID)) {
-			msg->rule_flags |= SFE_RULE_CREATE_FLAG_USE_RETURN_BOTTOM_INTERFACE;
+		if ((msg->rule_flags & SFE_RULE_CREATE_FLAG_RETURN_L2_DISABLE)) {
+			disable_l2_return = true;
+			DEBUG_TRACE("disable_l2_return is set to true\n");
 		}
 	}
 
-	if (msg->rule_flags & SFE_RULE_CREATE_FLAG_USE_FLOW_BOTTOM_INTERFACE) {
+	/*
+	 * Set the xmit interface to bottom interface if applicable.
+	 * If we are explicitly asked to disable L2 processing, then for the receive direction,
+	 * we need to store the bottom interface to use it as match_dev.
+	 */
+	if (msg->rule_flags & SFE_RULE_CREATE_FLAG_USE_FLOW_BOTTOM_INTERFACE || disable_l2_flow) {
 		flow_interface_num = msg->conn_rule.flow_interface_num;
 	}
 
-	if (msg->rule_flags & SFE_RULE_CREATE_FLAG_USE_RETURN_BOTTOM_INTERFACE) {
+	if (msg->rule_flags & SFE_RULE_CREATE_FLAG_USE_RETURN_BOTTOM_INTERFACE || disable_l2_return) {
 		return_interface_num = msg->conn_rule.return_interface_num;
 	}
 
@@ -2105,6 +2111,20 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 		original_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_FAST_QDISC_XMIT;
 		DEBUG_TRACE("%p: Fast qdisc xmit flag is set for original_cm, xmit_dev: %s, qdisc_xmit_dev: %s\n",
 				msg, original_cm->xmit_dev->name, original_cm->qdisc_xmit_dev->name);
+	} else if (disable_l2_return) {
+		/*
+		 * Set the xmit dev to the top interface, and store it in top_interface_dev,
+		 * to take the reference.
+		 * TODO: Store the top_interface in CE instead to take the reference.
+		 */
+		if (!(reply_cm->top_interface_dev)) {
+			reply_cm->top_interface_dev = dev_get_by_index(&init_net, msg->conn_rule.return_top_interface_num);
+		}
+
+		original_cm->xmit_dev = reply_cm->top_interface_dev;
+		DEBUG_TRACE("%p: Multiple qdisc found on return hierarchy, setting original_cm xmit_dev as top,\
+				original_cm->xmit_dev: %s, original_cm->match_dev: %s\n",
+				msg, original_cm->xmit_dev->name, original_cm->match_dev->name);
 	}
 
 	original_cm->xmit_dev_mtu = msg->conn_rule.return_mtu;
@@ -2171,7 +2191,7 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 					     vlan_secondary_rule->egress_vlan_tag);
 
 		if ((msg->rule_flags & SFE_RULE_CREATE_FLAG_USE_RETURN_BOTTOM_INTERFACE) &&
-			original_cm->egress_vlan_hdr_cnt > 0) {
+				original_cm->egress_vlan_hdr_cnt > 0) {
 			original_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_INSERT_EGRESS_VLAN_TAG;
 			original_cm->l2_hdr_size += original_cm->egress_vlan_hdr_cnt * VLAN_HLEN;
 		}
@@ -2443,6 +2463,20 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 		reply_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_FAST_QDISC_XMIT;
 		DEBUG_TRACE("%p: Fast qdisc xmit flag is set for original_cm, xmit_dev: %s, qdisc_xmit_dev: %s\n",
 				msg, reply_cm->xmit_dev->name, reply_cm->qdisc_xmit_dev->name);
+	} else if (disable_l2_flow) {
+		/*
+		 * Set the xmit dev to the top interface, and store it in top_interface_dev,
+		 * to take the reference.
+		 * TODO: Store the top_interface in CE instead to take the reference.
+		 */
+		if (!(original_cm->top_interface_dev)) {
+			original_cm->top_interface_dev = dev_get_by_index(&init_net, msg->conn_rule.flow_top_interface_num);
+		}
+
+		reply_cm->xmit_dev = original_cm->top_interface_dev;
+		DEBUG_TRACE("%p: Multiple qdisc found on flow hierarchy, setting xmit_dev as top,\
+				reply_cm->xmit_dev: %s, reply_cm->match_dev: %s\n",
+				msg, reply_cm->xmit_dev->name, reply_cm->match_dev->name);
 	}
 
 	reply_cm->xmit_dev_mtu = msg->conn_rule.flow_mtu;
@@ -2488,6 +2522,7 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 	if(IPPROTO_IPIP == tuple->protocol && !sfe_dev_is_ipip6(src_dev)) {
 		reply_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_PASSTHROUGH;
 	}
+
 	/*
 	 * Mark return SAWF metadata if the sawf tag is valid.
 	 */
@@ -2497,6 +2532,24 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 		reply_cm->mark = msg->sawf_rule.return_mark;
 		reply_cm->sawf_valid = true;
 		reply_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_MARK;
+	}
+
+	/*
+	 * Strip off flags if L2 processing is disabled in the rule.
+	 * SFE transmits the packet to the top interface for L2 processing
+	 */
+	if (disable_l2_flow) {
+		reply_cm->flags &= ~SFE_IPV6_CONNECTION_MATCH_FLAG_PPPOE_ENCAP;
+		reply_cm->flags &= ~SFE_IPV6_CONNECTION_MATCH_FLAG_WRITE_L2_HDR;
+		reply_cm->flags &= ~SFE_IPV6_CONNECTION_MATCH_FLAG_WRITE_FAST_ETH_HDR;
+		reply_cm->flags &= ~SFE_IPV6_CONNECTION_MATCH_FLAG_INSERT_EGRESS_VLAN_TAG;
+	}
+
+	if (disable_l2_return) {
+		original_cm->flags &= ~SFE_IPV6_CONNECTION_MATCH_FLAG_PPPOE_ENCAP;
+		original_cm->flags &= ~SFE_IPV6_CONNECTION_MATCH_FLAG_WRITE_L2_HDR;
+		original_cm->flags &= ~SFE_IPV6_CONNECTION_MATCH_FLAG_WRITE_FAST_ETH_HDR;
+		original_cm->flags &= ~SFE_IPV6_CONNECTION_MATCH_FLAG_INSERT_EGRESS_VLAN_TAG;
 	}
 
 	/*
@@ -2578,7 +2631,7 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 					     vlan_secondary_rule->ingress_vlan_tag);
 
 		if ((msg->rule_flags & SFE_RULE_CREATE_FLAG_USE_FLOW_BOTTOM_INTERFACE) &&
-			reply_cm->egress_vlan_hdr_cnt > 0) {
+				reply_cm->egress_vlan_hdr_cnt > 0) {
 			reply_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_INSERT_EGRESS_VLAN_TAG;
 			reply_cm->l2_hdr_size += reply_cm->egress_vlan_hdr_cnt * VLAN_HLEN;
 		}
