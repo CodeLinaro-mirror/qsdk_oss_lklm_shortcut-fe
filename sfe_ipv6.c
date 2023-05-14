@@ -54,6 +54,7 @@
 #include "sfe_ipv6_gre.h"
 #include "sfe_ipv6_esp.h"
 #include "sfe_ipv6_etherip.h"
+#include "sfe_ipv6_frag.h"
 
 #define sfe_ipv6_addr_copy(src, dest) memcpy((void *)(dest), (void *)(src), 16)
 
@@ -124,7 +125,9 @@ static char *sfe_ipv6_exception_events_string[SFE_IPV6_EXCEPTION_EVENT_LAST] = {
 	"ETHERIP_NO_CONNECTION",
 	"ETHERIP_IP_OPTIONS_OR_INITIAL_FRAGMENT",
 	"ETHERIP_NEEDS_FRAGMENTATION",
-	"ETHERIP_SMALL_TTL"
+	"ETHERIP_SMALL_TTL",
+	"DUMMY_FRAGMENT",
+	"FRAG_ENTRY_GET_FAILED"
 };
 
 static struct sfe_ipv6 __si6;
@@ -412,6 +415,14 @@ static void sfe_ipv6_update_summary_stats(struct sfe_ipv6 *si, struct sfe_ipv6_s
 		stats->pppoe_bridge_packets_forwarded64 += s->pppoe_bridge_packets_forwarded64;
 		stats->pppoe_bridge_packets_3tuple_forwarded64 += s->pppoe_bridge_packets_3tuple_forwarded64;
 		stats->connection_create_requests_overflow64 += s->connection_create_requests_overflow64;
+		stats->fragment_id_lookup_fail64 += s->fragment_id_lookup_fail64;
+		stats->fragment_id_entity_alloc_fail64 += s->fragment_id_entity_alloc_fail64;
+		stats->fragment_id_evict64 += s->fragment_id_evict64;
+		stats->fragment_id_hash_hits64 += s->fragment_id_hash_hits64;
+		stats->fragment_forwarded64 += s->fragment_forwarded64;
+		stats->fragment_dropped64 += s->fragment_dropped64;
+		stats->fragment_id_timeout64 += s->fragment_id_timeout64;
+		stats->fragment_exception64 += s->fragment_exception64;
 	}
 }
 
@@ -1049,7 +1060,9 @@ int sfe_ipv6_recv(struct net_device *dev, struct sk_buff *skb, struct sfe_l2_inf
 	unsigned int payload_len;
 	unsigned int ihl = sizeof(struct ipv6hdr);
 	bool sync_on_find = false;
+	bool is_frag = false;
 	struct ipv6hdr *iph;
+	struct frag_hdr *fhdr = NULL;
 	u8 next_hdr;
 
 	/*
@@ -1092,6 +1105,22 @@ int sfe_ipv6_recv(struct net_device *dev, struct sk_buff *skb, struct sfe_l2_inf
 
 		ext_hdr = (struct sfe_ipv6_ext_hdr *)(skb->data + ihl);
 
+		/*
+		 * Any packets have extend hdr other than the fragment header,
+		 * won't be handled in the fast path,
+		 * sync its status and exception to the kernel.
+		 */
+		if (next_hdr == NEXTHDR_FRAGMENT) {
+			fhdr = (struct frag_hdr *)(void *)ext_hdr;
+			if (!is_frag) {
+				is_frag = true;
+			} else {
+				sync_on_find = true;
+			}
+		} else {
+			sync_on_find = true;
+		}
+
 		ext_hdr_len = ext_hdr->hdr_len;
 		ext_hdr_len <<= 3;
 		ext_hdr_len += sizeof(struct sfe_ipv6_ext_hdr);
@@ -1102,11 +1131,7 @@ int sfe_ipv6_recv(struct net_device *dev, struct sk_buff *skb, struct sfe_l2_inf
 			DEBUG_TRACE("extension header %d not completed\n", next_hdr);
 			return 0;
 		}
-		/*
-		 * Any packets have extend hdr, won't be handled in the fast
-		 * path,sync its status and exception to the kernel.
-		 */
-		sync_on_find = true;
+
 		next_hdr = ext_hdr->next_hdr;
 	}
 
@@ -1122,15 +1147,15 @@ int sfe_ipv6_recv(struct net_device *dev, struct sk_buff *skb, struct sfe_l2_inf
 	}
 
 	if (IPPROTO_UDP == next_hdr) {
-		return sfe_ipv6_recv_udp(si, skb, dev, len, iph, ihl, sync_on_find, l2_info, tun_outer);
+		return sfe_ipv6_recv_udp(si, skb, dev, len, iph, ihl, sync_on_find, l2_info, tun_outer, is_frag, fhdr);
 	}
 
 	if (IPPROTO_TCP == next_hdr) {
-		return sfe_ipv6_recv_tcp(si, skb, dev, len, iph, ihl, sync_on_find, l2_info);
+		return sfe_ipv6_recv_tcp(si, skb, dev, len, iph, ihl, (sync_on_find || is_frag), l2_info);
 	}
 
 	if (IPPROTO_ESP == next_hdr) {
-		return sfe_ipv6_recv_esp(si, skb, dev, len, iph, ihl, sync_on_find, l2_info, tun_outer);
+		return sfe_ipv6_recv_esp(si, skb, dev, len, iph, ihl, (sync_on_find || is_frag), l2_info, tun_outer);
 	}
 
 	if (IPPROTO_ETHERIP == next_hdr) {
@@ -1142,12 +1167,12 @@ int sfe_ipv6_recv(struct net_device *dev, struct sk_buff *skb, struct sfe_l2_inf
 	}
 
 	if (IPPROTO_IPIP == next_hdr) {
-		return sfe_ipv6_recv_tunipip6(si, skb, dev, len, iph, ihl, sync_on_find, l2_info, true);
+		return sfe_ipv6_recv_tunipip6(si, skb, dev, len, iph, ihl, (sync_on_find || is_frag), l2_info, true);
 	}
 
 #ifdef SFE_GRE_TUN_ENABLE
 	if (IPPROTO_GRE == next_hdr) {
-		return sfe_ipv6_recv_gre(si, skb, dev, len, iph, ihl, sync_on_find, l2_info, tun_outer);
+		return sfe_ipv6_recv_gre(si, skb, dev, len, iph, ihl, (sync_on_find || is_frag), l2_info, tun_outer);
 	}
 #endif
 
@@ -3750,7 +3775,15 @@ static int sfe_ipv6_debug_dev_read_stats(struct sfe_ipv6 *si, char *buffer, char
 			      "pppoe_decap_pkts_fwded=\"%llu\" "
 			      "pppoe_bridge_pkts_fwded=\"%llu\" "
 			      "pppoe_bridge_pkts_3tuple_fwded=\"%llu\" "
-			      "connection_create_requests_overflow64=\"%llu\" />\n",
+			      "connection_create_requests_overflow64=\"%llu\" "
+			      "fragment_id_lookup_fail=\"%llu\" "
+			      "fragment_id_entity_alloc_fail=\"%llu\" "
+			      "fragment_id_evict=\"%llu\" "
+			      "fragment_id_hash_hits=\"%llu\" "
+			      "fragments_forwarded=\"%llu\" "
+			      "fragments_dropped=\"%llu\" "
+			      "fragment_id_timeout=\"%llu\" "
+			      "fragments_exception=\"%llu\" />\n",
 				num_conn,
 				stats.packets_dropped64,
 				stats.packets_fast_xmited64,
@@ -3769,7 +3802,15 @@ static int sfe_ipv6_debug_dev_read_stats(struct sfe_ipv6 *si, char *buffer, char
 				stats.pppoe_decap_packets_forwarded64,
 				stats.pppoe_bridge_packets_forwarded64,
 				stats.pppoe_bridge_packets_3tuple_forwarded64,
-				stats.connection_create_requests_overflow64);
+				stats.connection_create_requests_overflow64,
+				stats.fragment_id_lookup_fail64,
+				stats.fragment_id_entity_alloc_fail64,
+				stats.fragment_id_evict64,
+				stats.fragment_id_hash_hits64,
+				stats.fragment_forwarded64,
+				stats.fragment_dropped64,
+				stats.fragment_id_timeout64,
+				stats.fragment_exception64);
 
 	if ((bytes_read + *total_read) >= length) {
 		return -ENOMEM;
@@ -3999,6 +4040,105 @@ static const struct device_attribute sfe_ipv6_flow_cookie_attr =
 #endif /*CONFIG_NF_FLOW_COOKIE*/
 
 /*
+ * sfe_ipv6_get_frag_id_total_high_tresh()
+ */
+static ssize_t sfe_ipv6_get_frag_id_total_high_tresh(struct device *dev,
+					struct device_attribute *attr,
+					char *buf)
+{
+	struct sfe_ipv6 *si = &__si6;
+	return snprintf(buf, (ssize_t)PAGE_SIZE, "%u\n", si->sif->high_tresh);
+}
+
+/*
+ * sfe_ipv6_set_frag_id_total_high_tresh()
+ */
+static ssize_t sfe_ipv6_set_frag_id_total_high_tresh(struct device *dev,
+					struct device_attribute *attr,
+					const char *buf, size_t size)
+{
+	struct sfe_ipv6 *si = &__si6;
+	int ret = kstrtou16(buf, 0, &si->sif->high_tresh);
+	if (ret) {
+		DEBUG_ERROR("Failed to update frag_id total high tresh %d\n", ret);
+	}
+
+	return size;
+}
+
+/*
+ * sysfs attributes.
+ */
+static const struct device_attribute sfe_ipv6_frag_id_total_high_tresh_attr =
+	__ATTR(frag_id_total_high_tresh, S_IWUSR | S_IRUGO, sfe_ipv6_get_frag_id_total_high_tresh, sfe_ipv6_set_frag_id_total_high_tresh);
+
+/*
+ * sfe_ipv6_get_frag_id_queue_len_max()
+ */
+static ssize_t sfe_ipv6_get_frag_id_queue_len_max(struct device *dev,
+					struct device_attribute *attr,
+					char *buf)
+{
+	struct sfe_ipv6 *si = &__si6;
+	return snprintf(buf, (ssize_t)PAGE_SIZE, "%u\n", si->sif->qlen_max);
+}
+
+/*
+ * sfe_ipv6_set_frag_forward()
+ */
+static ssize_t sfe_ipv6_set_frag_id_queue_len_max(struct device *dev,
+					struct device_attribute *attr,
+					const char *buf, size_t size)
+{
+	struct sfe_ipv6 *si = &__si6;
+	int ret = kstrtou8(buf, 0, &si->sif->qlen_max);
+	if (ret) {
+		DEBUG_ERROR("Failed to update queue len max %d\n", ret);
+	}
+
+	return size;
+}
+
+/*
+ * sysfs attributes.
+ */
+static const struct device_attribute sfe_ipv6_frag_id_queue_len_max_attr =
+	__ATTR(frag_id_queue_len_max, S_IWUSR | S_IRUGO, sfe_ipv6_get_frag_id_queue_len_max, sfe_ipv6_set_frag_id_queue_len_max);
+
+/*
+ * sfe_ipv6_get_frag_forward()
+ */
+static ssize_t sfe_ipv6_get_frag_forward(struct device *dev,
+					struct device_attribute *attr,
+					char *buf)
+{
+	struct sfe_ipv6 *si = &__si6;
+	return snprintf(buf, (ssize_t)PAGE_SIZE, "%u\n", si->fragment_forwarding_enable);
+}
+
+/*
+ * sfe_ipv6_set_frag_forward()
+ */
+static ssize_t sfe_ipv6_set_frag_forward(struct device *dev,
+					struct device_attribute *attr,
+					const char *buf, size_t size)
+{
+	struct sfe_ipv6 *si = &__si6;
+	int ret = kstrtouint(buf, 0, &si->fragment_forwarding_enable);
+	if (ret) {
+		DEBUG_ERROR("Failed to enable fragment forwarding %d\n", ret);
+	}
+
+	return size;
+}
+
+/*
+ * sysfs attributes.
+ */
+static const struct device_attribute sfe_ipv6_frag_forward_attr =
+	__ATTR(fragment_forwarding_enable, S_IWUSR | S_IRUGO, sfe_ipv6_get_frag_forward, sfe_ipv6_set_frag_forward);
+
+/*
  * sfe_ipv6_get_cpu()
  */
 static ssize_t sfe_ipv6_get_cpu(struct device *dev,
@@ -4028,13 +4168,14 @@ static ssize_t sfe_ipv6_set_cpu(struct device *dev,
 
 	return size;
 }
+
 /*
  * sysfs attributes.
  */
 static const struct device_attribute sfe_ipv6_cpu_attr =
 	__ATTR(stat_work_cpu, S_IWUSR | S_IRUGO, sfe_ipv6_get_cpu, sfe_ipv6_set_cpu);
 
- /*
+/*
  * sfe_ipv6_hash_init()
  *	Initialize conn match hash lists
  */
@@ -4147,11 +4288,35 @@ int sfe_ipv6_init(void)
 		goto exit4;
 	}
 
+	si->sif = sfe_ipv6_frag_alloc(si);
+	if (!si->sif) {
+		DEBUG_ERROR("Failed to allocate memory for fragment handling structure\n");
+		goto exit5;
+	}
+
+	sfe_ipv6_frag_init(si->sif, si);
+	result = sysfs_create_file(si->sys_ipv6, &sfe_ipv6_frag_forward_attr.attr);
+	if (result) {
+		DEBUG_ERROR("failed to register debug dev file: %d\n", result);
+		goto exit6;
+	}
+
+	result = sysfs_create_file(si->sys_ipv6, &sfe_ipv6_frag_id_total_high_tresh_attr.attr);
+	if (result) {
+		DEBUG_ERROR("failed to register debug dev file: %d\n", result);
+		goto exit7;
+	}
+
+	result = sysfs_create_file(si->sys_ipv6, &sfe_ipv6_frag_id_queue_len_max_attr.attr);
+	if (result) {
+		DEBUG_ERROR("failed to register debug dev file: %d\n", result);
+		goto exit8;
+	}
 #ifdef CONFIG_NF_FLOW_COOKIE
 	result = sysfs_create_file(si->sys_ipv6, &sfe_ipv6_flow_cookie_attr.attr);
 	if (result) {
 		DEBUG_ERROR("failed to register flow cookie enable file: %d\n", result);
-		goto exit5;
+		goto exit9;
 	}
 #endif /* CONFIG_NF_FLOW_COOKIE */
 
@@ -4163,7 +4328,7 @@ int sfe_ipv6_init(void)
 #endif
 	if (result < 0) {
 		DEBUG_ERROR("can't register nf local out hook: %d\n", result);
-		goto exit6;
+		goto exit10;
 	}
 	DEBUG_INFO("Register nf local out hook success: %d\n", result);
 #endif
@@ -4174,7 +4339,7 @@ int sfe_ipv6_init(void)
 	result = register_chrdev(0, "sfe_ipv6", &sfe_ipv6_debug_dev_fops);
 	if (result < 0) {
 		DEBUG_ERROR("Failed to register chrdev: %d\n", result);
-		goto exit7;
+		goto exit11;
 	}
 
 	si->debug_dev = result;
@@ -4187,7 +4352,7 @@ int sfe_ipv6_init(void)
 
 	sfe_ipv6_sync_many_msg = kzalloc(PAGE_SIZE, GFP_KERNEL);
 	if(!sfe_ipv6_sync_many_msg) {
-		goto exit8;
+		goto exit12;
 	}
 
 	sfe_ipv6_msg_init(sfe_ipv6_sync_many_msg, SFE_SPECIAL_INTERFACE_IPV6,
@@ -4200,10 +4365,10 @@ int sfe_ipv6_init(void)
 	spin_lock_init(&si->lock);
 	return 0;
 
-exit8:
+exit12:
 	unregister_chrdev(si->debug_dev, "sfe_ipv6");
 
-exit7:
+exit11:
 #ifdef SFE_PROCESS_LOCAL_OUT
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 13, 0))
 	DEBUG_TRACE("sfe: Unregister local out hook\n");
@@ -4212,13 +4377,21 @@ exit7:
 	DEBUG_TRACE("sfe: Unregister local out hook\n");
 	nf_unregister_net_hooks(&init_net, sfe_ipv6_ops_local_out, ARRAY_SIZE(sfe_ipv6_ops_local_out));
 #endif
-exit6:
+exit10:
 #endif
 #ifdef CONFIG_NF_FLOW_COOKIE
 	sysfs_remove_file(si->sys_ipv6, &sfe_ipv6_flow_cookie_attr.attr);
 
-exit5:
+exit9:
 #endif /* CONFIG_NF_FLOW_COOKIE */
+	sysfs_remove_file(si->sys_ipv6, &sfe_ipv6_frag_id_queue_len_max_attr.attr);
+exit8:
+	sysfs_remove_file(si->sys_ipv6, &sfe_ipv6_frag_id_total_high_tresh_attr.attr);
+exit7:
+	sysfs_remove_file(si->sys_ipv6, &sfe_ipv6_frag_forward_attr.attr);
+exit6:
+	sfe_ipv6_frag_free(si->sif);
+exit5:
 	sysfs_remove_file(si->sys_ipv6, &sfe_ipv6_cpu_attr.attr);
 
 exit4:
@@ -4253,6 +4426,11 @@ void sfe_ipv6_exit(void)
 
 	cancel_delayed_work_sync(&si->sync_dwork);
 
+	/*
+	 * Clean up fragment handler.
+	 */
+	sfe_ipv6_frag_exit(si->sif);
+	sfe_ipv6_frag_free(si->sif);
 	unregister_chrdev(si->debug_dev, "sfe_ipv6");
 
 	free_percpu(si->stats_pcpu);
@@ -4271,6 +4449,12 @@ void sfe_ipv6_exit(void)
 #ifdef CONFIG_NF_FLOW_COOKIE
 	sysfs_remove_file(si->sys_ipv6, &sfe_ipv6_flow_cookie_attr.attr);
 #endif /* CONFIG_NF_FLOW_COOKIE */
+
+	sysfs_remove_file(si->sys_ipv6, &sfe_ipv6_frag_forward_attr.attr);
+
+	sysfs_remove_file(si->sys_ipv6, &sfe_ipv6_frag_id_total_high_tresh_attr.attr);
+
+	sysfs_remove_file(si->sys_ipv6, &sfe_ipv6_frag_id_queue_len_max_attr.attr);
 
 	sysfs_remove_file(si->sys_ipv6, &sfe_ipv6_cpu_attr.attr);
 

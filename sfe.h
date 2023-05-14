@@ -391,6 +391,8 @@ static inline bool sfe_dev_is_bridge(struct net_device *dev)
 	return false;
 }
 
+void sfe_recv_undo_parse_l2(struct net_device *dev, struct sk_buff *skb, struct sfe_l2_info *l2_info);
+
 int sfe_init_if(void);
 void sfe_exit_if(void);
 

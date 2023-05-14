@@ -763,7 +763,7 @@ static bool sfe_recv_parse_l2(struct net_device *dev, struct sk_buff *skb, struc
 /*
  * sfe_recv_undo_parse_l2()
  */
-static void sfe_recv_undo_parse_l2(struct net_device *dev, struct sk_buff *skb, struct sfe_l2_info *l2_info)
+void sfe_recv_undo_parse_l2(struct net_device *dev, struct sk_buff *skb, struct sfe_l2_info *l2_info)
 {
 	/*
 	 * PPPoE undo
