@@ -26,6 +26,8 @@
 
 #define	SFE_IPV6_FRAG_OFFSET	0xfff8
 
+struct sfe_ipv6_frag;
+
 /*
  * generic IPv6 extension header
  */
@@ -394,6 +396,8 @@ enum sfe_ipv6_exception_events {
 	SFE_IPV6_EXCEPTION_EVENT_ETHERIP_IP_OPTIONS_OR_INITIAL_FRAGMENT,
 	SFE_IPV6_EXCEPTION_EVENT_ETHERIP_NEEDS_FRAGMENTATION,
 	SFE_IPV6_EXCEPTION_EVENT_ETHERIP_SMALL_TTL,
+	SFE_IPV6_EXCEPTION_EVENT_DUMMY_FRAGMENT,
+	SFE_IPV6_EXCEPTION_EVENT_FAILED_TO_GET_FRAG_ID_ENTITY,
 	SFE_IPV6_EXCEPTION_EVENT_LAST
 };
 
@@ -432,6 +436,14 @@ struct sfe_ipv6_stats {
 	u64 pppoe_bridge_packets_forwarded64;	/* Number of IPv6 PPPoE decap packets forwarded */
 	u64 pppoe_bridge_packets_3tuple_forwarded64;    /* Number of IPv6 PPPoE bridge packets forwarded based on 3-tuple info */
 	u64 connection_create_requests_overflow64;	/* Number of IPv6 connection create requests after reaching max limit */
+	u64 fragment_id_lookup_fail64;	/*Number of fragment id lookup failures. */
+	u64 fragment_id_entity_alloc_fail64;	/* Number of fragment id entitiy allocation failures. */
+	u64 fragment_id_evict64;		/* Number of fragment id evictions. */
+	u64 fragment_id_hash_hits64;	/*Number of fragment id hash hits. */
+	u64 fragment_forwarded64;	/*Number of fragments forwarded. */
+	u64 fragment_dropped64;		/*Number of fragments dropped. */
+	u64 fragment_id_timeout64;	/*Number of fragment id timeouts. */
+	u64 fragment_exception64;	/*Number of fragment exception to host. */
 };
 
 /*
@@ -468,7 +480,8 @@ struct sfe_ipv6 {
 	unsigned int num_connections;	/* Number of connections */
 	struct delayed_work sync_dwork;	/* Work to sync the statistics */
 	unsigned int work_cpu;		/* The core to run stats sync on */
-
+	unsigned int fragment_forwarding_enable;
+					/* Flag to enable disable fragment forwarding */
 	sfe_sync_rule_callback_t __rcu sync_rule_callback;
 					/* Callback function registered by a connection manager for stats syncing */
 	sfe_ipv6_many_sync_callback_t __rcu many_sync_callback;
@@ -476,6 +489,7 @@ struct sfe_ipv6 {
 	struct sfe_ipv6_connection *conn_hash[SFE_IPV6_CONNECTION_HASH_SIZE];
 					/* Connection hash table */
 	struct hlist_head hlist_conn_match_hash_head[SFE_IPV6_CONNECTION_HASH_SIZE];
+					/* Connection match hash table */
 #ifdef CONFIG_NF_FLOW_COOKIE
 	struct sfe_ipv6_flow_cookie_entry sfe_flow_cookie_table[SFE_FLOW_COOKIE_SIZE];
 					/* flow cookie table*/
@@ -492,7 +506,8 @@ struct sfe_ipv6 {
 
 	struct sfe_ipv6_connection *wc_next;
 					/* The next walk point in the all connection list*/
-
+	struct sfe_ipv6_frag *sif;
+					/* Object to handle IPv6 fragments. */
 	/*
 	 * Control state.
 	 */

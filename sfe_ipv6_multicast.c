@@ -41,7 +41,7 @@
  *	Send the packet to an interface.
  */
 int sfe_ipv6_forward_multicast(struct sfe_ipv6 *si, struct sk_buff *skb, unsigned int len, struct ipv6hdr *iph,
-		struct udphdr *udph, struct sfe_ipv6_mc_dest *mc_xmit_dev, struct sfe_l2_info *l2_info, bool tun_outer)
+		struct udphdr *udph, struct sfe_ipv6_mc_dest *mc_xmit_dev, struct sfe_l2_info *l2_info, bool tun_outer, bool udph_valid)
 
 {
 	struct net_device *xmit_dev;
@@ -77,21 +77,23 @@ int sfe_ipv6_forward_multicast(struct sfe_ipv6 *si, struct sk_buff *skb, unsigne
 		iph->saddr.s6_addr32[1] = mc_xmit_dev->xlate_src_ip[1];
 		iph->saddr.s6_addr32[2] = mc_xmit_dev->xlate_src_ip[2];
 		iph->saddr.s6_addr32[3] = mc_xmit_dev->xlate_src_ip[3];
-		udph->source = mc_xmit_dev->xlate_src_ident;
+		if (likely(udph_valid)) {
+			udph->source = mc_xmit_dev->xlate_src_ident;
 
-		DEBUG_TRACE("%px: SRC XLAT :%pI6 ident:%u\n", skb, (void *)&mc_xmit_dev->xlate_src_ip,	mc_xmit_dev->xlate_src_ident);
+			DEBUG_TRACE("%px: SRC XLAT :%pI6 ident:%u\n", skb, (void *)&mc_xmit_dev->xlate_src_ip,	mc_xmit_dev->xlate_src_ident);
 
-		/*
-		 * Do we have a non-zero UDP checksum?  If we do then we need
-		 * to update it.
-		 */
-		if (unlikely(!hw_csum)) {
-			udp_csum = udph->check;
-			if (likely(udp_csum)) {
-				u32 sum = udp_csum + mc_xmit_dev->xlate_src_csum_adjustment;
-				sum = (sum & 0xffff) + (sum >> 16);
-				sum = (sum & 0xffff) + (sum >> 16);
-				udph->check = (u16)sum;
+			/*
+			 * Do we have a non-zero UDP checksum?  If we do then we need
+			 * to update it.
+			 */
+			if (unlikely(!hw_csum)) {
+				udp_csum = udph->check;
+				if (likely(udp_csum)) {
+					u32 sum = udp_csum + mc_xmit_dev->xlate_src_csum_adjustment;
+					sum = (sum & 0xffff) + (sum >> 16);
+					sum = (sum & 0xffff) + (sum >> 16);
+					udph->check = (u16)sum;
+				}
 			}
 		}
 	}
@@ -194,12 +196,12 @@ int sfe_ipv6_forward_multicast(struct sfe_ipv6 *si, struct sk_buff *skb, unsigne
  */
 int sfe_ipv6_recv_multicast(struct sfe_ipv6 *si, struct sk_buff *skb,
 		unsigned int ihl, unsigned int len, struct sfe_ipv6_connection_match *cm,
-		struct sfe_l2_info *l2_info, bool tun_outer)
+		struct sfe_l2_info *l2_info, bool tun_outer, bool udph_valid)
 
 {
 	u32 service_class_id;
 	struct ipv6hdr *iph;
-	struct udphdr *udph;
+	struct udphdr *udph = NULL;
 	struct sfe_ipv6_mc_dest *mc_xmit_dev;
 
 	/*
@@ -281,11 +283,14 @@ int sfe_ipv6_recv_multicast(struct sfe_ipv6 *si, struct sk_buff *skb,
 
 		}
 		iph = (struct ipv6hdr *)nskb->data;
-		udph = (struct udphdr *)(nskb->data + ihl);
+		if (udph_valid) {
+			udph = (struct udphdr *)(nskb->data + ihl);
+		}
+
 		/*
 		 * Always return 1
 		 */
-		sfe_ipv6_forward_multicast(si, nskb, len, iph, udph, mc_xmit_dev, l2_info,tun_outer);
+		sfe_ipv6_forward_multicast(si, nskb, len, iph, udph, mc_xmit_dev, l2_info, tun_outer, udph_valid);
 	}
 
 	return 1;

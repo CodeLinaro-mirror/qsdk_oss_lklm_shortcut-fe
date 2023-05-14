@@ -33,6 +33,7 @@
 #include "sfe_vlan.h"
 #include "sfe_trustsec.h"
 #include "sfe_ipv6_multicast.h"
+#include "sfe_ipv6_frag.h"
 
 /*
  * sfe_ipv6_udp_sk_deliver()
@@ -127,7 +128,7 @@ static int sfe_ipv6_udp_sk_deliver(struct sk_buff *skb, struct sfe_ipv6_connecti
  *	Handle UDP packet receives and forwarding.
  */
 int sfe_ipv6_recv_udp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_device *dev,
-			     unsigned int len, struct ipv6hdr *iph, unsigned int ihl, bool sync_on_find, struct sfe_l2_info *l2_info, bool tun_outer)
+			     unsigned int len, struct ipv6hdr *iph, unsigned int ihl, bool sync_on_find, struct sfe_l2_info *l2_info, bool tun_outer, bool is_frag, struct frag_hdr * fhdr)
 {
 	struct udphdr *udph;
 	struct sfe_ipv6_addr *src_ip;
@@ -146,6 +147,13 @@ int sfe_ipv6_recv_udp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 	sfe_fls_conn_stats_update_t update_cb;
 
 	DEBUG_TRACE("%px: sfe: sfe_ipv6_recv_udp called.\n", skb);
+
+	/*
+	 * If fragment handling is enabled, forward the fragments.
+	 */
+	if (si->fragment_forwarding_enable && is_frag) {
+		return sfe_ipv6_recv_udp_frag(si, skb, dev, len, iph, ihl, sync_on_find, l2_info, tun_outer, fhdr);
+	}
 
 	/*
 	 * Is our packet too short to contain a valid UDP header?
@@ -251,7 +259,7 @@ int sfe_ipv6_recv_udp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 	 * forward it in the fast path, but now that we've found an associated
 	 * connection we need sync its status before exception it to slow path.
 	 */
-	if (unlikely(sync_on_find)) {
+	if (unlikely(sync_on_find || is_frag)) {
 		sfe_ipv6_sync_status(si, cm->connection, SFE_SYNC_REASON_STATS);
 		rcu_read_unlock();
 
@@ -391,7 +399,7 @@ int sfe_ipv6_recv_udp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 	 * divert.
 	 */
 	if (unlikely(cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_MULTICAST)) {
-		sfe_ipv6_recv_multicast(si, skb, ihl, len, cm, l2_info, tun_outer);
+		sfe_ipv6_recv_multicast(si, skb, ihl, len, cm, l2_info, tun_outer, true);
 		rcu_read_unlock();
 		return 1;
 	}
