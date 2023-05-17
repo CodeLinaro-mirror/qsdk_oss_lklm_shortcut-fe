@@ -118,6 +118,8 @@ struct sfe_ipv6_vlan_filter_connection_match {
 	                                /* Set to send connection to Host */
 #define SFE_IPV6_CONNECTION_MATCH_FLAG_BRIDGE_VLAN_PASSTHROUGH (1<<25)
 					/* Bridge Vlan passthrough enable */
+#define SFE_IPV6_CONNECTION_MATCH_FLAG_FLS_DISABLED (1<<26)
+					/* Don't send packets to FLS */
 
 /*
  * IPv6 multicast destination structure

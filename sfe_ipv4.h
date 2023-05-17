@@ -106,6 +106,8 @@ struct sfe_ipv4_vlan_filter_connection_match {
 					/* Packet Host Type Set */
 #define SFE_IPV4_CONNECTION_MATCH_FLAG_BRIDGE_VLAN_PASSTHROUGH (1<<25)
 					/* Bridge Vlan passthrough enable */
+#define SFE_IPV4_CONNECTION_MATCH_FLAG_FLS_DISABLED (1<<26)
+					/* Don't send packets to FLS */
 
 /*
  * IPv4 multicast destination structure
