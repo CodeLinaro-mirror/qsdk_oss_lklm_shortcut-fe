@@ -241,9 +241,11 @@ int sfe_ipv6_recv_udp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 		return 0;
 	}
 
-	update_cb = rcu_dereference(sfe_fls_info.stats_update_cb);
-	if (cm->fls_conn && update_cb) {
-		update_cb(cm->fls_conn, skb);
+	if (unlikely(cm->fls_conn && !(cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_FLS_DISABLED))){
+		update_cb = rcu_dereference(sfe_fls_info.stats_update_cb);
+		if (likely(update_cb && !update_cb(cm->fls_conn, skb))) {
+			cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_FLS_DISABLED;
+		}
 	}
 
 	/*

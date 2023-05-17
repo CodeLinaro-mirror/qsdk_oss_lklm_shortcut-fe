@@ -2983,6 +2983,9 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 				&orig_conn,
 				&reply_conn);
 
+		/*
+		 * TODO: Set FLS_DISABLED flag by default and unset when fls_conn is set.
+		 */
 		if (orig_conn && reply_conn) {
 			original_cm->fls_conn = orig_conn;
 			reply_cm->fls_conn = reply_conn;
