@@ -53,6 +53,7 @@
 #include "sfe_ipv6_tunipip6.h"
 #include "sfe_ipv6_gre.h"
 #include "sfe_ipv6_esp.h"
+#include "sfe_ipv6_etherip.h"
 
 #define sfe_ipv6_addr_copy(src, dest) memcpy((void *)(dest), (void *)(src), 16)
 
@@ -119,7 +120,11 @@ static char *sfe_ipv6_exception_events_string[SFE_IPV6_EXCEPTION_EVENT_LAST] = {
 	"ESP_SMALL_TTL",
 	"INGRESS_TRUSTSEC_SGT_MISMATCH",
 	"GSO_NOT_SUPPORTED",
-	"TSO_SEG_MAX_NOT_SUPPORTED"
+	"TSO_SEG_MAX_NOT_SUPPORTED",
+	"ETHERIP_NO_CONNECTION",
+	"ETHERIP_IP_OPTIONS_OR_INITIAL_FRAGMENT",
+	"ETHERIP_NEEDS_FRAGMENTATION",
+	"ETHERIP_SMALL_TTL"
 };
 
 static struct sfe_ipv6 __si6;
@@ -1126,6 +1131,10 @@ int sfe_ipv6_recv(struct net_device *dev, struct sk_buff *skb, struct sfe_l2_inf
 
 	if (IPPROTO_ESP == next_hdr) {
 		return sfe_ipv6_recv_esp(si, skb, dev, len, iph, ihl, sync_on_find, l2_info, tun_outer);
+	}
+
+	if (IPPROTO_ETHERIP == next_hdr) {
+		return sfe_ipv6_recv_etherip(si, skb, dev, len, iph, ihl, sync_on_find, l2_info, tun_outer);
 	}
 
 	if (IPPROTO_ICMPV6 == next_hdr) {
@@ -2318,6 +2327,10 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 		original_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_PASSTHROUGH;
 	}
 
+	if ((IPPROTO_ETHERIP == tuple->protocol) && !sfe_ipv6_is_local_ip(si, (uint8_t *)original_cm->match_dest_ip)) {
+		original_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_PASSTHROUGH;
+	}
+
 	/*
 	 * In decap case, we should not set cm->proto for bypass ipip6 packets.
 	 */
@@ -2589,6 +2602,10 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 		reply_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_PASSTHROUGH;
 	}
 
+	if ((IPPROTO_ETHERIP == tuple->protocol) && !sfe_ipv6_is_local_ip(si, (uint8_t *)reply_cm->match_dest_ip)) {
+		reply_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_PASSTHROUGH;
+	}
+
         /*
          * In decap case, we should not set cm->proto for bypass ipip6 packets.
          */
@@ -2807,6 +2824,24 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 			dev_put(src_dev);
 			dev_put(dest_dev);
 			DEBUG_WARN("sfe: ESP proto handler is not registered\n");
+			return -EPERM;
+		}
+	}
+
+	if ((IPPROTO_ETHERIP == tuple->protocol) && !(reply_cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_PASSTHROUGH)) {
+		rcu_read_lock();
+		reply_cm->proto = rcu_dereference(inet6_protos[IPPROTO_ETHERIP]);
+		rcu_read_unlock();
+
+		if (unlikely(!reply_cm->proto)) {
+			this_cpu_inc(si->stats_pcpu->connection_create_failures64);
+			spin_unlock_bh(&si->lock);
+			kfree(reply_cm);
+			kfree(original_cm);
+			kfree(c);
+			dev_put(src_dev);
+			dev_put(dest_dev);
+			DEBUG_WARN("sfe: Etherip proto handler is not registered\n");
 			return -EPERM;
 		}
 	}
