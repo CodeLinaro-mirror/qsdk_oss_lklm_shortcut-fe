@@ -782,6 +782,12 @@ int sfe_ipv4_recv_tcp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 	features = cm->features;
 	fast_xmit = !!(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_FAST_XMIT);
 
+	/*
+	 * In the map-t tunnel, it needs correct transport header.
+	 * when l2 acceleration enabled, this header was not ever set.
+	 */
+	skb_set_transport_header(skb, ihl);
+
 	rcu_read_unlock();
 
 	this_cpu_inc(si->stats_pcpu->packets_forwarded64);
