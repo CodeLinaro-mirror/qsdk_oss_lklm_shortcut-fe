@@ -2467,6 +2467,10 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 	}
 #endif
 
+	if ((IPPROTO_ESP == tuple->protocol) && !sfe_ipv6_is_local_ip(si, (uint8_t *)original_cm->match_dest_ip)) {
+		original_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_PASSTHROUGH;
+	}
+
 	if ((IPPROTO_GRE == tuple->protocol) && !sfe_ipv6_is_local_ip(si, (uint8_t *)original_cm->match_dest_ip)) {
 		original_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_PASSTHROUGH;
 	}
@@ -2750,6 +2754,10 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 	if (sfe_is_l2_feature_enabled() && !(msg->rule_flags & SFE_RULE_CREATE_FLAG_BRIDGE_FLOW)) {
 		original_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_PACKET_HOST;
 		reply_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_PACKET_HOST;
+	}
+
+	if ((IPPROTO_ESP == tuple->protocol) && !sfe_ipv6_is_local_ip(si, (uint8_t *)reply_cm->match_dest_ip)) {
+		reply_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_PASSTHROUGH;
 	}
 
 	if ((IPPROTO_GRE == tuple->protocol) && !sfe_ipv6_is_local_ip(si, (uint8_t *)reply_cm->match_dest_ip)) {
