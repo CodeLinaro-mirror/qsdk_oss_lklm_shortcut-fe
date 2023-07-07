@@ -9,10 +9,7 @@ SFE_IPV4_OBJS := sfe_ipv4.o sfe_ipv4_udp.o sfe_ipv4_tcp.o sfe_ipv4_icmp.o sfe_ip
 SFE_IPV6_OBJS := sfe_ipv6.o sfe_ipv6_udp.o sfe_ipv6_tcp.o sfe_ipv6_icmp.o sfe_ipv6_tunipip6.o sfe_ipv6_pppoe_br.o sfe_ipv6_esp.o sfe_ipv6_multicast.o sfe_ipv6_etherip.o
 SFE_PPPOE_OBJS := sfe_pppoe.o sfe_pppoe_mgr.o
 
-#
-# TODO: Remove this check when GRE support is added for 6.1 kernel
-#
-ifneq ($(findstring 5.4, $(KERNELVERSION)),)
+ifeq ($(findstring 4.4, $(KERNELVERSION)),)
   SFE_IPV4_OBJS += sfe_ipv4_gre.o
   SFE_IPV6_OBJS += sfe_ipv6_gre.o
   ccflags-y += -DSFE_GRE_TUN_ENABLE
