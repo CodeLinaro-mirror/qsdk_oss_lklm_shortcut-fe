@@ -116,6 +116,8 @@ struct sfe_ipv6_vlan_filter_connection_match {
 					/* TSO enabled for dest dev */
 #define SFE_IPV6_CONNECTION_MATCH_FLAG_PACKET_HOST (1<<24)
 	                                /* Set to send connection to Host */
+#define SFE_IPV6_CONNECTION_MATCH_FLAG_BRIDGE_VLAN_PASSTHROUGH (1<<25)
+					/* Bridge Vlan passthrough enable */
 
 /*
  * IPv6 multicast destination structure
@@ -444,6 +446,7 @@ struct sfe_ipv6_stats {
 	u64 fragment_dropped64;		/*Number of fragments dropped. */
 	u64 fragment_id_timeout64;	/*Number of fragment id timeouts. */
 	u64 fragment_exception64;	/*Number of fragment exception to host. */
+	u64 bridge_vlan_passthorugh_forwarded64;	/* Number of IPV6 bridge vlan passthrough packets forwarded */
 };
 
 /*

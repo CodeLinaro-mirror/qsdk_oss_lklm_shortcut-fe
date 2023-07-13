@@ -100,6 +100,7 @@
 								/**< Check source interface on the flow direction but do not flush the connection. */
 #define SFE_RULE_CREATE_FLAG_RETURN_SRC_INTERFACE_CHECK_NO_FLUSH  (1<<15)
 								/**< Check source interface on the return direction but do not flush the connection. */
+#define SFE_RULE_CREATE_FLAG_BRIDGE_VLAN_PASSTHROUGH  (1<<16)	/**< Bridge VLAN passthrough. */
 
 /*
  * Rule creation validity flags.
@@ -482,8 +483,8 @@ struct sfe_qdisc_rule {
  */
 struct sfe_ipv4_rule_create_msg {
 	/* Request */
-	u16 valid_flags;				/**< Bit flags associated with paramater validity. */
-	u16 rule_flags;					/**< Bit flags associated with the rule. */
+	u32 valid_flags;				/**< Bit flags associated with paramater validity. */
+	u32 rule_flags;					/**< Bit flags associated with the rule. */
 
 	struct sfe_ipv4_5tuple tuple;			/**< Holds values of 5-tuple. */
 
@@ -524,8 +525,8 @@ struct sfe_ipv4_rule_destroy_msg {
  * Multicast destination interface entry
  */
 struct sfe_ipv4_mc_device_entry {
-	uint16_t rule_flags;		/**< Bit flag of rules indicating PPPOE session, Vlan. */
-	uint16_t valid_flags;		/**< Valid Bit flags associated with the rule of vlan/pppoe. */
+	uint32_t rule_flags;		/**< Bit flag of rules indicating PPPOE session, Vlan. */
+	uint32_t valid_flags;		/**< Valid Bit flags associated with the rule of vlan/pppoe. */
 	uint32_t xlate_src_ip;		/**< nated source ip address. */
 	uint32_t xlate_src_ident;	/**< nated source port number. */
 	uint32_t egress_vlan_tag[SFE_MAX_VLAN_DEPTH]; /**< VLAN tag stack for the ingress packets. */
@@ -545,8 +546,8 @@ struct sfe_ipv4_mc_device_entry {
  */
 struct sfe_ipv4_mc_rule_create_msg {
 	/* Request */
-	u16 valid_flags;				/**< Bit flags associated with paramater validity. */
-	u16 rule_flags;					/**< Bit flags associated with the rule. */
+	u32 valid_flags;				/**< Bit flags associated with paramater validity. */
+	u32 rule_flags;					/**< Bit flags associated with the rule. */
 
 	struct sfe_ipv4_5tuple tuple;           /**< Holds values of the 5 tuple. */
 	struct sfe_ipv4_connection_rule conn_rule;	/**< Basic connection-specific data. */
@@ -709,8 +710,8 @@ struct sfe_ipv6_rule_create_msg {
 	/*
 	 * Request
 	 */
-	u16 valid_flags;				/**< Bit flags associated with parameter validity. */
-	u16 rule_flags;					/**< Bit flags associated with the rule. */
+	u32 valid_flags;				/**< Bit flags associated with parameter validity. */
+	u32 rule_flags;					/**< Bit flags associated with the rule. */
 	struct sfe_ipv6_5tuple tuple;			/**< Holds values of the sfe_ipv6_5tuple tuple. */
 	struct sfe_ipv6_connection_rule conn_rule;	/**< Basic connection-specific data. */
 	struct sfe_protocol_tcp_rule tcp_rule;		/**< Protocol-related acceleration parameters. */
@@ -750,8 +751,8 @@ struct sfe_ipv6_rule_destroy_msg {
  * Multicast destination interface entry
  */
 struct sfe_ipv6_mc_device_entry {
-	uint16_t rule_flags;		/**< Bit flag of rules indicating PPPOE session, Vlan. */
-	uint16_t valid_flags;		/**< Valid Bit flags associated with the rule of vlan/pppoe. */
+	uint32_t rule_flags;		/**< Bit flag of rules indicating PPPOE session, Vlan. */
+	uint32_t valid_flags;		/**< Valid Bit flags associated with the rule of vlan/pppoe. */
 	uint32_t xlate_src_ip[4];	/**< nated source ip address. */
 	uint32_t xlate_src_ident;	/**< nated source port number. */
 
@@ -772,8 +773,8 @@ struct sfe_ipv6_mc_device_entry {
  */
 struct sfe_ipv6_mc_rule_create_msg {
 	/* Request */
-	u16 valid_flags;				/**< Bit flags associated with paramater validity. */
-	u16 rule_flags;					/**< Bit flags associated with the rule. */
+	u32 valid_flags;				/**< Bit flags associated with paramater validity. */
+	u32 rule_flags;					/**< Bit flags associated with the rule. */
 
 	struct sfe_ipv6_5tuple tuple;           /**< Holds values of the 5 tuple. */
 	struct sfe_ipv6_connection_rule conn_rule;	/**< Basic connection-specific data. */
