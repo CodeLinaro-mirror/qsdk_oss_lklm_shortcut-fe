@@ -423,6 +423,7 @@ static void sfe_ipv6_update_summary_stats(struct sfe_ipv6 *si, struct sfe_ipv6_s
 		stats->fragment_dropped64 += s->fragment_dropped64;
 		stats->fragment_id_timeout64 += s->fragment_id_timeout64;
 		stats->fragment_exception64 += s->fragment_exception64;
+		stats->bridge_vlan_passthorugh_forwarded64 += s->bridge_vlan_passthorugh_forwarded64;
 	}
 }
 
@@ -2520,6 +2521,21 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 	}
 
 	/*
+	 * For a bridge flow we are checking the bridge vlan passthrough flag enabled from ECM
+	 * enable bridge vlan passthrough for the original and reply direction.
+	 */
+	if (msg->rule_flags & SFE_RULE_CREATE_FLAG_BRIDGE_FLOW) {
+		/*
+		 * For the non-arp interface, we don't write L2 HDR.
+		 */
+		if ((original_cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_WRITE_L2_HDR) && (msg->rule_flags & SFE_RULE_CREATE_FLAG_BRIDGE_VLAN_PASSTHROUGH)) {
+			if (!((msg->valid_flags & SFE_RULE_CREATE_VLAN_VALID) || (msg->valid_flags & SFE_RULE_CREATE_VLAN_FILTER_VALID))) {
+				original_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_BRIDGE_VLAN_PASSTHROUGH;
+			}
+		}
+	}
+
+	/*
 	 * Fill in the "reply" direction connection matching object.
 	 */
 	reply_cm->match_dev = dest_dev;
@@ -2985,6 +3001,21 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 		if (src_dev->header_ops) {
 			if (src_dev->header_ops->create == eth_header) {
 				reply_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_WRITE_FAST_ETH_HDR;
+			}
+		}
+	}
+
+	/*
+	 * For a bridge flow we are checking the bridge vlan passthrough flag enabled from ECM
+	 * enable bridge vlan passthrough for the original and reply direction.
+	 */
+	if (msg->rule_flags & SFE_RULE_CREATE_FLAG_BRIDGE_FLOW) {
+		/*
+		 * For the non-arp interface, we don't write L2 HDR.
+		 */
+		if ((reply_cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_WRITE_L2_HDR) && (msg->rule_flags & SFE_RULE_CREATE_FLAG_BRIDGE_VLAN_PASSTHROUGH)) {
+			if (!((msg->valid_flags & SFE_RULE_CREATE_VLAN_VALID) || (msg->valid_flags & SFE_RULE_CREATE_VLAN_FILTER_VALID))) {
+				reply_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_BRIDGE_VLAN_PASSTHROUGH;
 			}
 		}
 	}
@@ -3610,6 +3641,10 @@ static int sfe_ipv6_debug_dev_read_connections_connection(struct sfe_ipv6 *si, s
 		 }
 	}
 
+	if (original_cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_BRIDGE_VLAN_PASSTHROUGH) {
+		ws->msg_len += snprintf(ws->msg + ws->msg_len, length - ws->msg_len, "bridge_vlan_passthrough=\"Yes\"");
+	}
+
 	ws->msg_len += snprintf(ws->msg + ws->msg_len, length - ws->msg_len, "/>\n");
 	ws->msgp = ws->msg;
 
@@ -3748,7 +3783,8 @@ static int sfe_ipv6_debug_dev_read_stats(struct sfe_ipv6 *si, struct sfe_ipv6_de
 			      "fragments_forwarded=\"%llu\" "
 			      "fragments_dropped=\"%llu\" "
 			      "fragment_id_timeout=\"%llu\" "
-			      "fragments_exception=\"%llu\" />\n",
+			      "fragments_exception=\"%llu\" "
+			      "bridge_vlan_passthorugh_forwarded64=\"%llu\" />\n",
 				num_conn,
 				stats.packets_dropped64,
 				stats.packets_fast_xmited64,
@@ -3775,7 +3811,8 @@ static int sfe_ipv6_debug_dev_read_stats(struct sfe_ipv6 *si, struct sfe_ipv6_de
 				stats.fragment_forwarded64,
 				stats.fragment_dropped64,
 				stats.fragment_id_timeout64,
-				stats.fragment_exception64);
+				stats.fragment_exception64,
+				stats.bridge_vlan_passthorugh_forwarded64);
 
 	ws->msgp = ws->msg;
 

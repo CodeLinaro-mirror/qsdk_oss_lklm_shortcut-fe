@@ -137,6 +137,7 @@ int sfe_ipv4_recv_tcp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 	netdev_features_t features;
 	u8 ingress_flags = 0;
 	sfe_fls_conn_stats_update_t update_cb;
+	bool vlan_passthrough = false;
 
 	/*
 	 * Is our packet too short to contain a valid TCP header?
@@ -258,10 +259,14 @@ int sfe_ipv4_recv_tcp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 	ingress_flags = cm->vlan_filter_rule.ingress_flags;
 #endif
 	if (unlikely(!sfe_vlan_validate_ingress_tag(skb, cm->ingress_vlan_hdr_cnt, cm->ingress_vlan_hdr, l2_info, ingress_flags))) {
-		rcu_read_unlock();
-		sfe_ipv4_exception_stats_inc(si, SFE_IPV4_EXCEPTION_EVENT_INGRESS_VLAN_TAG_MISMATCH);
-		DEBUG_TRACE("VLAN tag mismatch. skb=%px\n", skb);
-		return 0;
+		if (!(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_BRIDGE_VLAN_PASSTHROUGH)) {
+			rcu_read_unlock();
+			sfe_ipv4_exception_stats_inc(si, SFE_IPV4_EXCEPTION_EVENT_INGRESS_VLAN_TAG_MISMATCH);
+			DEBUG_TRACE("VLAN tag mismatch. skb=%px\n", skb);
+			return 0;
+		}
+		vlan_passthrough = true;
+		this_cpu_inc(si->stats_pcpu->bridge_vlan_passthorugh_forwarded64);
 	}
 
 	/*
@@ -585,6 +590,17 @@ int sfe_ipv4_recv_tcp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 		 */
 		__skb_push(skb, PPPOE_SES_HLEN);
 		this_cpu_inc(si->stats_pcpu->pppoe_bridge_packets_forwarded64);
+	}
+
+	/*
+	 * For bridged flows when packet contains the VLan header, restore the header back and forward
+	 * we do this here, to make sure PPPOE header is restored before VLAN header(s) is restored for pppoe over vlan passthrough use cases
+	 */
+	if (unlikely(vlan_passthrough)) {
+		struct ethhdr *eth = eth_hdr(skb);
+		__skb_push(skb, l2_info->vlan_hdr_cnt * VLAN_HLEN);
+		skb_reset_network_header(skb);
+		skb->protocol = eth->h_proto;
 	}
 
 	/*

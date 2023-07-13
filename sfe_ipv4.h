@@ -111,6 +111,8 @@ struct sfe_ipv4_vlan_filter_connection_match {
 					/* Packet Host Type Set */
 #define SFE_IPV4_CONNECTION_MATCH_FLAG_FLS_DISABLED (1<<25)
 					/* Don't send packets to FLS */
+#define SFE_IPV4_CONNECTION_MATCH_FLAG_BRIDGE_VLAN_PASSTHROUGH (1<<26)
+					/* Bridge Vlan passthrough enable */
 
 /*
  * IPv4 multicast destination structure
@@ -430,6 +432,7 @@ struct sfe_ipv4_stats {
 	u64 pppoe_bridge_packets_forwarded64;	/* Number of IPv4 PPPoE bridge packets forwarded */
 	u64 pppoe_bridge_packets_3tuple_forwarded64;    /* Number of IPv4 PPPoE bridge packets forwarded based on 3-tuple info */
 	u64 connection_create_requests_overflow64;	/* Number of IPV4 connection create requests after reaching max limit */
+	u64 bridge_vlan_passthorugh_forwarded64;	/* Number of IPV4 bridge vlan passthrough packets forwarded */
 };
 
 /*

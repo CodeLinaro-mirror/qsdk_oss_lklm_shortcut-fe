@@ -102,6 +102,7 @@
 								/**< Check source interface on the return direction but do not flush the connection. */
 #define SFE_RULE_CREATE_FLAG_FLOW_L2_DISABLE (1<<16)		/**< Disable L2 flow processing in original flow. */
 #define SFE_RULE_CREATE_FLAG_RETURN_L2_DISABLE (1<<17)		/**< Disable L2 flow processing in return flow. */
+#define SFE_RULE_CREATE_FLAG_BRIDGE_VLAN_PASSTHROUGH  (1<<18)	/**< Bridge VLAN passthrough. */
 
 /*
  * Rule creation validity flags.
