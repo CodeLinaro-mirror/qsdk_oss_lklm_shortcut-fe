@@ -396,6 +396,7 @@ static void sfe_ipv4_update_summary_stats(struct sfe_ipv4 *si,  struct sfe_ipv4_
 		stats->pppoe_bridge_packets_forwarded64 += s->pppoe_bridge_packets_forwarded64;
 		stats->pppoe_bridge_packets_3tuple_forwarded64 += s->pppoe_bridge_packets_3tuple_forwarded64;
 		stats->connection_create_requests_overflow64 += s->connection_create_requests_overflow64;
+		stats->bridge_vlan_passthorugh_forwarded64 += s->bridge_vlan_passthorugh_forwarded64;
 	}
 
 }
@@ -2474,6 +2475,21 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	}
 
 	/*
+	 * For a bridge flow we are checking the bridge vlan passthrough flag enabled from ECM
+	 * enable bridge vlan passthrough for the original and reply direction.
+	 */
+	if (msg->rule_flags & SFE_RULE_CREATE_FLAG_BRIDGE_FLOW) {
+		/*
+		 * For the non-arp interface, we don't write L2 HDR.
+		 */
+		if ((original_cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_WRITE_L2_HDR) && (msg->rule_flags & SFE_RULE_CREATE_FLAG_BRIDGE_VLAN_PASSTHROUGH)) {
+			if (!((msg->valid_flags & SFE_RULE_CREATE_VLAN_VALID) || (msg->valid_flags & SFE_RULE_CREATE_VLAN_FILTER_VALID))) {
+				original_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_BRIDGE_VLAN_PASSTHROUGH;
+			}
+		}
+	}
+
+	/*
 	 * Fill in the "reply" direction connection matching object.
 	 */
 	reply_cm->match_dev = dest_dev;
@@ -2842,6 +2858,21 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 		if (src_dev->header_ops) {
 			if (src_dev->header_ops->create == eth_header) {
 				reply_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_WRITE_FAST_ETH_HDR;
+			}
+		}
+	}
+
+	/*
+	 * For a bridge flow we are checking the bridge vlan passthrough flag enabled from ECM
+	 * enable bridge vlan passthrough for the original and reply direction.
+	 */
+	if (msg->rule_flags & SFE_RULE_CREATE_FLAG_BRIDGE_FLOW) {
+		/*
+		 * For the non-arp interface, we don't write L2 HDR.
+		 */
+		if ((reply_cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_WRITE_L2_HDR) && (msg->rule_flags & SFE_RULE_CREATE_FLAG_BRIDGE_VLAN_PASSTHROUGH)) {
+			if (!((msg->valid_flags & SFE_RULE_CREATE_VLAN_VALID) || (msg->valid_flags & SFE_RULE_CREATE_VLAN_FILTER_VALID))) {
+				reply_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_BRIDGE_VLAN_PASSTHROUGH;
 			}
 		}
 	}
@@ -3516,6 +3547,15 @@ static int sfe_ipv4_debug_dev_read_connections_connection(struct sfe_ipv4 *si, c
 
 	}
 
+	if (original_cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_BRIDGE_VLAN_PASSTHROUGH) {
+
+		if ((length - bytes_read) <= 0) {
+			return -ENOMEM;
+		}
+
+		bytes_read += snprintf(msg + bytes_read, length - bytes_read, "bridge_vlan_passthrough=\"Yes\"");
+	}
+
 	if ((length - bytes_read) <= 0) {
 		return -ENOMEM;
 	}
@@ -3687,7 +3727,8 @@ static int sfe_ipv4_debug_dev_read_stats(struct sfe_ipv4 *si, char *buffer, char
 			      "pppoe_decap_pkts_fwded=\"%llu\" "
 			      "pppoe_bridge_pkts_fwded=\"%llu\" "
 			      "pppoe_bridge_pkts_3tuple_fwded=\"%llu\" "
-			      "connection_create_requests_overflow64=\"%llu\" />\n",
+			      "connection_create_requests_overflow64=\"%llu\" "
+			      "bridge_vlan_passthorugh_forwarded64=\"%llu\" />\n",
 				num_conn,
 				stats.packets_dropped64,
 				stats.packets_fast_xmited64,
@@ -3706,7 +3747,8 @@ static int sfe_ipv4_debug_dev_read_stats(struct sfe_ipv4 *si, char *buffer, char
 				stats.pppoe_decap_packets_forwarded64,
 				stats.pppoe_bridge_packets_forwarded64,
 				stats.pppoe_bridge_packets_3tuple_forwarded64,
-				stats.connection_create_requests_overflow64);
+				stats.connection_create_requests_overflow64,
+				stats.bridge_vlan_passthorugh_forwarded64);
 
 	if ((bytes_read + *total_read) >= length) {
 		return -ENOMEM;
