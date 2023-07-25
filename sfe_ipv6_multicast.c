@@ -68,13 +68,41 @@ int sfe_ipv6_forward_multicast(struct sfe_ipv6 *si, struct sk_buff *skb, unsigne
 	hw_csum = !!(mc_xmit_dev->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_CSUM_OFFLOAD) && (skb->ip_summed == CHECKSUM_UNNECESSARY);
 
 	/*
+	 * Do we have to perform translations of the source address/port?
+	 */
+	if (unlikely(mc_xmit_dev->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_XLATE_SRC)) {
+		u16 udp_csum;
+
+		iph->saddr.s6_addr32[0] = mc_xmit_dev->xlate_src_ip[0];
+		iph->saddr.s6_addr32[1] = mc_xmit_dev->xlate_src_ip[1];
+		iph->saddr.s6_addr32[2] = mc_xmit_dev->xlate_src_ip[2];
+		iph->saddr.s6_addr32[3] = mc_xmit_dev->xlate_src_ip[3];
+		udph->source = mc_xmit_dev->xlate_src_ident;
+
+		DEBUG_TRACE("%px: SRC XLAT :%pI6 ident:%u\n", skb, (void *)&mc_xmit_dev->xlate_src_ip,	mc_xmit_dev->xlate_src_ident);
+
+		/*
+		 * Do we have a non-zero UDP checksum?  If we do then we need
+		 * to update it.
+		 */
+		if (unlikely(!hw_csum)) {
+			udp_csum = udph->check;
+			if (likely(udp_csum)) {
+				u32 sum = udp_csum + mc_xmit_dev->xlate_src_csum_adjustment;
+				sum = (sum & 0xffff) + (sum >> 16);
+				sum = (sum & 0xffff) + (sum >> 16);
+				udph->check = (u16)sum;
+			}
+		}
+	}
+
+	/*
 	 * Decrement our TTL
 	 * Except when called from hook function in post-decap.
 	 */
 	if (likely(!bridge_flow)) {
 		iph->hop_limit -= (u8)!tun_outer;
 	}
-
 
 	/*
 	 * If HW checksum offload is not possible, full L3 checksum and incremental L4 checksum

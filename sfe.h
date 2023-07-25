@@ -41,6 +41,8 @@
 
 #define SFE_L2_PARSE_FLAGS_PPPOE_INGRESS 0x01		/* Indicates presence of a valid PPPoE header */
 #define SFE_L2_PARSE_FLAGS_TRUSTSEC_INGRESS 0x02	/* Indicates presence of a valid trustsec header */
+#define SFE_L2_PARSE_FLAGS_VLAN_HW_TAG_SET 0x04		/* Indicates presence of a skb tag set by linux */
+#define SFE_L2_PARSE_FLAGS_VLAN_LINUX_UNTAGGED 0x08	/* Indicates vlan dev in skb set by linunx */
 
 /*
  * IPv6 address structure

@@ -128,12 +128,70 @@ static inline bool sfe_vlan_check_and_parse_tag(struct sk_buff *skb, struct sfe_
  */
 static inline void sfe_vlan_undo_parse(struct sk_buff *skb, struct sfe_l2_info *l2_info)
 {
-	if (l2_info->vlan_hdr_cnt == 0) {
+
+	if ((l2_info->vlan_hdr_cnt == 0)) {
+		return;
+	}
+
+	if ((sfe_l2_parse_flag_check(l2_info, SFE_L2_PARSE_FLAGS_VLAN_HW_TAG_SET))) {
+		skb->vlan_present = 1;
+		return;
+	}
+
+	if ((sfe_l2_parse_flag_check(l2_info, SFE_L2_PARSE_FLAGS_VLAN_LINUX_UNTAGGED))) {
 		return;
 	}
 
 	skb->protocol = l2_info->vlan_hdr[0].tpid;
 	__skb_push(skb, l2_info->vlan_hdr_cnt * VLAN_HLEN);
+}
+
+static inline bool sfe_vlan_dev_check_and_parse_tag(struct sk_buff *skb, struct sfe_l2_info *l2_info)
+{
+	struct net_device *vlan_dev = skb->dev;
+	struct sfe_l2_info l2_info_temp;
+	l2_info_temp.vlan_hdr_cnt = 0;
+
+	/*
+	 * Vlan tag would be present for ports where VLAN filtering is enabled.
+	 * Read the vlan tag from skb header vlan field.
+	 */
+	if (skb_vlan_tag_present(skb)) {
+		l2_info_temp.vlan_hdr[l2_info_temp.vlan_hdr_cnt].tci = skb_vlan_tag_get(skb);
+		l2_info_temp.vlan_hdr[l2_info_temp.vlan_hdr_cnt].tpid = skb->vlan_proto;
+		l2_info_temp.vlan_hdr_cnt++;
+		__vlan_hwaccel_clear_tag(skb);
+		sfe_l2_parse_flag_set(l2_info, SFE_L2_PARSE_FLAGS_VLAN_HW_TAG_SET);
+	}
+
+	/*
+	 * VLAN processing is done by linux and hence skb->dev is updated to
+	 * corresponding vlan dev, so extract the vlan info from vlan dev.
+	 */
+	while (is_vlan_dev(vlan_dev)) {
+		if (unlikely(l2_info_temp.vlan_hdr_cnt > SFE_MAX_VLAN_DEPTH)) {
+			if ((sfe_l2_parse_flag_check(l2_info, SFE_L2_PARSE_FLAGS_VLAN_HW_TAG_SET))) {
+				skb->vlan_present = 1;
+			}
+			return false;
+		}
+
+		l2_info_temp.vlan_hdr[l2_info_temp.vlan_hdr_cnt].tci = vlan_dev_vlan_id(vlan_dev);
+		l2_info_temp.vlan_hdr[l2_info_temp.vlan_hdr_cnt].tpid = vlan_dev_vlan_proto(vlan_dev);
+		l2_info_temp.vlan_hdr_cnt++;
+		vlan_dev = vlan_dev_next_dev(vlan_dev);
+	}
+
+	while ((l2_info_temp.vlan_hdr_cnt > 0) && l2_info->vlan_hdr_cnt < SFE_MAX_VLAN_DEPTH) {
+		l2_info_temp.vlan_hdr_cnt--;
+		l2_info->vlan_hdr[l2_info->vlan_hdr_cnt].tci = l2_info_temp.vlan_hdr[l2_info_temp.vlan_hdr_cnt].tci;
+		l2_info->vlan_hdr[l2_info->vlan_hdr_cnt].tpid = l2_info_temp.vlan_hdr[l2_info_temp.vlan_hdr_cnt].tpid;
+		l2_info->vlan_hdr_cnt++;
+		sfe_l2_parse_flag_set(l2_info, SFE_L2_PARSE_FLAGS_VLAN_LINUX_UNTAGGED);
+	}
+
+	l2_info->protocol = htons(skb->protocol);
+	return true;
 }
 
 /*

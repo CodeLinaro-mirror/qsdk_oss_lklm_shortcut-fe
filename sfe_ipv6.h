@@ -127,6 +127,10 @@ struct sfe_ipv6_mc_dest {
 	struct net_device *xmit_dev;		/* Transmit interface */
 	netdev_features_t features;		/* Device features */
 
+	uint32_t xlate_src_ip[4];			/* Translated flow IP address */
+	uint32_t xlate_src_ident;		/* Translated flow ident (e.g. port) */
+	uint32_t xlate_src_csum_adjustment;	/* Transport layer checksum adjustment after source translation */
+
 	uint16_t if_mac[3];			/* Interface MAC address */
 	u16 pppoe_session_id;			/* PPPOE header offset */
 	u8 pppoe_remote_mac[ETH_ALEN];		/* PPPOE header remote mac address */
@@ -386,6 +390,10 @@ enum sfe_ipv6_exception_events {
 	SFE_IPV6_EXCEPTION_EVENT_INGRESS_TRUSTSEC_SGT_MISMATCH,
 	SFE_IPV6_EXCEPTION_EVENT_GSO_NOT_SUPPORTED,
 	SFE_IPV6_EXCEPTION_EVENT_TSO_SEG_MAX_NOT_SUPPORTED,
+	SFE_IPV6_EXCEPTION_EVENT_ETHERIP_NO_CONNECTION,
+	SFE_IPV6_EXCEPTION_EVENT_ETHERIP_IP_OPTIONS_OR_INITIAL_FRAGMENT,
+	SFE_IPV6_EXCEPTION_EVENT_ETHERIP_NEEDS_FRAGMENTATION,
+	SFE_IPV6_EXCEPTION_EVENT_ETHERIP_SMALL_TTL,
 	SFE_IPV6_EXCEPTION_EVENT_LAST
 };
 

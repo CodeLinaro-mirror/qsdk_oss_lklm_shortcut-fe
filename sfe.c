@@ -39,9 +39,11 @@
 #include "sfe_trustsec.h"
 #include "sfe_ipv4.h"
 #include "sfe_ipv6.h"
+#include "sfe_ipv6_etherip.h"
 
 extern int max_ipv4_conn;
 extern int max_ipv6_conn;
+extern bool fast_tc_filter;
 
 #define SFE_MESSAGE_VERSION 0x1
 #define sfe_ipv6_addr_copy(src, dest) memcpy((void *)(dest), (void *)(src), 16)
@@ -1347,10 +1349,14 @@ void sfe_ipv6_stats_convert(struct sfe_ipv6_conn_sync *sync_msg, struct sfe_conn
 	 */
 	sync_msg->protocol = (u8)sis->protocol;
 	sfe_ipv6_addr_copy(sis->src_ip.ip6, sync_msg->flow_ip);
+	sfe_ipv6_addr_copy(sis->src_ip_xlate.ip6, sync_msg->flow_ip_xlate);
 	sync_msg->flow_ident = sis->src_port;
+	sync_msg->flow_ident_xlate = sis->src_port_xlate;
 
 	sfe_ipv6_addr_copy(sis->dest_ip.ip6, sync_msg->return_ip);
+	sfe_ipv6_addr_copy(sis->dest_ip_xlate.ip6, sync_msg->return_ip_xlate);
 	sync_msg->return_ident = sis->dest_port;
+	sync_msg->return_ident_xlate = sis->dest_port_xlate;
 
 	/*
 	 * Fill TCP protocol specific information
@@ -1626,6 +1632,9 @@ sfe_tx_status_t sfe_create_ipv6_rule_msg(struct sfe_ctx_instance_internal *sfe_c
 		break;
 
 	case IPPROTO_ESP:
+		break;
+
+	case IPPROTO_ETHERIP:
 		break;
 
 	case IPPROTO_RAW:
@@ -2048,21 +2057,45 @@ int sfe_recv(struct sk_buff *skb)
 	l2_info.parse_flags = 0;
 	l2_info.vlan_hdr_cnt = 0;
 
-#ifdef CONFIG_NET_CLS_ACT
 	/*
-	 * If ingress Qdisc configured, and packet not processed by ingress Qdisc yet
-	 * We can not accelerate this packet.
+	 * If TC filter processing is enabled skip tc_classify check as:
+	 * - for IFB case it taken care by netif_recv_skb
+	 * - for simple filters on ingress tc_skip_classify would never be
+	 *   set and hence this check should be skipped.
+	 *
 	 */
+	if (likely(!fast_tc_filter)) {
+#ifdef CONFIG_NET_CLS_ACT
+		/*
+		 * If ingress Qdisc configured, and packet not processed by ingress Qdisc yet
+		 * We can not accelerate this packet.
+		 */
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 4, 0))
-	if (dev->ingress_queue && !(skb->tc_verd & TC_NCLS)) {
-		return 0;
-	}
+		if (dev->ingress_queue && !(skb->tc_verd & TC_NCLS)) {
+			return 0;
+		}
 #else
-	if (rcu_access_pointer(dev->miniq_ingress) && !skb->tc_skip_classify) {
-		return 0;
+		if (rcu_access_pointer(dev->miniq_ingress) && !skb->tc_skip_classify) {
+			return 0;
+		}
+#endif
+#endif
+	} else {
+		/*
+		 * Update Vlan l2 info by parsing vlan netdev
+		 */
+		if (unlikely(!sfe_vlan_dev_check_and_parse_tag(skb, &l2_info))){
+			return 0;
+		}
+
+		/*
+		 * If skb vlan tag is present it needs to go through undo if match fails
+		 * and hence we let the processing go l2 parse below.
+		 */
+		if ((sfe_l2_parse_flag_check(&l2_info, SFE_L2_PARSE_FLAGS_VLAN_HW_TAG_SET))) {
+			goto sfe_l2_parse;
+		}
 	}
-#endif
-#endif
 
 	/*
 	 * If l2_feature is enabled, we need not check if src dev is L3 interface since bridge flow offload is supported.
@@ -2093,13 +2126,14 @@ int sfe_recv(struct sk_buff *skb)
 		break;
 	}
 
+sfe_l2_parse:
 	/*
 	 * Stop L2 processing if L2 feature is disabled.
 	 */
 	if (!sfe_is_l2_feature_enabled()) {
 		DEBUG_TRACE("Unsupported protocol %#x %s (L2 feature is disabled) skb=%px\n",
-				ntohs(skb->protocol), dev->name, skb);
-		return 0;
+				ntohs(skb->protocol), skb->dev->name, skb);
+		goto send_to_linux;
 	}
 
 	/*
@@ -2132,7 +2166,8 @@ int sfe_recv(struct sk_buff *skb)
 
 	DEBUG_TRACE("Non-IP(%x) %s skb=%px skb_vlan:%x/%x/%x skb_proto=%x\n",
 			l2_info.protocol, dev->name, skb,
-			ntohs(skb->vlan_proto), skb->vlan_tci, skb_vlan_tag_present(skb),
+			ntohs(skb->vlan_proto), skb->vlan_tci, skb_vlan_tag_present(skb) ? 1 : \
+			(sfe_l2_parse_flag_check(&l2_info, SFE_L2_PARSE_FLAGS_VLAN_HW_TAG_SET)),
 			htons(skb->protocol));
 
 send_to_linux:
@@ -2213,6 +2248,65 @@ bool sfe_is_l2_feature_enabled()
 	return (sfe_ctx->l2_feature_support == 1);
 }
 EXPORT_SYMBOL(sfe_is_l2_feature_enabled);
+
+/*
+ * sfe_get_fast_tc_filter()
+ *	fast_tc feature is enabled/disabled
+ */
+ssize_t sfe_get_fast_tc_filter(struct device *dev,
+				     struct device_attribute *attr,
+				     char *buf)
+{
+	ssize_t len;
+
+	len = snprintf(buf, (ssize_t)(PAGE_SIZE), "fast tc filter feature is %s\n", fast_tc_filter ? "enabled" : "disabled");
+	return len;
+}
+
+/*
+ * sfe_set_fast_tc_filter()
+ *	Enable or disable fast tc filter feature.
+ */
+ssize_t sfe_set_fast_tc_filter(struct device *dev, struct device_attribute *attr,
+			 const char *buf, size_t count)
+{
+	unsigned long val;
+	int ret;
+	ret = sscanf(buf, "%lu", &val);
+
+	if (ret != 1) {
+		pr_err("Wrong input, %s\n", buf);
+		return -EINVAL;
+	}
+
+	if (val != 1 && val != 0) {
+		pr_err("Input should be either 1 or 0, (%s)\n", buf);
+		return -EINVAL;
+	}
+
+
+	if (fast_tc_filter == true && val) {
+		pr_err("fast tc filter feature is already enabled\n");
+		return -EINVAL;
+	}
+
+	if (fast_tc_filter == false && !val) {
+		pr_err("fast tc filter feature is already disabled\n");
+		return -EINVAL;
+	}
+
+
+	if (val) {
+		fast_tc_filter = true;
+	} else {
+		fast_tc_filter = false;
+	}
+
+	return count;
+}
+
+static const struct device_attribute fast_tc_filter_attr =
+	__ATTR(fast_tc_filter,  0644, sfe_get_fast_tc_filter, sfe_set_fast_tc_filter);
 
 /*
  * sfe_get_l2_feature()
@@ -2405,6 +2499,15 @@ int sfe_init_if(void)
 	result = sysfs_create_file(sfe_ctx->sys_sfe, &sfe_exceptions_attr.attr);
 	if (result) {
 		DEBUG_ERROR("failed to register exceptions file: %d\n", result);
+		goto exit2;
+	}
+
+	/*
+	 * Create sys/sfe/fast_tc_filter
+	 */
+	result = sysfs_create_file(sfe_ctx->sys_sfe, &fast_tc_filter_attr.attr);
+	if (result) {
+		DEBUG_ERROR("failed to register tc filter enable feature flag sysfs file: %d\n", result);
 		goto exit2;
 	}
 
