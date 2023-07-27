@@ -1492,7 +1492,7 @@ enum sfe_cmn_response sfe_create_ipv6_mc_rule_msg(struct sfe_ctx_instance_intern
 			pr6rc.conn_rule.flow_mtu = rule_create->conn_rule.flow_mtu;
 			pr6rc.conn_rule.return_mtu = rule_create->conn_rule.return_mtu;
 			pr6rc.conn_rule.flow_interface_num = rule_create->conn_rule.flow_interface_num;
-			pr6rc.conn_rule.return_interface_num = rule_create->conn_rule.flow_interface_num;
+			pr6rc.conn_rule.return_interface_num = rule_create->conn_rule.return_interface_num;
 			pr6rc.conn_rule.flow_top_interface_num = rule_create->conn_rule.flow_top_interface_num;
 			pr6rc.conn_rule.return_top_interface_num = rule_create->conn_rule.return_top_interface_num;
 
@@ -1696,7 +1696,7 @@ enum sfe_cmn_response sfe_create_ipv6_rule_msg(struct sfe_ctx_instance_internal 
 			pr6rc.conn_rule.flow_mtu = rule_create->conn_rule.flow_mtu;
 			pr6rc.conn_rule.return_mtu = rule_create->conn_rule.return_mtu;
 			pr6rc.conn_rule.flow_interface_num = rule_create->conn_rule.flow_interface_num;
-			pr6rc.conn_rule.return_interface_num = rule_create->conn_rule.flow_interface_num;
+			pr6rc.conn_rule.return_interface_num = rule_create->conn_rule.return_interface_num;
 			pr6rc.conn_rule.flow_top_interface_num = rule_create->conn_rule.flow_top_interface_num;
 			pr6rc.conn_rule.return_top_interface_num = rule_create->conn_rule.return_top_interface_num;
 
