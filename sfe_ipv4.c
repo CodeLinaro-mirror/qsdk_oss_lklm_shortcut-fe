@@ -1092,9 +1092,11 @@ int sfe_ipv4_recv(struct net_device *dev, struct sk_buff *skb, struct sfe_l2_inf
 		return sfe_ipv4_recv_tcp(si, skb, dev, len, iph, ihl, sync_on_find, l2_info);
 	}
 
+#ifdef SFE_IPSEC_ENABLE
 	if (IPPROTO_ESP == protocol) {
 		return sfe_ipv4_recv_esp(si, skb, dev, len, iph, ihl, sync_on_find, l2_info, tun_outer);
 	}
+#endif
 
 	if (IPPROTO_ICMP == protocol) {
 		return sfe_ipv4_recv_icmp(si, skb, dev, len, iph, ihl);
@@ -1105,9 +1107,12 @@ int sfe_ipv4_recv(struct net_device *dev, struct sk_buff *skb, struct sfe_l2_inf
 		return sfe_ipv4_recv_gre(si, skb, dev, len, iph, ihl, sync_on_find, l2_info, tun_outer);
 	}
 #endif
+
+#ifdef SFE_6RD_ENABLE
 	if (IPPROTO_IPV6 == protocol) {
 		return sfe_ipv4_recv_tun6rd(si, skb, dev, len, iph, ihl, sync_on_find, l2_info, true);
 	}
+#endif
 
 	sfe_ipv4_exception_stats_inc(si, SFE_IPV4_EXCEPTION_EVENT_UNHANDLED_PROTOCOL);
 
