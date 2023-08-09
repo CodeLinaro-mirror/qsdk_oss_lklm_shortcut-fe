@@ -1155,9 +1155,11 @@ int sfe_ipv6_recv(struct net_device *dev, struct sk_buff *skb, struct sfe_l2_inf
 		return sfe_ipv6_recv_tcp(si, skb, dev, len, iph, ihl, (sync_on_find || is_frag), l2_info);
 	}
 
+#ifdef SFE_IPSEC_ENABLE
 	if (IPPROTO_ESP == next_hdr) {
 		return sfe_ipv6_recv_esp(si, skb, dev, len, iph, ihl, (sync_on_find || is_frag), l2_info, tun_outer);
 	}
+#endif
 
 	if (IPPROTO_ETHERIP == next_hdr) {
 		return sfe_ipv6_recv_etherip(si, skb, dev, len, iph, ihl, sync_on_find, l2_info, tun_outer);
@@ -1167,9 +1169,11 @@ int sfe_ipv6_recv(struct net_device *dev, struct sk_buff *skb, struct sfe_l2_inf
 		return sfe_ipv6_recv_icmp(si, skb, dev, len, iph, ihl);
 	}
 
+#ifdef SFE_DSLITE_ENABLE
 	if (IPPROTO_IPIP == next_hdr) {
 		return sfe_ipv6_recv_tunipip6(si, skb, dev, len, iph, ihl, (sync_on_find || is_frag), l2_info, true);
 	}
+#endif
 
 #ifdef SFE_GRE_TUN_ENABLE
 	if (IPPROTO_GRE == next_hdr) {
