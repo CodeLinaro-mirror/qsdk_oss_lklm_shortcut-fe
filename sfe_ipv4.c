@@ -1841,11 +1841,11 @@ update_done:
 		original_cm->mark = msg->mark_rule.flow_mark;
 		original_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_MARK;
 	}
-	if (msg->valid_flags & SFE_RULE_CREATE_QOS_VALID) {
+	if (msg->valid_flags & SFE_MC_RULE_CREATE_FLAG_QOS_VALID) {
 		original_cm->priority =  msg->qos_rule.flow_qos_tag;
 		original_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_PRIORITY_REMARK;
 	}
-	if (msg->valid_flags & SFE_RULE_CREATE_DSCP_MARKING_VALID) {
+	if (msg->valid_flags & SFE_MC_RULE_CREATE_FLAG_DSCP_MARKING_VALID) {
 		original_cm->dscp = msg->dscp_rule.flow_dscp << SFE_IPV4_DSCP_SHIFT;
 		original_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_DSCP_REMARK;
 	}
