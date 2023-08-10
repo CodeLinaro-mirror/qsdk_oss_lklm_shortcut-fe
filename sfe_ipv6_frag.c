@@ -811,10 +811,6 @@ static int sfe_ipv6_frag_udp_forward(struct sfe_ipv6 *si, struct sk_buff *skb, s
 	 */
 	skb->fast_forwarded = 1;
 
-	/*
-	 * TODO: Remove this check when fast qdisc support is added for 6.1 kernel
-	 */
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0))
 
 	/*
 	 * check if fast qdisc xmit is enabled and send the packet on its way.
@@ -825,7 +821,6 @@ static int sfe_ipv6_frag_udp_forward(struct sfe_ipv6 *si, struct sk_buff *skb, s
 			return 1;
 		}
 	}
-#endif
 
 	dev_queue_xmit(skb);
 	return 1;

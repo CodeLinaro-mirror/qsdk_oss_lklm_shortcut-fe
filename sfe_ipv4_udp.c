@@ -680,10 +680,6 @@ int sfe_ipv4_recv_udp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 	skb->fast_forwarded = 1;
 
 	/*
-	 * TODO: Remove this check when fast qdisc support is added for 6.1 kernel
-	 */
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0))
-	/*
 	 * check if fast qdisc xmit is enabled and send the packet on its way.
 	 */
 	if (cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_FAST_QDISC_XMIT) {
@@ -692,7 +688,6 @@ int sfe_ipv4_recv_udp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 			return 1;
 		}
 	}
-#endif
 
 	dev_queue_xmit(skb);
 
