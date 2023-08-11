@@ -905,6 +905,12 @@ sfe_tx_status_t sfe_create_ipv4_mc_rule_msg(struct sfe_ctx_instance_internal *sf
 				pr4rc.rule_flags |= PPE_RFS_V4_RULE_FLAG_BRIDGE_FLOW;
 			}
 
+			if (rule_create->valid_flags & SFE_RULE_CREATE_QOS_VALID) {
+				pr4rc.qos_rule.flow_qos_tag = rule_create->qos_rule.flow_qos_tag;
+				pr4rc.qos_rule.return_qos_tag = rule_create->qos_rule.return_qos_tag;
+				pr4rc.valid_flags |= PPE_RFS_V4_RULE_FLAG_QOS_VALID;
+			}
+
 			pr4rc.rule_flags |= PPE_RFS_V4_RULE_FLAG_RETURN_VALID | PPE_RFS_V4_RULE_FLAG_FLOW_VALID;
 
 			if (ppe_rfs_ipv4_rule_create(&pr4rc) != PPE_RFS_RET_SUCCESS) {
@@ -1077,6 +1083,12 @@ sfe_tx_status_t sfe_create_ipv4_rule_msg(struct sfe_ctx_instance_internal *sfe_c
 
 			if (rule_create->rule_flags & SFE_RULE_CREATE_FLAG_BRIDGE_FLOW) {
 				pr4rc.rule_flags |= PPE_RFS_V4_RULE_FLAG_BRIDGE_FLOW;
+			}
+
+			if (rule_create->valid_flags & SFE_RULE_CREATE_QOS_VALID) {
+				pr4rc.qos_rule.flow_qos_tag = rule_create->qos_rule.flow_qos_tag;
+				pr4rc.qos_rule.return_qos_tag = rule_create->qos_rule.return_qos_tag;
+				pr4rc.valid_flags |= PPE_RFS_V4_RULE_FLAG_QOS_VALID;
 			}
 
 			pr4rc.rule_flags |= PPE_RFS_V4_RULE_FLAG_RETURN_VALID | PPE_RFS_V4_RULE_FLAG_FLOW_VALID;
@@ -1499,6 +1511,11 @@ sfe_tx_status_t sfe_create_ipv6_mc_rule_msg(struct sfe_ctx_instance_internal *sf
 				pr6rc.rule_flags |= PPE_RFS_V6_RULE_FLAG_BRIDGE_FLOW;
 			}
 
+			if (rule_create->valid_flags & SFE_RULE_CREATE_QOS_VALID) {
+				pr6rc.qos_rule.flow_qos_tag = rule_create->qos_rule.flow_qos_tag;
+				pr6rc.qos_rule.return_qos_tag = rule_create->qos_rule.return_qos_tag;
+				pr6rc.valid_flags |= PPE_RFS_V6_RULE_FLAG_QOS_VALID;
+			}
 			pr6rc.rule_flags |= PPE_RFS_V6_RULE_FLAG_RETURN_VALID | PPE_RFS_V6_RULE_FLAG_FLOW_VALID;
 
 			if (ppe_rfs_ipv6_rule_create(&pr6rc) != PPE_RFS_RET_SUCCESS) {
@@ -1718,6 +1735,12 @@ sfe_tx_status_t sfe_create_ipv6_rule_msg(struct sfe_ctx_instance_internal *sfe_c
 
 			if (rule_create->rule_flags & SFE_RULE_CREATE_FLAG_BRIDGE_FLOW) {
 				pr6rc.rule_flags |= PPE_RFS_V6_RULE_FLAG_BRIDGE_FLOW;
+			}
+
+			if (rule_create->valid_flags & SFE_RULE_CREATE_QOS_VALID) {
+				pr6rc.qos_rule.flow_qos_tag = rule_create->qos_rule.flow_qos_tag;
+				pr6rc.qos_rule.return_qos_tag = rule_create->qos_rule.return_qos_tag;
+				pr6rc.valid_flags |= PPE_RFS_V6_RULE_FLAG_QOS_VALID;
 			}
 
 			pr6rc.rule_flags |= PPE_RFS_V6_RULE_FLAG_RETURN_VALID | PPE_RFS_V6_RULE_FLAG_FLOW_VALID;
