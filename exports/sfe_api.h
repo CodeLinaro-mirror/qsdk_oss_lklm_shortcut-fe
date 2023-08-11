@@ -1162,7 +1162,7 @@ typedef void (*sfe_fls_conn_delete_t)(void *conn);
  * @param	conn	The entry to be updated.
  * @param	skb	The sk_buff to use for statistics.
  */
-typedef void (*sfe_fls_conn_stats_update_t)(void *conn, struct sk_buff *skb);
+typedef bool (*sfe_fls_conn_stats_update_t)(void *conn, struct sk_buff *skb);
 
 /**
  * Registers flow statistics methods with SFE.
