@@ -255,13 +255,14 @@ struct sfe_ipv6_connection_match {
 	__be16 xlate_dest_port;	/* Port/connection ident after destination translation */
 	u16 xlate_dest_csum_adjustment;
 					/* Transport layer checksum adjustment after destination translation */
-	u32 mark;			/* mark for outgoing packet */
 
 	/*
 	 * QoS information
 	 */
 	u32 priority;
 	u32 dscp;
+	u32 mark;			/* mark for outgoing packet */
+	u8 svc_id;			/* service_class for the flow */
 #if defined(SFE_PPE_QOS_SUPPORTED)
 	u8 int_pri;			/* INT_PRI value of PPE QDISC */
 #endif
@@ -471,7 +472,7 @@ struct sfe_ipv6_per_service_class_stats {
  *      Stat entries for each service class.
  */
 struct sfe_ipv6_service_class_stats_db{
-	struct sfe_ipv6_per_service_class_stats psc_stats[SFE_MAX_SERVICE_CLASS_ID];
+	struct sfe_ipv6_per_service_class_stats psc_stats[SFE_MAX_SERVICE_CLASS_ID + 1];
 					/* Per service class stats */
 };
 
