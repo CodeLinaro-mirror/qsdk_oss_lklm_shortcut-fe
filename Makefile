@@ -6,7 +6,7 @@ KERNELVERSION := $(word 1, $(subst ., ,$(KERNELVERSION))).$(word 2, $(subst ., ,
 
 SFE_BASE_OBJS := sfe.o sfe_init.o
 SFE_IPV4_OBJS := sfe_ipv4.o sfe_ipv4_udp.o sfe_ipv4_tcp.o sfe_ipv4_icmp.o sfe_ipv4_tun6rd.o sfe_ipv4_pppoe_br.o sfe_ipv4_esp.o sfe_ipv4_multicast.o
-SFE_IPV6_OBJS := sfe_ipv6.o sfe_ipv6_udp.o sfe_ipv6_tcp.o sfe_ipv6_icmp.o sfe_ipv6_tunipip6.o sfe_ipv6_pppoe_br.o sfe_ipv6_esp.o sfe_ipv6_multicast.o
+SFE_IPV6_OBJS := sfe_ipv6.o sfe_ipv6_udp.o sfe_ipv6_tcp.o sfe_ipv6_icmp.o sfe_ipv6_tunipip6.o sfe_ipv6_pppoe_br.o sfe_ipv6_esp.o sfe_ipv6_multicast.o sfe_ipv6_etherip.o sfe_ipv6_frag.o
 SFE_PPPOE_OBJS := sfe_pppoe.o sfe_pppoe_mgr.o
 
 
@@ -37,6 +37,10 @@ endif
 
 ifdef SFE_RFS_SUPPORTED
 ccflags-y += -DSFE_RFS_SUPPORTED
+endif
+
+ifdef SFE_PPE_QOS_SUPPORTED
+ccflags-y += -DSFE_PPE_QOS_SUPPORTED
 endif
 
 ifdef SFE_PROCESS_LOCAL_OUT

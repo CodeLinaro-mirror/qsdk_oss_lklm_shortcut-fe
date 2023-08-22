@@ -39,6 +39,7 @@
 #include "sfe_trustsec.h"
 #include "sfe_ipv4.h"
 #include "sfe_ipv6.h"
+#include "sfe_ipv6_etherip.h"
 
 extern int max_ipv4_conn;
 extern int max_ipv6_conn;
@@ -761,7 +762,7 @@ static bool sfe_recv_parse_l2(struct net_device *dev, struct sk_buff *skb, struc
 /*
  * sfe_recv_undo_parse_l2()
  */
-static void sfe_recv_undo_parse_l2(struct net_device *dev, struct sk_buff *skb, struct sfe_l2_info *l2_info)
+void sfe_recv_undo_parse_l2(struct net_device *dev, struct sk_buff *skb, struct sfe_l2_info *l2_info)
 {
 	/*
 	 * PPPoE undo
@@ -1630,6 +1631,9 @@ sfe_tx_status_t sfe_create_ipv6_rule_msg(struct sfe_ctx_instance_internal *sfe_c
 		break;
 
 	case IPPROTO_ESP:
+		break;
+
+	case IPPROTO_ETHERIP:
 		break;
 
 	case IPPROTO_RAW:
