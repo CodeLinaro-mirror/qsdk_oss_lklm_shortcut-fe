@@ -2148,7 +2148,9 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 		kfree(c);
 		dev_put(src_dev);
 		dev_put(dest_dev);
-		DEBUG_WARN("%px: Maximum connection count(%d), reached %d\n", msg, sfe_ipv6_max_conn_count(), si->num_connections);
+		if (net_ratelimit()) {
+			DEBUG_WARN("%px: Maximum connection count(%d), reached %d\n", msg, sfe_ipv6_max_conn_count(), si->num_connections);
+		}
 		return -EPERM;
 	}
 
