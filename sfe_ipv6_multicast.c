@@ -249,7 +249,7 @@ int sfe_ipv6_recv_multicast(struct sfe_ipv6 *si, struct sk_buff *skb,
 		 * Update service class stats if SAWF is valid.
 		 */
 		if (likely(cm->sawf_valid)) {
-			service_class_id = SFE_GET_SAWF_SERVICE_CLASS(cm->mark);
+			service_class_id = cm->svc_id;
 			sfe_ipv6_service_class_stats_inc(si, service_class_id, len);
 		}
 	}

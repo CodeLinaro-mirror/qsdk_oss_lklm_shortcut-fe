@@ -62,10 +62,6 @@
  */
 #define SFE_GET_SAWF_TAG(sawf_meta)             (sawf_meta >> SFE_SAWF_TAG_SHIFT)
 				/**< Get tag field in SAWF meta. */
-#define SFE_GET_SAWF_SERVICE_CLASS(sawf_meta)   ((sawf_meta >> SFE_SAWF_SERVICE_CLASS_SHIFT) & SFE_SAWF_SERVICE_CLASS_MASK)
-				/**< Get service class ID field in SAWF meta. */
-#define SFE_GET_SAWF_MSDUQ(sawf_meta)           (sawf_meta & SFE_SAWF_MSDUQ_MASK)
-				/**< Get msduq field in SAWF meta. */
 #define SFE_SAWF_TAG_IS_VALID(tag)              ((tag == SFE_SAWF_VALID_TAG) ? true : false)
 				/**< Check if tag is a valid SAWF tag. */
 
@@ -298,15 +294,17 @@ enum sfe_connection_mark_type {
  * Connection mark structure.
  */
 struct sfe_connection_mark {
-	int protocol;                           /**< Protocol number. */
-	__be32 src_ip[4];                       /**< Source IP address. */
-	__be32 dest_ip[4];                      /**< Destination IP address. */
-	__be16 src_port;                        /**< Source port number. */
-	__be16 dest_port;                       /**< Destination port number. */
-	u32 flow_mark;                          /**< Mark to be updated for the flow direction. */
-	u32 return_mark;                        /**< Mark to be updated for the return direction. */
-	u32 flags;                              /**< State of marks. */
-	enum sfe_connection_mark_type type;     /**< Type of the marking. */
+	int protocol;				/**< Protocol number. */
+	__be32 src_ip[4];			/**< Source IP address. */
+	__be32 dest_ip[4];			/**< Destination IP address. */
+	__be16 src_port;			/**< Source port number. */
+	__be16 dest_port;			/**< Destination port number. */
+	u32 flow_mark;				/**< Mark to be updated for the flow direction. */
+	u32 return_mark;			/**< Mark to be updated for the return direction. */
+	u8 flow_svc_id;			/**< Service class in the flow direction. */
+	u8 return_svc_id;		/**< Service class in the return direction. */
+	u32 flags;				/**< State of marks. */
+	enum sfe_connection_mark_type type;	/**< Type of the marking. */
 };
 
 /**
@@ -468,8 +466,10 @@ struct sfe_acceleration_direction_rule {
  * Service class rule information in both directions.
  */
 struct sfe_service_class_rule {
-	uint32_t flow_mark;		/**< Service class information in flow direction. */
-	uint32_t return_mark;		/**< Service class information in return direction. */
+	uint32_t flow_mark;		/**< SAWF metadata information in flow direction. */
+	uint32_t return_mark;		/**< SAWF metadata information in return direction. */
+	uint8_t flow_svc_id;		/**< Service class id in flow direction. */
+	uint8_t return_svc_id;		/**< Service class id in return direction. */
 };
 
 /**

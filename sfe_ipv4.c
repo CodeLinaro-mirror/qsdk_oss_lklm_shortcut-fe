@@ -1298,6 +1298,7 @@ void sfe_ipv4_mark_rule_update(struct sfe_connection_mark *mark)
 	case SFE_CONNECTION_MARK_TYPE_SAWFMARK:
 		if (mark->flags & SFE_SAWF_MARK_FLOW_VALID) {
 			c->original_match->mark = mark->flow_mark;
+			c->original_match->svc_id = mark->flow_svc_id;
 			c->original_match->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_MARK;
 			c->original_match->sawf_valid = true;
 		}
@@ -1305,6 +1306,7 @@ void sfe_ipv4_mark_rule_update(struct sfe_connection_mark *mark)
 		if (c->reply_match) {
 			if (mark->flags & SFE_SAWF_MARK_RETURN_VALID) {
 				c->reply_match->mark = mark->return_mark;
+				c->reply_match->svc_id = mark->return_svc_id;
 				c->reply_match->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_MARK;
 				c->reply_match->sawf_valid = true;
 			}
@@ -1860,6 +1862,7 @@ update_done:
 	flow_sawf_tag = SFE_GET_SAWF_TAG(msg->sawf_rule.flow_mark);
 	if (likely(SFE_SAWF_TAG_IS_VALID(flow_sawf_tag))) {
 		original_cm->mark = msg->sawf_rule.flow_mark;
+		original_cm->svc_id = msg->sawf_rule.flow_svc_id;
 		original_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_MARK;
 		original_cm->sawf_valid = true;
 	}
@@ -2255,6 +2258,7 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	flow_sawf_tag = SFE_GET_SAWF_TAG(msg->sawf_rule.flow_mark);
 	if (likely(SFE_SAWF_TAG_IS_VALID(flow_sawf_tag))) {
 		original_cm->mark = msg->sawf_rule.flow_mark;
+		original_cm->svc_id = msg->sawf_rule.flow_svc_id;
 		original_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_MARK;
 		original_cm->sawf_valid = true;
 	}
@@ -2602,6 +2606,7 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	return_sawf_tag = SFE_GET_SAWF_TAG(msg->sawf_rule.return_mark);
 	if (likely(SFE_SAWF_TAG_IS_VALID(return_sawf_tag))) {
 		reply_cm->mark = msg->sawf_rule.return_mark;
+		reply_cm->svc_id = msg->sawf_rule.return_svc_id;
 		reply_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_MARK;
 		reply_cm->sawf_valid = true;
 	}
@@ -3400,7 +3405,7 @@ static int sfe_ipv4_debug_dev_read_connections_connection(struct sfe_ipv4 *si, c
 	u64 last_sync_jiffies;
 	u32 src_mark, dest_mark, src_priority, dest_priority, src_dscp, dest_dscp;
 	bool original_cm_sawf_valid, reply_cm_sawf_valid;
-	u32 flow_service_class, return_service_class;
+	u32 flow_svc_id, return_svc_id;
 	u32 flow_msduq, return_msduq;
 	u32 packet, byte, original_cm_flags;
 	u16 pppoe_session_id;
@@ -3459,8 +3464,8 @@ static int sfe_ipv4_debug_dev_read_connections_connection(struct sfe_ipv4 *si, c
 		dest_mark = reply_cm->mark;
 		reply_fast_xmit = (reply_cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_FAST_XMIT);
 		reply_cm_sawf_valid = reply_cm->sawf_valid;
-		return_service_class = SFE_GET_SAWF_SERVICE_CLASS(reply_cm->mark);
-		return_msduq = SFE_GET_SAWF_MSDUQ(reply_cm->mark);
+		return_svc_id = reply_cm->svc_id;
+		return_msduq = reply_cm->mark;
 #ifdef CONFIG_NF_FLOW_COOKIE
 		dst_flow_cookie = reply_cm->flow_cookie;
 #endif
@@ -3473,7 +3478,7 @@ static int sfe_ipv4_debug_dev_read_connections_connection(struct sfe_ipv4 *si, c
 		dest_mark = 0;
 		reply_fast_xmit = 0;
 		reply_cm_sawf_valid = 0;
-		return_service_class = 0;
+		return_svc_id = 0;
 		return_msduq = 0;
 #ifdef CONFIG_NF_FLOW_COOKIE
 		dst_flow_cookie = 0;
@@ -3484,8 +3489,8 @@ static int sfe_ipv4_debug_dev_read_connections_connection(struct sfe_ipv4 *si, c
 	pppoe_session_id = original_cm->pppoe_session_id;
 	ether_addr_copy(pppoe_remote_mac, original_cm->pppoe_remote_mac);
 	original_cm_sawf_valid = original_cm->sawf_valid;
-	flow_service_class = SFE_GET_SAWF_SERVICE_CLASS(original_cm->mark);
-	flow_msduq = SFE_GET_SAWF_MSDUQ(original_cm->mark);
+	flow_svc_id = original_cm->svc_id;
+	flow_msduq = original_cm->mark;
 #ifdef CONFIG_NF_FLOW_COOKIE
 	src_flow_cookie = original_cm->flow_cookie;
 #endif
@@ -3546,7 +3551,7 @@ static int sfe_ipv4_debug_dev_read_connections_connection(struct sfe_ipv4 *si, c
 
 	if (original_cm_sawf_valid) {
 		bytes_read += snprintf(msg + bytes_read, length - bytes_read, "flow_service_class=\"%d\" flow_msduq = \"0x%x\" ",
-				flow_service_class, flow_msduq);
+				flow_svc_id, flow_msduq);
 	}
 
 	if ((length - bytes_read) <= 0) {
@@ -3555,7 +3560,7 @@ static int sfe_ipv4_debug_dev_read_connections_connection(struct sfe_ipv4 *si, c
 
 	if (reply_cm_sawf_valid) {
 		bytes_read += snprintf(msg + bytes_read, length - bytes_read, "return_service_class=\"%d\" return_msduq = \"0x%x\" ",
-				return_service_class, return_msduq);
+				return_svc_id, return_msduq);
 	}
 
 	if (original_cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_MULTICAST) {
