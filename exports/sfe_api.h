@@ -66,6 +66,13 @@
 				/**< Check if tag is a valid SAWF tag. */
 
 /**
+ * MHT port information placement in mark field.
+ */
+#define SFE_MHT_VALID_TAG		0xBB	/**< Valid MHT tag value. */
+#define SFE_MHT_TAG_SHIFT		24	/**< Number of bit shifts for MHT tag. */
+
+#define SFE_MHT_MAX_ACCELERATION_RETRY	256	/**< Maximum retry for SFE acceleration for MHT. */
+/**
 * @}
 */
 
