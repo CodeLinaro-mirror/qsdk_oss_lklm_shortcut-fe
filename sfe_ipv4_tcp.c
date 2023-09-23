@@ -32,6 +32,37 @@
 #include "sfe_vlan.h"
 #include "sfe_trustsec.h"
 
+static uint8_t tso_clear_fixed_id __read_mostly;		/* TSO clear fixed id */
+
+/*
+ * sfe_tso_clear_fixed_id_cfg_get()
+ *	Get tso clear fixed id value
+ */
+uint8_t sfe_tso_clear_fixed_id_cfg_get(void)
+{
+	return tso_clear_fixed_id;
+}
+
+/*
+ * sfe_tso_clear_fixed_id_cfg_set()
+ *	Set tso clear fixed id value
+ */
+int sfe_tso_clear_fixed_id_cfg_set(uint8_t val)
+{
+	if (tso_clear_fixed_id && val) {
+		pr_err("TSO clear fixed id is already enabled\n");
+		return -EINVAL;
+	}
+
+	if (!tso_clear_fixed_id && !val) {
+		pr_err("TSO clear fixed id is already disabled\n");
+		return -EINVAL;
+	}
+
+	tso_clear_fixed_id = val;
+	return 0;
+}
+
 /*
  * sfe_ipv4_process_tcp_option_sack()
  *	Parse TCP SACK option and update ack according
@@ -606,6 +637,20 @@ int sfe_ipv4_recv_tcp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 	 */
 
 	/*
+	 * In case of TSO, when DF bit is set in TCP frames in gro path,
+	 * it sets SKB_GSO_TCP_FIXEDID in gso_type but our HW does not
+	 * support fixed ID. Hence, in normal SFE+TSO case it goes through
+	 * GSO instead of TSO. In case of SFE+PPPOE+TSO if fixed id is
+	 * set it can't do TSO as HW doesn't support it and also it can't
+	 * do GSO because GSO currently does not support PPPoE header.
+	 * In both the above cases, if TSO has to be used then clear the
+	 * fixed id from skb gso type and it can be done using sys param.
+	 */
+	if (unlikely(tso_clear_fixed_id)) {
+		skb_shinfo(skb)->gso_type &= ~(SKB_GSO_TCP_FIXEDID);
+	}
+
+	/*
 	 * TSO is not supported for maple. Hence SFE_IPV4_CONNECTION_MATCH_FLAG_TSO_ENABLE will be disabled for maple.
 	 * For SFE + PPPoE flow, GSO is not supported but TSO is supported. If TSO is enabled and if the number of segments is more than 32, flush the rule so that it goes throught host.
 	 * For PPPoE flows, add PPPoE header before L2 header is added.
@@ -613,7 +658,7 @@ int sfe_ipv4_recv_tcp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 	if (unlikely(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_PPPOE_ENCAP)) {
 #if defined(SFE_TSO_MAX_SEG_LIMIT_ENABLE)
 		if (((!(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_TSO_ENABLE)) && skb_shinfo(skb)->gso_segs) ||
-			(skb_shinfo(skb)->gso_segs >= SFE_TSO_SEG_MAX)) {
+			(skb_shinfo(skb)->gso_segs >= SFE_TSO_SEG_MAX) || (skb_shinfo(skb)->gso_type & SKB_GSO_TCP_FIXEDID)) {
 			struct sfe_ipv4_connection *c = cm->connection;
 			spin_lock_bh(&si->lock);
 			ret = sfe_ipv4_remove_connection(si, c);
