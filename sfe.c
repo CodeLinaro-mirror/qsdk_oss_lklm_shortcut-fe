@@ -38,6 +38,7 @@
 #include "sfe_vlan.h"
 #include "sfe_trustsec.h"
 #include "sfe_ipv4.h"
+#include "sfe_ipv4_tcp.h"
 #include "sfe_ipv6.h"
 #include "sfe_ipv6_etherip.h"
 
@@ -2355,6 +2356,59 @@ static const struct device_attribute sfe_pppoe_br_accel_mode_attr =
 	__ATTR(pppoe_br_accel_mode, 0644, sfe_get_pppoe_br_accel_mode, sfe_set_pppoe_br_accel_mode);
 
 /*
+ * sfe_get_tso_clear_fixed_id()
+ *	TSO clear fixed id is enabled/disabled
+ */
+ssize_t sfe_get_tso_clear_fixed_id(struct device *dev,
+				     struct device_attribute *attr,
+				     char *buf)
+{
+	ssize_t len;
+	uint8_t fixed_id_val;
+
+	fixed_id_val = sfe_tso_clear_fixed_id_cfg_get();
+	len = snprintf(buf, (ssize_t)(PAGE_SIZE), "TSO clear fixed id is %s\n", fixed_id_val ? "enabled" : "disabled");
+	return len;
+}
+
+/*
+ * sfe_set_tso_clear_fixed_id()
+ *	Enable or disable tso clear fixed id.
+ */
+ssize_t sfe_set_tso_clear_fixed_id(struct device *dev, struct device_attribute *attr,
+				const char *buf, size_t count)
+{
+	uint8_t val;
+	int ret;
+
+	ret = sscanf(buf, "%hhu", &val);
+	if (ret != 1) {
+		pr_err("Wrong input, %s\n", buf);
+		return -EINVAL;
+	}
+
+	if (val != 1 && val != 0) {
+		pr_err("Input should be either 1 or 0, (%s)\n", buf);
+		return -EINVAL;
+	}
+
+	ret = sfe_tso_clear_fixed_id_cfg_set(val);
+	if (ret) {
+		pr_err("Provided value is already set %s\n", buf);
+		return -EINVAL;
+	}
+
+	return count;
+}
+
+/*
+ * sfe_tso_clear_fixed_id_attr
+ * 	sysfs attributes.
+ */
+static const struct device_attribute sfe_tso_clear_fixed_id_attr =
+	__ATTR(tso_clear_fixed_id,  0644, sfe_get_tso_clear_fixed_id, sfe_set_tso_clear_fixed_id);
+
+/*
  * sfe_fls_register()
  *	Register flow statistics functions with SFE.
  */
@@ -2441,6 +2495,14 @@ int sfe_init_if(void)
 		goto exit2;
 	}
 #endif
+	/*
+	 * Create sys/sfe/tso_clear_fixed_id
+	 */
+	result = sysfs_create_file(sfe_ctx->sys_sfe, &sfe_tso_clear_fixed_id_attr.attr);
+	if (result) {
+		DEBUG_ERROR("failed to register TSO clear fixed id sysfs file: %d\n", result);
+		goto exit2;
+	}
 
 	sfe_pppoe_mgr_init();
 
