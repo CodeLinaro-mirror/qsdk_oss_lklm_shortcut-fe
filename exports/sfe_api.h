@@ -979,6 +979,17 @@ int sfe_ipv4_max_conn_count(void);
 extern sfe_tx_status_t sfe_ipv4_tx(struct sfe_ctx_instance *sfe_ctx, struct sfe_ipv4_msg *msg);
 
 /**
+ * Transmits an IPv4 message to the SFE.
+ *
+ * @param	sfe_ctx		SFE context.
+ * @param	msg		The IPv4 message.
+ *
+ * @return
+ * ACK/NACK msg based on successful accel/deaccel.
+ */
+extern enum sfe_cmn_response sfe_ipv4_tx_with_resp(struct sfe_ctx_instance *sfe_ctx, struct sfe_ipv4_msg *msg);
+
+/**
  * Registers a notifier callback for IPv4 messages from the SFE.
  *
  * @param	one_rule_cb		The callback pointer for one rule.
@@ -1031,6 +1042,17 @@ int sfe_ipv6_max_conn_count(void);
  * The status of the Tx operation (#sfe_tx_status_t).
  */
 extern sfe_tx_status_t sfe_ipv6_tx(struct sfe_ctx_instance *sfe_ctx, struct sfe_ipv6_msg *msg);
+
+/**
+ * Transmits an IPv6 message to the SFE.
+ *
+ * @param	sfe_ctx		The SFE context.
+ * @param	msg		The IPv6 message.
+ *
+ * @return
+ * ACK/NACK msg based on successful accel/deaccel.
+ */
+extern enum sfe_cmn_response sfe_ipv6_tx_with_resp(struct sfe_ctx_instance *sfe_ctx, struct sfe_ipv6_msg *msg);
 
 /**
  * Registers a notifier callback for IPv6 messages from the SFE.
