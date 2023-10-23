@@ -417,9 +417,9 @@ int sfe_ipv6_recv_udp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 	 * divert.
 	 */
 	if (unlikely(cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_MULTICAST)) {
-		sfe_ipv6_recv_multicast(si, skb, ihl, len, cm, l2_info, tun_outer, true);
+		ret = sfe_ipv6_recv_multicast(si, skb, ihl, len, cm, l2_info, tun_outer, true);
 		rcu_read_unlock();
-		return 1;
+		return ret;
 	}
 
 	/*
