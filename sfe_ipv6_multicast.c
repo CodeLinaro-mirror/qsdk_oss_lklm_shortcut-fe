@@ -211,6 +211,13 @@ int sfe_ipv6_recv_multicast(struct sfe_ipv6 *si, struct sk_buff *skb,
 	atomic_add(len, &cm->rx_byte_count);
 
 	/*
+	 * Temporary WAR to avoid SKB leak where mc_list is empty here.
+	 */
+	if (list_empty(&cm->mc_list)) {
+		return 0;
+	}
+
+	/*
 	 * Update DSCP
 	 */
 	if (unlikely(cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_DSCP_REMARK)) {
