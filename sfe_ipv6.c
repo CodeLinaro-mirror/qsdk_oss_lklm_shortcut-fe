@@ -1160,7 +1160,7 @@ int sfe_ipv6_recv(struct net_device *dev, struct sk_buff *skb, struct sfe_l2_inf
 	}
 
 	if (IPPROTO_ETHERIP == next_hdr) {
-		return sfe_ipv6_recv_etherip(si, skb, dev, len, iph, ihl, sync_on_find, l2_info, tun_outer);
+		return sfe_ipv6_recv_etherip(si, skb, dev, len, iph, ihl, (sync_on_find || is_frag), l2_info, tun_outer);
 	}
 
 	if (IPPROTO_ICMPV6 == next_hdr) {
