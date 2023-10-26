@@ -885,7 +885,7 @@ void sfe_ipv6_sync_status(struct sfe_ipv6 *si,
 				      struct sfe_ipv6_connection *c,
 				      sfe_sync_reason_t reason)
 {
-	struct sfe_connection_sync sis;
+	struct sfe_connection_sync sis = {/*zero*/};
 	u64 now_jiffies;
 	sfe_sync_rule_callback_t sync_rule_callback;
 
@@ -3338,7 +3338,7 @@ static void sfe_ipv6_periodic_sync(struct work_struct *work)
 	while (likely(c && quota)) {
 		struct sfe_ipv6_connection_match *cm;
 		struct sfe_ipv6_connection_match *counter_cm;
-		struct sfe_connection_sync sis;
+		struct sfe_connection_sync sis = {/*zero*/};
 
 		cm = c->original_match;
 		counter_cm = c->reply_match;
