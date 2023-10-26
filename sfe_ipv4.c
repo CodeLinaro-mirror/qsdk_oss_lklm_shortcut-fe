@@ -2145,7 +2145,7 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 		 * request to create the connection rule contains more
 		 * up-to-date information. Check and update accordingly.
 		 */
-		sfe_ipv4_update_protocol_state(c, msg);
+		sfe_ipv4_update_protocol_state(c_old, msg);
 		spin_unlock_bh(&si->lock);
 
 		kfree(reply_cm);
