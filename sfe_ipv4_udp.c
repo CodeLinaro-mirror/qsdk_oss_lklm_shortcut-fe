@@ -481,13 +481,13 @@ int sfe_ipv4_recv_udp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 				u32 sum;
 
 				if (unlikely(skb->ip_summed == CHECKSUM_PARTIAL)) {
-					sum = udp_csum + cm->xlate_src_partial_csum_adjustment;
+					sum = ~udp_csum + cm->xlate_src_partial_csum_adjustment;
 				} else {
-					sum = udp_csum + cm->xlate_src_csum_adjustment;
+					sum = ~udp_csum + cm->xlate_src_csum_adjustment;
 				}
 
 				sum = (sum & 0xffff) + (sum >> 16);
-				udph->check = (u16)sum;
+				udph->check = (u16)~sum;
 			}
 		}
 	}
@@ -515,13 +515,13 @@ int sfe_ipv4_recv_udp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 				 * for IPv4/IPv6 UDP/TCP
 				 */
 				if (unlikely(skb->ip_summed == CHECKSUM_PARTIAL)) {
-					sum = udp_csum + cm->xlate_dest_partial_csum_adjustment;
+					sum = ~udp_csum + cm->xlate_dest_partial_csum_adjustment;
 				} else {
-					sum = udp_csum + cm->xlate_dest_csum_adjustment;
+					sum = ~udp_csum + cm->xlate_dest_csum_adjustment;
 				}
 
 				sum = (sum & 0xffff) + (sum >> 16);
-				udph->check = (u16)sum;
+				udph->check = (u16)~sum;
 			}
 		}
 	}

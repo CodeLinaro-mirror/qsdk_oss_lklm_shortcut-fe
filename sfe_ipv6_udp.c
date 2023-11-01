@@ -525,9 +525,9 @@ int sfe_ipv6_recv_udp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 		if (unlikely(!hw_csum)) {
 			udp_csum = udph->check;
 			if (likely(udp_csum)) {
-				u32 sum = udp_csum + cm->xlate_src_csum_adjustment;
+				u32 sum = ~udp_csum + cm->xlate_src_csum_adjustment;
 				sum = (sum & 0xffff) + (sum >> 16);
-				udph->check = (u16)sum;
+				udph->check = (u16)~sum;
 			}
 		}
 	}
@@ -551,9 +551,9 @@ int sfe_ipv6_recv_udp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 		if (unlikely(!hw_csum)) {
 			udp_csum = udph->check;
 			if (likely(udp_csum)) {
-				u32 sum = udp_csum + cm->xlate_dest_csum_adjustment;
+				u32 sum = ~udp_csum + cm->xlate_dest_csum_adjustment;
 				sum = (sum & 0xffff) + (sum >> 16);
-				udph->check = (u16)sum;
+				udph->check = (u16)~sum;
 			}
 		}
 	}
