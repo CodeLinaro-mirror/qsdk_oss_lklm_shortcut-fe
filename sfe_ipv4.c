@@ -1502,6 +1502,10 @@ struct sfe_ipv4_mc_dest *sfe_ipv4_allocate_mc_dest(struct sfe_ipv4_connection_ma
 		skb_changed = 1;
 	}
 
+	if (if_rule->rule_flags & SFE_MC_RULE_CREATE_IF_FLAG_BRIDGE_FLOW) {
+		dest->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_BRIDGE_FLOW;
+	}
+
 	/*
 	 * For the non-arp interface, we don't write L2 HDR.
 	 */
