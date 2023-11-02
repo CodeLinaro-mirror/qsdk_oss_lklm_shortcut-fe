@@ -218,6 +218,13 @@ int sfe_ipv6_recv_multicast(struct sfe_ipv6 *si, struct sk_buff *skb,
 	}
 
 	/*
+         * duplicated packet with VLan Passthrough
+         */
+        if (unlikely((cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_BRIDGE_VLAN_PASSTHROUGH) && !l2_info->vlan_hdr_cnt)) {
+                return 0;
+        }
+
+	/*
 	 * Update DSCP
 	 */
 	if (unlikely(cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_DSCP_REMARK)) {
