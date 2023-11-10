@@ -20,6 +20,11 @@ ifeq ($(findstring 4.4, $(KERNELVERSION)),)
   ccflags-y += -DSFE_GRE_TUN_ENABLE
 endif
 
+ifdef SFE_L2TPV3_SUPPORTED
+SFE_IPV4_OBJS += sfe_ipv4_l2tpv3.o
+SFE_IPV6_OBJS += sfe_ipv6_l2tpv3.o
+ccflags-y += -DSFE_L2TPV3_ENABLED
+endif
 
 obj-m += qca-nss-sfe.o
 
