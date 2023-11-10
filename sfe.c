@@ -249,6 +249,12 @@ static bool sfe_routed_dev_allow(struct net_device *dev, bool is_routed,  bool c
 	}
 #endif
 
+#ifdef SFE_L2TPV3_ENABLED
+	if (dev->priv_flags_ext & (IFF_EXT_ETH_L2TPV3)) {
+		return true;
+	}
+#endif
+
 	if (dev->type == SFE_IPSEC_TUNNEL_TYPE) {
 		return true;
 	}
@@ -274,6 +280,13 @@ bool sfe_dev_has_hw_csum(struct net_device *dev)
 		return false;
 	}
 #endif
+
+#ifdef SFE_L2TPV3_ENABLED
+	if (dev->priv_flags_ext & (IFF_EXT_ETH_L2TPV3)) {
+		return false;
+	}
+#endif
+
 	/*
 	 * Tunnel MAP-E/DS-LITE share the same Routing netlink operator
 	 * whose kind is "ip6tnl". The HW csum for these tunnel devices should be disabled.
@@ -973,20 +986,13 @@ sfe_tx_status_t sfe_create_ipv4_rule_msg(struct sfe_ctx_instance_internal *sfe_c
 		break;
 
 	case IPPROTO_UDP:
-		break;
-
 	case IPPROTO_GRE:
-		break;
-
+	case IPPROTO_L2TP:
 	case IPPROTO_IPV6:
-		break;
-
 	case IPPROTO_ESP:
-		break;
-
 	case IPPROTO_RAW:
 		/*
-		 * for accelerating PPPoE bridged flows using 3-tuple information
+		 * IPPROTO_RAW for accelerating PPPoE bridged flows using 3-tuple information
 		 */
 		break;
 
@@ -1623,23 +1629,14 @@ sfe_tx_status_t sfe_create_ipv6_rule_msg(struct sfe_ctx_instance_internal *sfe_c
 		break;
 
 	case IPPROTO_UDP:
-		break;
-
 	case IPPROTO_IPIP:
-		break;
-
 	case IPPROTO_GRE:
-		break;
-
 	case IPPROTO_ESP:
-		break;
-
 	case IPPROTO_ETHERIP:
-		break;
-
+	case IPPROTO_L2TP:
 	case IPPROTO_RAW:
 		/*
-		 * for accelerating PPPoE bridged flows using 3-tuple information
+		 * IPPROTO_RAW for accelerating PPPoE bridged flows using 3-tuple information
 		 */
 		break;
 

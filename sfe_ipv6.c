@@ -55,6 +55,7 @@
 #include "sfe_ipv6_esp.h"
 #include "sfe_ipv6_etherip.h"
 #include "sfe_ipv6_frag.h"
+#include "sfe_ipv6_l2tpv3.h"
 
 #define sfe_ipv6_addr_copy(src, dest) memcpy((void *)(dest), (void *)(src), 16)
 
@@ -1169,6 +1170,12 @@ int sfe_ipv6_recv(struct net_device *dev, struct sk_buff *skb, struct sfe_l2_inf
 #ifdef SFE_GRE_TUN_ENABLE
 	if (IPPROTO_GRE == next_hdr) {
 		return sfe_ipv6_recv_gre(si, skb, dev, len, iph, ihl, (sync_on_find || is_frag), l2_info, tun_outer);
+	}
+#endif
+
+#ifdef SFE_L2TPV3_ENABLED
+	if (IPPROTO_L2TP == next_hdr) {
+		return sfe_ipv6_recv_l2tpv3(si, skb, dev, len, iph, ihl, (sync_on_find || is_frag), l2_info, tun_outer);
 	}
 #endif
 
@@ -2334,6 +2341,10 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 		original_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_PASSTHROUGH;
 	}
 
+	if ((IPPROTO_L2TP == tuple->protocol) && !sfe_ipv6_is_local_ip(si, (uint8_t *)original_cm->match_dest_ip)) {
+		original_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_PASSTHROUGH;
+	}
+
 	/*
 	 * In decap case, we should not set cm->proto for bypass ipip6 packets.
 	 */
@@ -2613,7 +2624,11 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 		reply_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_PASSTHROUGH;
 	}
 
-        /*
+	if ((IPPROTO_L2TP == tuple->protocol) && !sfe_ipv6_is_local_ip(si, (uint8_t *)reply_cm->match_dest_ip)) {
+		reply_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_PASSTHROUGH;
+	}
+
+	/*
          * In decap case, we should not set cm->proto for bypass ipip6 packets.
          */
 	if(IPPROTO_IPIP == tuple->protocol && !sfe_dev_is_ipip6(src_dev)) {
@@ -2793,6 +2808,26 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 			dev_put(src_dev);
 			dev_put(dest_dev);
 			DEBUG_WARN("sfe: GRE proto handler is not registered\n");
+			return -EPERM;
+		}
+	}
+#endif
+
+#ifdef SFE_L2TPV3_ENABLED
+	if ((IPPROTO_L2TP == tuple->protocol) && !(reply_cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_PASSTHROUGH)) {
+		rcu_read_lock();
+		reply_cm->proto = rcu_dereference(inet6_protos[IPPROTO_L2TP]);
+		rcu_read_unlock();
+
+		if (unlikely(!reply_cm->proto)) {
+			this_cpu_inc(si->stats_pcpu->connection_create_failures64);
+			spin_unlock_bh(&si->lock);
+			kfree(reply_cm);
+			kfree(original_cm);
+			kfree(c);
+			dev_put(src_dev);
+			dev_put(dest_dev);
+			DEBUG_WARN("sfe: L2TP proto handler is not registered\n");
 			return -EPERM;
 		}
 	}
