@@ -427,9 +427,9 @@ int sfe_ipv4_recv_udp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 	 * divert.
 	 */
 	if (unlikely(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_MULTICAST)) {
-		sfe_ipv4_recv_multicast(si, skb, ihl, len, cm, l2_info, tun_outer);
+		ret = sfe_ipv4_recv_multicast(si, skb, ihl, len, cm, l2_info, tun_outer);
 		rcu_read_unlock();
-		return 1;
+		return ret;
 	}
 
 	/*
