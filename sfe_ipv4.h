@@ -3,7 +3,7 @@
  *	Shortcut forwarding engine header file for IPv4.
  *
  * Copyright (c) 2013-2016, 2019-2020, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -400,6 +400,11 @@ enum sfe_ipv4_exception_events {
 	SFE_IPV4_EXCEPTION_EVENT_L2TPV3_IP_OPTIONS_OR_INITIAL_FRAGMENT,
 	SFE_IPV4_EXCEPTION_EVENT_L2TPV3_SMALL_TTL,
 	SFE_IPV4_EXCEPTION_EVENT_L2TPV3_NEEDS_FRAGMENTATION,
+	SFE_IPV4_EXCEPTION_EVENT_FRAG_FAILS_NOMEM,
+	SFE_IPV4_EXCEPTION_EVENT_FRAG_FAILS_DF_SET,
+	SFE_IPV4_EXCEPTION_EVENT_NON_LINEAR_PACKET_NEEDS_FRAGMENTATION,
+	SFE_IPV4_EXCEPTION_EVENT_MULTICAST_PACKET_NEEDS_FRAGMENTATION,
+	SFE_IPV4_EXCEPTION_EVENT_FRAG_FAILS_BRIDGED_FLOW,
 	SFE_IPV4_EXCEPTION_EVENT_LAST
 };
 
@@ -554,6 +559,8 @@ struct sfe_ipv4_connection_match *
 sfe_ipv4_find_connection_match_rcu(struct sfe_ipv4 *si, struct net_device *dev, u8 protocol,
 					__be32 src_ip, __be16 src_port,
 					__be32 dest_ip, __be16 dest_port);
+int sfe_ipv4_frag_prepare(struct sfe_ipv4 *si, struct sfe_ipv4_connection_match *cm, struct sk_buff *skb, struct sk_buff_head *head, struct iphdr *iph);
+void sfe_ipv4_frag(struct sfe_ipv4 *si, struct sfe_ipv4_connection_match *cm, struct sk_buff *skb, struct sk_buff_head *head, struct iphdr *iph, bool fast_xmit);
 
 void sfe_ipv4_exit(void);
 int sfe_ipv4_init(void);
