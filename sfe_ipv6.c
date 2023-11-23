@@ -226,20 +226,20 @@ static void sfe_ipv6_connection_mc_dest_compute_translations(struct sfe_ipv6_con
 		 * edit packets in this stream very quickly.  The algorithm is from RFC1624.
 		 */
 		idx_32 = diff;
-		*(idx_32++) = cm->match_src_ip[0].addr[0];
-		*(idx_32++) = cm->match_src_ip[0].addr[1];
-		*(idx_32++) = cm->match_src_ip[0].addr[2];
-		*(idx_32++) = cm->match_src_ip[0].addr[3];
+		*(idx_32++) = ~cm->match_src_ip[0].addr[0];
+		*(idx_32++) = ~cm->match_src_ip[0].addr[1];
+		*(idx_32++) = ~cm->match_src_ip[0].addr[2];
+		*(idx_32++) = ~cm->match_src_ip[0].addr[3];
 
 		idx_16 = (u16 *)idx_32;
-		*(idx_16++) = cm->match_src_port;
-		*(idx_16++) = ~dest->xlate_src_ident;
+		*(idx_16++) = ~cm->match_src_port;
+		*(idx_16++) = dest->xlate_src_ident;
 		idx_32 = (u32 *)idx_16;
 
-		*(idx_32++) = ~dest->xlate_src_ip[0];
-		*(idx_32++) = ~dest->xlate_src_ip[1];
-		*(idx_32++) = ~dest->xlate_src_ip[2];
-		*(idx_32++) = ~dest->xlate_src_ip[3];
+		*(idx_32++) = dest->xlate_src_ip[0];
+		*(idx_32++) = dest->xlate_src_ip[1];
+		*(idx_32++) = dest->xlate_src_ip[2];
+		*(idx_32++) = dest->xlate_src_ip[3];
 
 		/*
 		 * When we compute this fold it down to a 16-bit offset
@@ -307,20 +307,20 @@ static void sfe_ipv6_connection_match_compute_translations(struct sfe_ipv6_conne
 		 * edit packets in this stream very quickly.  The algorithm is from RFC1624.
 		 */
 		idx_32 = diff;
-		*(idx_32++) = cm->match_src_ip[0].addr[0];
-		*(idx_32++) = cm->match_src_ip[0].addr[1];
-		*(idx_32++) = cm->match_src_ip[0].addr[2];
-		*(idx_32++) = cm->match_src_ip[0].addr[3];
+		*(idx_32++) = ~cm->match_src_ip[0].addr[0];
+		*(idx_32++) = ~cm->match_src_ip[0].addr[1];
+		*(idx_32++) = ~cm->match_src_ip[0].addr[2];
+		*(idx_32++) = ~cm->match_src_ip[0].addr[3];
 
 		idx_16 = (u16 *)idx_32;
-		*(idx_16++) = cm->match_src_port;
-		*(idx_16++) = ~cm->xlate_src_port;
+		*(idx_16++) = ~cm->match_src_port;
+		*(idx_16++) = cm->xlate_src_port;
 		idx_32 = (u32 *)idx_16;
 
-		*(idx_32++) = ~cm->xlate_src_ip[0].addr[0];
-		*(idx_32++) = ~cm->xlate_src_ip[0].addr[1];
-		*(idx_32++) = ~cm->xlate_src_ip[0].addr[2];
-		*(idx_32++) = ~cm->xlate_src_ip[0].addr[3];
+		*(idx_32++) = cm->xlate_src_ip[0].addr[0];
+		*(idx_32++) = cm->xlate_src_ip[0].addr[1];
+		*(idx_32++) = cm->xlate_src_ip[0].addr[2];
+		*(idx_32++) = cm->xlate_src_ip[0].addr[3];
 
 		/*
 		 * When we compute this fold it down to a 16-bit offset
@@ -350,20 +350,20 @@ static void sfe_ipv6_connection_match_compute_translations(struct sfe_ipv6_conne
 		 * edit packets in this stream very quickly.  The algorithm is from RFC1624.
 		 */
 		idx_32 = diff;
-		*(idx_32++) = cm->match_dest_ip[0].addr[0];
-		*(idx_32++) = cm->match_dest_ip[0].addr[1];
-		*(idx_32++) = cm->match_dest_ip[0].addr[2];
-		*(idx_32++) = cm->match_dest_ip[0].addr[3];
+		*(idx_32++) = ~cm->match_dest_ip[0].addr[0];
+		*(idx_32++) = ~cm->match_dest_ip[0].addr[1];
+		*(idx_32++) = ~cm->match_dest_ip[0].addr[2];
+		*(idx_32++) = ~cm->match_dest_ip[0].addr[3];
 
 		idx_16 = (u16 *)idx_32;
-		*(idx_16++) = cm->match_dest_port;
-		*(idx_16++) = ~cm->xlate_dest_port;
+		*(idx_16++) = ~cm->match_dest_port;
+		*(idx_16++) = cm->xlate_dest_port;
 		idx_32 = (u32 *)idx_16;
 
-		*(idx_32++) = ~cm->xlate_dest_ip[0].addr[0];
-		*(idx_32++) = ~cm->xlate_dest_ip[0].addr[1];
-		*(idx_32++) = ~cm->xlate_dest_ip[0].addr[2];
-		*(idx_32++) = ~cm->xlate_dest_ip[0].addr[3];
+		*(idx_32++) = cm->xlate_dest_ip[0].addr[0];
+		*(idx_32++) = cm->xlate_dest_ip[0].addr[1];
+		*(idx_32++) = cm->xlate_dest_ip[0].addr[2];
+		*(idx_32++) = cm->xlate_dest_ip[0].addr[3];
 
 		/*
 		 * When we compute this fold it down to a 16-bit offset

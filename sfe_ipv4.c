@@ -217,12 +217,13 @@ static void sfe_ipv4_connection_mc_dest_compute_translations(struct sfe_ipv4_con
 		 * Precompute an incremental checksum adjustment so we can
 		 * edit packets in this stream very quickly.  The algorithm is from RFC1624.
 		 */
-		u16 src_ip_hi = cm->match_src_ip >> 16;
-		u16 src_ip_lo = cm->match_src_ip & 0xffff;
-		u32 xlate_src_ip = ~dest->xlate_src_ip;
-		u16 xlate_src_ip_hi = xlate_src_ip >> 16;
-		u16 xlate_src_ip_lo = xlate_src_ip & 0xffff;
-		u16 xlate_src_port = ~dest->xlate_src_ident;
+		u32 match_src_ip = ~cm->match_src_ip;
+		u16 src_ip_hi = match_src_ip >> 16;
+		u16 src_ip_lo = match_src_ip & 0xffff;
+		u16 match_src_port = ~cm->match_src_port;
+
+		u16 xlate_src_ip_hi = dest->xlate_src_ip >> 16;
+		u16 xlate_src_ip_lo = dest->xlate_src_ip & 0xffff;
 		u32 adj;
 
 		/*
@@ -232,8 +233,8 @@ static void sfe_ipv4_connection_mc_dest_compute_translations(struct sfe_ipv4_con
 		 * addition of 2 16-bit values cannot cause a double
 		 * wrap-around!
 		 */
-		adj = src_ip_hi + src_ip_lo + cm->match_src_port
-		      + xlate_src_ip_hi + xlate_src_ip_lo + xlate_src_port;
+		adj = src_ip_hi + src_ip_lo + match_src_port
+		      + xlate_src_ip_hi + xlate_src_ip_lo + dest->xlate_src_ident;
 		adj = (adj & 0xffff) + (adj >> 16);
 		adj = (adj & 0xffff) + (adj >> 16);
 		dest->xlate_src_csum_adjustment = (u16)adj;
@@ -292,12 +293,13 @@ static void sfe_ipv4_connection_match_compute_translations(struct sfe_ipv4_conne
 		 * Precompute an incremental checksum adjustment so we can
 		 * edit packets in this stream very quickly.  The algorithm is from RFC1624.
 		 */
-		u16 src_ip_hi = cm->match_src_ip >> 16;
-		u16 src_ip_lo = cm->match_src_ip & 0xffff;
-		u32 xlate_src_ip = ~cm->xlate_src_ip;
-		u16 xlate_src_ip_hi = xlate_src_ip >> 16;
-		u16 xlate_src_ip_lo = xlate_src_ip & 0xffff;
-		u16 xlate_src_port = ~cm->xlate_src_port;
+		u32 match_src_ip = ~cm->match_src_ip;
+		u16 src_ip_hi = match_src_ip >> 16;
+		u16 src_ip_lo = match_src_ip & 0xffff;
+		u16 match_src_port = ~cm->match_src_port;
+
+		u16 xlate_src_ip_hi = cm->xlate_src_ip >> 16;
+		u16 xlate_src_ip_lo = cm->xlate_src_ip & 0xffff;
 		u32 adj;
 
 		/*
@@ -307,8 +309,8 @@ static void sfe_ipv4_connection_match_compute_translations(struct sfe_ipv4_conne
 		 * addition of 2 16-bit values cannot cause a double
 		 * wrap-around!
 		 */
-		adj = src_ip_hi + src_ip_lo + cm->match_src_port
-		      + xlate_src_ip_hi + xlate_src_ip_lo + xlate_src_port;
+		adj = src_ip_hi + src_ip_lo + match_src_port
+		      + xlate_src_ip_hi + xlate_src_ip_lo + cm->xlate_src_port;
 		adj = (adj & 0xffff) + (adj >> 16);
 		adj = (adj & 0xffff) + (adj >> 16);
 		cm->xlate_src_csum_adjustment = (u16)adj;
@@ -320,12 +322,13 @@ static void sfe_ipv4_connection_match_compute_translations(struct sfe_ipv4_conne
 		 * Precompute an incremental checksum adjustment so we can
 		 * edit packets in this stream very quickly.  The algorithm is from RFC1624.
 		 */
-		u16 dest_ip_hi = cm->match_dest_ip >> 16;
-		u16 dest_ip_lo = cm->match_dest_ip & 0xffff;
-		u32 xlate_dest_ip = ~cm->xlate_dest_ip;
-		u16 xlate_dest_ip_hi = xlate_dest_ip >> 16;
-		u16 xlate_dest_ip_lo = xlate_dest_ip & 0xffff;
-		u16 xlate_dest_port = ~cm->xlate_dest_port;
+		u32 match_dest_ip = ~cm->match_dest_ip;
+		u16 dest_ip_hi = match_dest_ip >> 16;
+		u16 dest_ip_lo = match_dest_ip & 0xffff;
+		u16 match_dest_port = ~cm->match_dest_port;
+
+		u16 xlate_dest_ip_hi = cm->xlate_dest_ip >> 16;
+		u16 xlate_dest_ip_lo = cm->xlate_dest_ip & 0xffff;
 		u32 adj;
 
 		/*
@@ -335,8 +338,8 @@ static void sfe_ipv4_connection_match_compute_translations(struct sfe_ipv4_conne
 		 * addition of 2 16-bit values cannot cause a double
 		 * wrap-around!
 		 */
-		adj = dest_ip_hi + dest_ip_lo + cm->match_dest_port
-		      + xlate_dest_ip_hi + xlate_dest_ip_lo + xlate_dest_port;
+		adj = dest_ip_hi + dest_ip_lo + match_dest_port
+		      + xlate_dest_ip_hi + xlate_dest_ip_lo + cm->xlate_dest_port;
 		adj = (adj & 0xffff) + (adj >> 16);
 		adj = (adj & 0xffff) + (adj >> 16);
 		cm->xlate_dest_csum_adjustment = (u16)adj;

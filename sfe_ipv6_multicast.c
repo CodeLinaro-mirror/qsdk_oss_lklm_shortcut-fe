@@ -89,10 +89,10 @@ int sfe_ipv6_forward_multicast(struct sfe_ipv6 *si, struct sk_buff *skb, unsigne
 			if (unlikely(!hw_csum)) {
 				udp_csum = udph->check;
 				if (likely(udp_csum)) {
-					u32 sum = udp_csum + mc_xmit_dev->xlate_src_csum_adjustment;
+					u32 sum = ~udp_csum + mc_xmit_dev->xlate_src_csum_adjustment;
 					sum = (sum & 0xffff) + (sum >> 16);
 					sum = (sum & 0xffff) + (sum >> 16);
-					udph->check = (u16)sum;
+					udph->check = (u16)~sum;
 				}
 			}
 		}

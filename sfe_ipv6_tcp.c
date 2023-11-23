@@ -680,9 +680,9 @@ int sfe_ipv6_recv_tcp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 
 		if (unlikely(!hw_csum)) {
 			tcp_csum = tcph->check;
-			sum = tcp_csum + cm->xlate_src_csum_adjustment;
+			sum = ~tcp_csum + cm->xlate_src_csum_adjustment;
 			sum = (sum & 0xffff) + (sum >> 16);
-			tcph->check = (u16)sum;
+			tcph->check = (u16)~sum;
 		}
 	}
 
@@ -700,10 +700,10 @@ int sfe_ipv6_recv_tcp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 		tcph->dest = cm->xlate_dest_port;
 
 		if (unlikely(!hw_csum)) {
-			tcp_csum = tcph->check;
+			tcp_csum = ~tcph->check;
 			sum = tcp_csum + cm->xlate_dest_csum_adjustment;
 			sum = (sum & 0xffff) + (sum >> 16);
-			tcph->check = (u16)sum;
+			tcph->check = (u16)~sum;
 		}
 	}
 

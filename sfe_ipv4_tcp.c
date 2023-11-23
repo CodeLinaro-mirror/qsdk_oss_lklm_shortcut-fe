@@ -717,7 +717,7 @@ int sfe_ipv4_recv_tcp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 		tcph->source = cm->xlate_src_port;
 
 		if (unlikely(!hw_csum)) {
-			tcp_csum = tcph->check;
+			tcp_csum = ~tcph->check;
 			if (unlikely(skb->ip_summed == CHECKSUM_PARTIAL)) {
 				sum = tcp_csum + cm->xlate_src_partial_csum_adjustment;
 			} else {
@@ -725,7 +725,7 @@ int sfe_ipv4_recv_tcp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 			}
 
 			sum = (sum & 0xffff) + (sum >> 16);
-			tcph->check = (u16)sum;
+			tcph->check = (u16)~sum;
 		}
 	}
 
@@ -740,7 +740,7 @@ int sfe_ipv4_recv_tcp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 		tcph->dest = cm->xlate_dest_port;
 
 		if (unlikely(!hw_csum)) {
-			tcp_csum = tcph->check;
+			tcp_csum = ~tcph->check;
 			if (unlikely(skb->ip_summed == CHECKSUM_PARTIAL)) {
 				sum = tcp_csum + cm->xlate_dest_partial_csum_adjustment;
 			} else {
@@ -748,7 +748,7 @@ int sfe_ipv4_recv_tcp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 			}
 
 			sum = (sum & 0xffff) + (sum >> 16);
-			tcph->check = (u16)sum;
+			tcph->check = (u16)~sum;
 		}
 	}
 
