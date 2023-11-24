@@ -2435,19 +2435,6 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 		reply_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_SRC_INTERFACE_CHECK_NO_FLUSH;
 	}
 
-	if (sfe_is_l2_feature_enabled() && !(msg->rule_flags & SFE_RULE_CREATE_FLAG_BRIDGE_FLOW)) {
-		if (msg->rule_flags & SFE_RULE_CREATE_FLAG_USE_FLOW_BOTTOM_INTERFACE) {
-			if (sfe_dev_is_bridge(original_cm->top_interface_dev)) {
-				original_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_PACKET_HOST;
-			}
-		}
-		if (msg->rule_flags & SFE_RULE_CREATE_FLAG_USE_RETURN_BOTTOM_INTERFACE) {
-			if (sfe_dev_is_bridge(reply_cm->top_interface_dev)) {
-				reply_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_PACKET_HOST;
-			}
-		}
-	}
-
 	/*
 	 * For the non-arp interface, we don't write L2 HDR.
 	 */
@@ -2588,6 +2575,11 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	}
 	if (msg->rule_flags & SFE_RULE_CREATE_FLAG_RETURN_TRANSMIT_FAST) {
 		reply_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_FAST_XMIT_DEV_ADMISSION;
+	}
+
+	if (sfe_is_l2_feature_enabled() && !(msg->rule_flags & SFE_RULE_CREATE_FLAG_BRIDGE_FLOW)) {
+		original_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_PACKET_HOST;
+		reply_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_PACKET_HOST;
 	}
 
 	if (((IPPROTO_IPV6 == tuple->protocol) || (IPPROTO_GRE == tuple->protocol) || (IPPROTO_ESP == tuple->protocol)) &&
