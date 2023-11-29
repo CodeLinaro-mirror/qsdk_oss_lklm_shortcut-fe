@@ -1776,10 +1776,11 @@ int sfe_ipv6_create_mc_rule(struct sfe_ipv6_mc_rule_create_msg *msg)
 
 #if (defined(SFE_MEM_PROFILE_MEDIUM) || defined(SFE_MEM_PROFILE_LOW))
 	if (si->num_connections  >= sfe_ipv6_max_conn_count()) {
-		spin_unlock_bh(&si->lock);
 		this_cpu_inc(si->stats_pcpu->connection_create_requests_overflow64);
 		dev_put(src_dev);
-		DEBUG_WARN("%px: Maximum connection count(%d), reached %d\n", msg, sfe_ipv6_max_conn_count(), si->num_connections);
+		if (net_ratelimit()) {
+			DEBUG_WARN("%px: Maximum connection count(%d), reached %d\n", msg, sfe_ipv6_max_conn_count(), si->num_connections);
+		}
 		return -EPERM;
 	}
 #endif
