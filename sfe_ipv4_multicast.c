@@ -84,13 +84,13 @@ int sfe_ipv4_forward_multicast(struct sfe_ipv4 *si, struct sk_buff *skb, unsigne
 				u32 sum;
 
 				if (unlikely(skb->ip_summed == CHECKSUM_PARTIAL)) {
-					sum = udp_csum + mc_xmit_dev->xlate_src_partial_csum_adjustment;
+					sum = ~udp_csum + mc_xmit_dev->xlate_src_partial_csum_adjustment;
 				} else {
-					sum = udp_csum + mc_xmit_dev->xlate_src_csum_adjustment;
+					sum = ~udp_csum + mc_xmit_dev->xlate_src_csum_adjustment;
 				}
 
 				sum = (sum & 0xffff) + (sum >> 16);
-				udph->check = (u16)sum;
+				udph->check = (u16)~sum;
 			}
 		}
 	}
