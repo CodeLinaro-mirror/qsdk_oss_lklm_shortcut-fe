@@ -1055,6 +1055,17 @@ int sfe_ipv4_recv(struct net_device *dev, struct sk_buff *skb, struct sfe_l2_inf
 	}
 
 	/*
+	 * Remove any data link layer's padding for non paged buffers, for paged buffers
+	 * the ethernet frame would usually not have any padding.
+	 * Usually TCP ACK's(with length 18(eth)+20(IP)+20(TCP) < 64) have ethernet padding set.
+	 */
+	if (likely(!skb->data_len)) {
+		skb->len = tot_len;
+		skb_set_tail_pointer(skb, tot_len);
+		len = tot_len;
+	}
+
+	/*
 	 * If we have a (first) fragment then mark it to cause any connection to flush.
 	 */
 	sync_on_find = unlikely(frag_off & IP_MF) ? true : false;
