@@ -44,13 +44,8 @@ qca-nss-sfe-objs += $(SFE_IPV6_OBJS)
 ccflags-y += -DSFE_SUPPORT_IPV6
 endif
 
-#
-# TODO: Remove this check when RFS support is added for 6.1 kernel
-#
-ifeq ($(findstring 6.1, $(KERNELVERSION)),)
 ifdef SFE_RFS_SUPPORTED
 ccflags-y += -DSFE_RFS_SUPPORTED
-endif
 endif
 
 ifdef SFE_PPE_QOS_SUPPORTED
