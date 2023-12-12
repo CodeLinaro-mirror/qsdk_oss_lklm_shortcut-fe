@@ -254,6 +254,10 @@ static bool sfe_routed_dev_allow(struct net_device *dev, bool is_routed,  bool c
 		return true;
 	}
 
+	if (dev->type == ARPHRD_TUNNEL6) {
+		return true;
+	}
+
 	return false;
 }
 
