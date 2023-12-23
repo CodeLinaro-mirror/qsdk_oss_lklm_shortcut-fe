@@ -3,7 +3,7 @@
  *     API for shortcut forwarding engine.
  *
  * Copyright (c) 2015,2016, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -27,6 +27,9 @@
 #include <net/pkt_sched.h>
 #include <net/vxlan.h>
 #include <net/gre.h>
+#if (LINUX_VERSION_CODE > KERNEL_VERSION(6, 6, 0))
+#include <net/tcx.h>
+#endif
 #if defined(SFE_RFS_SUPPORTED)
 #include <ppe_rfs.h>
 #endif
@@ -971,7 +974,7 @@ sfe_tx_status_t sfe_create_ipv4_rule_msg(struct sfe_ctx_instance_internal *sfe_c
 	struct net_device *src_dev = NULL;
 	struct net_device *dest_dev = NULL;
 	struct sfe_response_msg *response;
-	enum sfe_cmn_response ret = SFE_TX_SUCCESS;
+	enum sfe_cmn_response ret = SFE_CMN_RESPONSE_ACK;
 	bool is_routed = true;
 	bool cfg_err;
 
@@ -1443,7 +1446,7 @@ sfe_tx_status_t sfe_create_ipv6_mc_rule_msg(struct sfe_ctx_instance_internal *sf
 {
 	struct net_device *src_dev = NULL;
 	struct sfe_response_msg *response;
-	enum sfe_cmn_response ret = SFE_TX_SUCCESS;
+	enum sfe_cmn_response ret = SFE_CMN_RESPONSE_ACK;
 	bool is_routed = true;
 	bool cfg_err;
 
@@ -1611,7 +1614,7 @@ sfe_tx_status_t sfe_create_ipv6_rule_msg(struct sfe_ctx_instance_internal *sfe_c
 	struct net_device *src_dev = NULL;
 	struct net_device *dest_dev = NULL;
 	struct sfe_response_msg *response;
-	enum sfe_cmn_response ret = SFE_TX_SUCCESS;
+	enum sfe_cmn_response ret = SFE_CMN_RESPONSE_ACK;
 	bool is_routed = true;
 	bool cfg_err;
 
@@ -2095,12 +2098,13 @@ int sfe_recv(struct sk_buff *skb)
 		 * If ingress Qdisc configured, and packet not processed by ingress Qdisc yet
 		 * We can not accelerate this packet.
 		 */
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 4, 0))
-		if (dev->ingress_queue && !(skb->tc_verd & TC_NCLS)) {
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 6, 0))
+		if (rcu_access_pointer(dev->miniq_ingress) && !skb->tc_skip_classify) {
 			return 0;
 		}
 #else
-		if (rcu_access_pointer(dev->miniq_ingress) && !skb->tc_skip_classify) {
+		struct bpf_mprog_entry *entry = rcu_dereference_bh(dev->tcx_ingress);
+		if (entry && rcu_access_pointer(tcx_entry(entry)->miniq) && !skb->tc_skip_classify) {
 			return 0;
 		}
 #endif
