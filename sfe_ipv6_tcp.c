@@ -679,9 +679,24 @@ int sfe_ipv6_recv_tcp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 		tcph->source = cm->xlate_src_port;
 
 		if (unlikely(!hw_csum)) {
-			tcp_csum = tcph->check;
-			sum = ~tcp_csum + cm->xlate_src_csum_adjustment;
+
+			/*
+			 * Get the 1's compliment of csum here
+			 * instead of inline in the next step to prevent
+			 * compilier from doing a 32bit 1's compliment.
+			 */
+			tcp_csum = ~tcph->check;
+			sum = tcp_csum + cm->xlate_src_csum_adjustment;
+
+			/*
+			 * Since we used 32bits to store the 1's compliment sum,
+			 * when converting it back to 16bits, we need to add the
+			 * carry to lsb as well. This is taken care by the 2nd
+			 * iteration of sum.
+			 */
 			sum = (sum & 0xffff) + (sum >> 16);
+			sum = (sum & 0xffff) + (sum >> 16);
+
 			tcph->check = (u16)~sum;
 		}
 	}
@@ -700,9 +715,24 @@ int sfe_ipv6_recv_tcp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 		tcph->dest = cm->xlate_dest_port;
 
 		if (unlikely(!hw_csum)) {
+
+			/*
+			 * Get the 1's compliment of csum here
+			 * instead of inline in the next step to prevent
+			 * compilier from doing a 32bit 1's compliment. 
+			 */
 			tcp_csum = ~tcph->check;
 			sum = tcp_csum + cm->xlate_dest_csum_adjustment;
+
+			/*
+			 * Since we used 32bits to store the 1's compliment sum,
+			 * when converting it back to 16bits, we need to add the
+			 * carry to lsb as well. This is taken care by the 2nd
+			 * iteration of sum.
+			 */
 			sum = (sum & 0xffff) + (sum >> 16);
+			sum = (sum & 0xffff) + (sum >> 16);
+
 			tcph->check = (u16)~sum;
 		}
 	}

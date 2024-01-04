@@ -480,12 +480,25 @@ int sfe_ipv4_recv_udp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 			if (likely(udp_csum)) {
 				u32 sum;
 
+				/*
+				 * Get the 1's compliment of csum here
+				 * instead of inline in the next step to prevent
+				 * compilier from doing a 32bit 1's compliment.
+				 */
+				udp_csum = ~udp_csum;
 				if (unlikely(skb->ip_summed == CHECKSUM_PARTIAL)) {
-					sum = ~udp_csum + cm->xlate_src_partial_csum_adjustment;
+					sum = udp_csum + cm->xlate_src_partial_csum_adjustment;
 				} else {
-					sum = ~udp_csum + cm->xlate_src_csum_adjustment;
+					sum = udp_csum + cm->xlate_src_csum_adjustment;
 				}
 
+				/*
+				 * Since we used 32bits to store the 1's compliment sum,
+				 * when converting it back to 16bits, we need to add the
+				 * carry to lsb as well. This is taken care by the 2nd
+				 * iteration of sum.
+				 */
+				sum = (sum & 0xffff) + (sum >> 16);
 				sum = (sum & 0xffff) + (sum >> 16);
 				udph->check = (u16)~sum;
 			}
@@ -514,12 +527,26 @@ int sfe_ipv4_recv_udp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 				 * TODO: Use a common API for below incremental checksum calculation
 				 * for IPv4/IPv6 UDP/TCP
 				 */
+
+				/*
+				 * Get the 1's compliment of csum here
+				 * instead of inline in the next step to prevent
+				 * compilier from doing a 32bit 1's compliment.
+				 */
+				udp_csum = ~udp_csum;
 				if (unlikely(skb->ip_summed == CHECKSUM_PARTIAL)) {
-					sum = ~udp_csum + cm->xlate_dest_partial_csum_adjustment;
+					sum = udp_csum + cm->xlate_dest_partial_csum_adjustment;
 				} else {
-					sum = ~udp_csum + cm->xlate_dest_csum_adjustment;
+					sum = udp_csum + cm->xlate_dest_csum_adjustment;
 				}
 
+				/*
+				 * Since we used 32bits to store the 1's compliment sum,
+				 * when converting it back to 16bits, we need to add the
+				 * carry to lsb as well. This is taken care by the 2nd
+				 * iteration of sum.
+				 */
+				sum = (sum & 0xffff) + (sum >> 16);
 				sum = (sum & 0xffff) + (sum >> 16);
 				udph->check = (u16)~sum;
 			}
