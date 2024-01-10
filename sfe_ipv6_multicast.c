@@ -89,7 +89,22 @@ int sfe_ipv6_forward_multicast(struct sfe_ipv6 *si, struct sk_buff *skb, unsigne
 			if (unlikely(!hw_csum)) {
 				udp_csum = udph->check;
 				if (likely(udp_csum)) {
-					u32 sum = ~udp_csum + mc_xmit_dev->xlate_src_csum_adjustment;
+					u32 sum;
+
+					/*
+					 * Get the 1's compliment of csum here
+					 * instead of inline in the next step to prevent
+					 * compilier from doing a 32bit 1's compliment.
+					 */
+					udp_csum = ~udp_csum;
+					sum = udp_csum + mc_xmit_dev->xlate_src_csum_adjustment;
+
+					/*
+					 * Since we used 32bits to store the 1's compliment sum,
+					 * when converting it back to 16bits, we need to add the
+					 * carry to lsb as well. This is taken care by the 2nd
+					 * iteration of sum.
+					 */
 					sum = (sum & 0xffff) + (sum >> 16);
 					sum = (sum & 0xffff) + (sum >> 16);
 					udph->check = (u16)~sum;
