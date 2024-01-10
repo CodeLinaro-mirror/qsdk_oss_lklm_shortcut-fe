@@ -1897,6 +1897,7 @@ update_done:
 	flow_sawf_tag = SFE_GET_SAWF_TAG(msg->sawf_rule.flow_mark);
 	if (likely(SFE_SAWF_TAG_IS_VALID(flow_sawf_tag))) {
 		original_cm->mark = msg->sawf_rule.flow_mark;
+		original_cm->svc_id = msg->sawf_rule.flow_svc_id;
 		original_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_MARK;
 		original_cm->sawf_valid = true;
 	}
@@ -2271,6 +2272,7 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 	flow_sawf_tag = SFE_GET_SAWF_TAG(msg->sawf_rule.flow_mark);
 	if (likely(SFE_SAWF_TAG_IS_VALID(flow_sawf_tag))) {
 		original_cm->mark = msg->sawf_rule.flow_mark;
+		original_cm->svc_id = msg->sawf_rule.flow_svc_id;
 		original_cm->sawf_valid = true;
 		original_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_MARK;
 	}
@@ -2638,6 +2640,7 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 	return_sawf_tag = SFE_GET_SAWF_TAG(msg->sawf_rule.return_mark);
 	if (likely(SFE_SAWF_TAG_IS_VALID(return_sawf_tag))) {
 		reply_cm->mark = msg->sawf_rule.return_mark;
+		reply_cm->svc_id = msg->sawf_rule.return_svc_id;
 		reply_cm->sawf_valid = true;
 		reply_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_MARK;
 	}
