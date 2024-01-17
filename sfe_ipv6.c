@@ -203,6 +203,52 @@ sfe_ipv6_find_connection_match_rcu(struct sfe_ipv6 *si, struct net_device *dev, 
 }
 
 /*
+ * sfe_ipv6_get_single_conn_stats()
+ *	Get the tx and rx bytes and packet data for particular 5-tuple
+ */
+bool sfe_ipv6_get_single_conn_stats(struct sfe_ipv6_single_conn_stats *stats)
+{
+	struct sfe_ipv6 *si = &__si6;
+	struct sfe_ipv6_connection_match *original_cm;
+	struct sfe_ipv6_connection_match *reply_cm;
+
+	rcu_read_lock();
+
+	original_cm = sfe_ipv6_find_connection_match_rcu(si, stats->org_dev, stats->tuple.protocol, (struct sfe_ipv6_addr *)stats->tuple.flow_ip, stats->tuple.flow_ident, (struct sfe_ipv6_addr *)stats->tuple.return_ip, stats->tuple.return_ident);
+	if (!original_cm) {
+		if (IPPROTO_TCP == stats->tuple.protocol) {
+			sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_TCP_NO_CONNECTION_FAST_FLAGS);
+		} else {
+			sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_UDP_NO_CONNECTION);
+		}
+		DEBUG_TRACE("Failed to find connection match entry for the following connection: protocol: %u, src_ip: %pI6, src_port: %u, dest_ip: %pI6, dest_port: %u\n", stats->tuple.protocol, &stats->tuple.flow_ip, stats->tuple.flow_ident, &stats->tuple.return_ip, stats->tuple.return_ident);
+		rcu_read_unlock();
+		return false;
+	}
+
+	reply_cm = original_cm->counter_match;
+ 	if (!reply_cm) {
+		if (IPPROTO_TCP == stats->tuple.protocol) {
+			sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_TCP_NO_CONNECTION_FAST_FLAGS);
+		} else {
+			sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_UDP_NO_CONNECTION);
+		}
+		DEBUG_TRACE("Failed to find reverse match entry for the following connection: protocol: %u, src_ip: %pI6, src_port: %u, dest_ip: %pI6, dest_port: %u\n", stats->tuple.protocol, &stats->tuple.flow_ip, stats->tuple.flow_ident, &stats->tuple.return_ip, stats->tuple.return_ident);
+		rcu_read_unlock();
+		return false;
+	}
+
+	rcu_read_unlock();
+
+	stats->rx_packet_count = original_cm->rx_packet_count64;
+	stats->rx_byte_count = original_cm->rx_byte_count64;
+	stats->tx_packet_count = reply_cm->rx_packet_count64;
+	stats->tx_byte_count = reply_cm->rx_byte_count64;
+	return true;
+}
+EXPORT_SYMBOL(sfe_ipv6_get_single_conn_stats);
+
+/*
  * sfe_ipv6_connection_mc_dest_compute_translations()
  *	Compute port and address translations for a connection match entry.
  */
