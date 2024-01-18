@@ -1042,7 +1042,14 @@ static bool sfe_ipv6_is_local_ip(struct sfe_ipv6 *si, uint8_t *addr)
 #endif
 
 	if (dev) {
+
+		/*
+		 * The kernel api ipv6_dev_find() holds a reference in 5.4 kernel but
+		 * does not hold in 6.x kernel, hence dev_put is not necessary in 6.x kernel
+		 */
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0))
 		dev_put(dev);
+#endif
 		return true;
 	}
 
