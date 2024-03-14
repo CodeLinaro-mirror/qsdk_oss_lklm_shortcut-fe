@@ -2592,6 +2592,13 @@ int sfe_init_if(void)
 
 	sfe_pppoe_mgr_init();
 
+	/*
+	 * Enable RFS by default
+	 */
+#if defined(SFE_RFS_SUPPORTED)
+	sfe_ctx->ppe_rfs_feature_support = 1;
+#endif
+
 	spin_lock_init(&sfe_ctx->lock);
 
 	INIT_LIST_HEAD(&sfe_ctx->msg_queue);
