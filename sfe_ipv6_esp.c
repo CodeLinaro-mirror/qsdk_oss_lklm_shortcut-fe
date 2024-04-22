@@ -89,7 +89,7 @@ int sfe_ipv6_recv_esp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 		spin_unlock_bh(&si->lock);
 
 		if (ret) {
-			sfe_ipv6_flush_connection(si, c, SFE_SYNC_REASON_FLUSH);
+			sfe_ipv6_flush_connection(si, c, SFE_RULE_SYNC_REASON_FLUSH);
 		}
 		rcu_read_unlock();
 		sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_INVALID_SRC_IFACE);
@@ -108,7 +108,7 @@ int sfe_ipv6_recv_esp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 	 * TODO: revisit to ensure that pass through traffic is not bypassing firewall for fragmented cases
 	 */
 	if (unlikely(sync_on_find) && !passthrough) {
-		sfe_ipv6_sync_status(si, cm->connection, SFE_SYNC_REASON_STATS);
+		sfe_ipv6_sync_status(si, cm->connection, SFE_RULE_SYNC_REASON_STATS);
 		rcu_read_unlock();
 
 		sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_ESP_IP_OPTIONS_OR_INITIAL_FRAGMENT);
@@ -188,7 +188,7 @@ int sfe_ipv6_recv_esp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 	 * we can't forward it easily.
 	 */
 	if (unlikely(len > cm->xmit_dev_mtu)) {
-		sfe_ipv6_sync_status(si, cm->connection, SFE_SYNC_REASON_STATS);
+		sfe_ipv6_sync_status(si, cm->connection, SFE_RULE_SYNC_REASON_STATS);
 		rcu_read_unlock();
 
 		sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_ESP_NEEDS_FRAGMENTATION);
@@ -217,7 +217,7 @@ int sfe_ipv6_recv_esp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 	 * need to ensure that TTL is >=2.
 	 */
 	if (!bridge_flow && (iph->hop_limit < 2) && passthrough) {
-		sfe_ipv6_sync_status(si, cm->connection, SFE_SYNC_REASON_STATS);
+		sfe_ipv6_sync_status(si, cm->connection, SFE_RULE_SYNC_REASON_STATS);
 		rcu_read_unlock();
 
 		sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_ESP_SMALL_TTL);

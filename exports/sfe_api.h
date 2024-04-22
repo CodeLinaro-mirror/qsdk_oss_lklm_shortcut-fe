@@ -150,6 +150,14 @@
 		/**< Ingress shaping fields are valid. */
 
 /*
+ * FLS Communication Flags
+ */
+#define SFE_FLS_CONNECTION_FLAG_DEF_DISABLE 0
+#define SFE_FLS_CONNECTION_FLAG_DEF_ENABLE (1 << 0)
+#define SFE_FLS_CONNECTION_FLAG_DELAY_FINISHED (1 << 1)
+#define SFE_FLS_CONNECTION_FLAG_HWM_EXCEEDED (1 << 2)
+
+/*
  * Per-interface rule flags for a multicast connection (to be used with the rule_flags
  * field of sfe_ipv4_mc_if_rule structure).
  */
@@ -237,10 +245,11 @@ typedef uint32_t sfe_ptr_t; /**< 32-bit pointer. */
 * Synchronize reason enum.
 */
 typedef enum /** @cond */ sfe_rule_sync_reason /** @endcond */ {
-	SFE_RULE_SYNC_REASON_STATS,	/**< Synchronize statistics. */
-	SFE_RULE_SYNC_REASON_FLUSH,	/**< Synchronize to flush an entry. */
-	SFE_RULE_SYNC_REASON_EVICT,	/**< Synchronize to evict an entry. */
-	SFE_RULE_SYNC_REASON_DESTROY	/**< Synchronize to destroy an entry (requested by the connection manager). */
+	SFE_RULE_SYNC_REASON_STATS,		/**< Synchronize statistics. */
+	SFE_RULE_SYNC_REASON_FLUSH,		/**< Synchronize to flush an entry. */
+	SFE_RULE_SYNC_REASON_EVICT,		/**< Synchronize to evict an entry. */
+	SFE_RULE_SYNC_REASON_DESTROY,		/**< Synchronize to destroy an entry (requested by the connection manager). */
+	SFE_RULE_SYNC_REASON_FLUSH_SWITCH_AE	/**< Synchronize to flush an entry and direct ECM switch acceleration engine */
 
 } sfe_rule_sync_reason_t;
 
@@ -1236,7 +1245,7 @@ typedef void (*sfe_fls_conn_delete_t)(void *conn);
  * @param	conn	The entry to be updated.
  * @param	skb	The sk_buff to use for statistics.
  */
-typedef bool (*sfe_fls_conn_stats_update_t)(void *conn, struct sk_buff *skb);
+typedef uint8_t (*sfe_fls_conn_stats_update_t)(void *conn, struct sk_buff *skb);
 
 /**
  * Registers flow statistics methods with SFE.
