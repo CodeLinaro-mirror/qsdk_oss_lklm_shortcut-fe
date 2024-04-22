@@ -90,7 +90,7 @@ int sfe_ipv4_recv_esp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 		spin_unlock_bh(&si->lock);
 
 		if (ret) {
-			sfe_ipv4_flush_connection(si, c, SFE_SYNC_REASON_FLUSH);
+			sfe_ipv4_flush_connection(si, c, SFE_RULE_SYNC_REASON_FLUSH);
 		}
 		rcu_read_unlock();
 		sfe_ipv4_exception_stats_inc(si, SFE_IPV4_EXCEPTION_EVENT_INVALID_SRC_IFACE);
@@ -109,7 +109,7 @@ int sfe_ipv4_recv_esp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 	 * TODO: revisit to ensure that pass through traffic is not bypassing firewall for fragmented cases
 	 */
 	if (unlikely(sync_on_find) && !passthrough) {
-		sfe_ipv4_sync_status(si, cm->connection, SFE_SYNC_REASON_STATS);
+		sfe_ipv4_sync_status(si, cm->connection, SFE_RULE_SYNC_REASON_STATS);
 		rcu_read_unlock();
 		sfe_ipv4_exception_stats_inc(si, SFE_IPV4_EXCEPTION_EVENT_ESP_IP_OPTIONS_OR_INITIAL_FRAGMENT);
 		DEBUG_TRACE("%px: sfe: sync on find\n", cm);
@@ -199,7 +199,7 @@ int sfe_ipv4_recv_esp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 	 * we can't forward it easily.
 	 */
 	if (unlikely(len > cm->xmit_dev_mtu)) {
-		sfe_ipv4_sync_status(si, cm->connection, SFE_SYNC_REASON_STATS);
+		sfe_ipv4_sync_status(si, cm->connection, SFE_RULE_SYNC_REASON_STATS);
 		rcu_read_unlock();
 		sfe_ipv4_exception_stats_inc(si, SFE_IPV4_EXCEPTION_EVENT_ESP_NEEDS_FRAGMENTATION);
 		DEBUG_TRACE("%px: sfe: larger than MTU\n", cm);
@@ -221,7 +221,7 @@ int sfe_ipv4_recv_esp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 	 */
 	ttl = iph->ttl;
 	if (!bridge_flow && (ttl < 2) && passthrough) {
-		sfe_ipv4_sync_status(si, cm->connection, SFE_SYNC_REASON_STATS);
+		sfe_ipv4_sync_status(si, cm->connection, SFE_RULE_SYNC_REASON_STATS);
 		rcu_read_unlock();
 
 		DEBUG_TRACE("%px: sfe: TTL too low\n", skb);

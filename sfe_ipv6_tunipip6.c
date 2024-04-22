@@ -109,7 +109,7 @@ int sfe_ipv6_recv_tunipip6(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_
 	 * which is embedded in exthdr type NEXTHDR_DEST.
 	 */
 	if (unlikely(sync_on_find && non_dst)) {
-		sfe_ipv6_sync_status(si, cm->connection, SFE_SYNC_REASON_STATS);
+		sfe_ipv6_sync_status(si, cm->connection, SFE_RULE_SYNC_REASON_STATS);
 		rcu_read_unlock();
 		sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_TUNIPIP6_SYNC_ON_FIND);
 		DEBUG_TRACE("%px: Sync on find\n", skb);
@@ -123,7 +123,7 @@ int sfe_ipv6_recv_tunipip6(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_
 	passthrough = cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_PASSTHROUGH;
 	if (passthrough) {
 		if (iph->hop_limit < 2) {
-			sfe_ipv6_sync_status(si, cm->connection, SFE_SYNC_REASON_STATS);
+			sfe_ipv6_sync_status(si, cm->connection, SFE_RULE_SYNC_REASON_STATS);
 			rcu_read_unlock();
 
 			sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_TUNIPIP6_SMALL_TTL);
@@ -263,7 +263,7 @@ int sfe_ipv6_recv_tunipip6(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_
 	 * we can't forward it easily.
 	 */
 	if (unlikely(len > cm->xmit_dev_mtu)) {
-		sfe_ipv6_sync_status(si, cm->connection, SFE_SYNC_REASON_STATS);
+		sfe_ipv6_sync_status(si, cm->connection, SFE_RULE_SYNC_REASON_STATS);
 		rcu_read_unlock();
 
 		sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_TUNIPIP6_NEEDS_FRAGMENTATION);

@@ -412,6 +412,7 @@ enum sfe_ipv6_exception_events {
 	SFE_IPV6_EXCEPTION_EVENT_L2TPV3_IP_OPTIONS_OR_INITIAL_FRAGMENT,
 	SFE_IPV6_EXCEPTION_EVENT_L2TPV3_SMALL_TTL,
 	SFE_IPV6_EXCEPTION_EVENT_L2TPV3_NEEDS_FRAGMENTATION,
+	SFE_IPV6_EXCEPTION_EVENT_FLS_HWM_FLUSH,
 	SFE_IPV6_EXCEPTION_EVENT_LAST
 };
 
@@ -603,11 +604,11 @@ bool sfe_ipv6_remove_connection(struct sfe_ipv6 *si, struct sfe_ipv6_connection 
 
 void sfe_ipv6_flush_connection(struct sfe_ipv6 *si,
 				      struct sfe_ipv6_connection *c,
-				      sfe_sync_reason_t reason);
+				      sfe_rule_sync_reason_t reason);
 
 void sfe_ipv6_sync_status(struct sfe_ipv6 *si,
 				      struct sfe_ipv6_connection *c,
-				      sfe_sync_reason_t reason);
+				      sfe_rule_sync_reason_t reason);
 
 void sfe_ipv6_exit(void);
 int sfe_ipv6_init(void);

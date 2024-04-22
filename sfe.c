@@ -48,6 +48,7 @@
 extern int max_ipv4_conn;
 extern int max_ipv6_conn;
 extern bool fast_tc_filter;
+uint8_t sfe_fls_flush_on_hwm_enable;
 
 #define SFE_MESSAGE_VERSION 0x1
 #define sfe_ipv6_addr_copy(src, dest) memcpy((void *)(dest), (void *)(src), 16)
@@ -609,11 +610,14 @@ void sfe_ipv4_stats_convert(struct sfe_ipv4_conn_sync *sync_msg, struct sfe_conn
 	 * Fill other information
 	 */
 	switch (sis->reason) {
-	case SFE_SYNC_REASON_DESTROY:
+	case SFE_RULE_SYNC_REASON_DESTROY:
 		sync_msg->reason = SFE_RULE_SYNC_REASON_DESTROY;
 		break;
-	case SFE_SYNC_REASON_FLUSH:
+	case SFE_RULE_SYNC_REASON_FLUSH:
 		sync_msg->reason = SFE_RULE_SYNC_REASON_FLUSH;
+		break;
+	case SFE_RULE_SYNC_REASON_FLUSH_SWITCH_AE:
+		sync_msg->reason = SFE_RULE_SYNC_REASON_FLUSH_SWITCH_AE;
 		break;
 	default:
 		sync_msg->reason = SFE_RULE_SYNC_REASON_STATS;
@@ -1401,10 +1405,10 @@ void sfe_ipv6_stats_convert(struct sfe_ipv6_conn_sync *sync_msg, struct sfe_conn
 	 * Fill other information
 	 */
 	switch (sis->reason) {
-	case SFE_SYNC_REASON_DESTROY:
+	case SFE_RULE_SYNC_REASON_DESTROY:
 		sync_msg->reason = SFE_RULE_SYNC_REASON_DESTROY;
 		break;
-	case SFE_SYNC_REASON_FLUSH:
+	case SFE_RULE_SYNC_REASON_FLUSH:
 		sync_msg->reason = SFE_RULE_SYNC_REASON_FLUSH;
 		break;
 	default:
@@ -2486,6 +2490,38 @@ static const struct device_attribute sfe_tso_clear_fixed_id_attr =
 	__ATTR(tso_clear_fixed_id,  0644, sfe_get_tso_clear_fixed_id, sfe_set_tso_clear_fixed_id);
 
 /*
+ * sfe_set_flush_if_fls_breach()
+ *	Enable or disable if connection should be flushed from SFE based on FLS breach
+ */
+ssize_t sfe_set_flush_if_fls_breach(struct device *dev, struct device_attribute *attr,
+				const char *buf, size_t count)
+{
+	uint8_t val;
+	int ret;
+
+	ret = sscanf(buf, "%hhu", &val);
+	if (ret != 1) {
+		pr_err("Wrong input, %s\n", buf);
+		return -EINVAL;
+	}
+
+	if (val != 1 && val != 0) {
+		pr_err("Input should be either 1 or 0, (%s)\n", buf);
+		return -EINVAL;
+	}
+	sfe_fls_flush_on_hwm_enable = val;
+
+	return count;
+}
+
+/*
+ * sfe_flush_if_fls_breach_attr
+ * 	sysfs attributes.
+ */
+static const struct device_attribute sfe_flush_if_fls_breach_attr =
+	__ATTR(flush_if_fls_breach,  0644, NULL, sfe_set_flush_if_fls_breach);
+
+/*
  * sfe_fls_register()
  *	Register flow statistics functions with SFE.
  */
@@ -2587,6 +2623,15 @@ int sfe_init_if(void)
 	result = sysfs_create_file(sfe_ctx->sys_sfe, &sfe_tso_clear_fixed_id_attr.attr);
 	if (result) {
 		DEBUG_ERROR("failed to register TSO clear fixed id sysfs file: %d\n", result);
+		goto exit2;
+	}
+
+	/*
+	 * Create sys/sfe/flush_if_fls_breach
+	 */
+	result = sysfs_create_file(sfe_ctx->sys_sfe, &sfe_flush_if_fls_breach_attr.attr);
+	if (result) {
+		DEBUG_ERROR("failed to register flush if fls breach sysfs file: %d\n", result);
 		goto exit2;
 	}
 
