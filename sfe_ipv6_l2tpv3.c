@@ -275,7 +275,7 @@ int sfe_ipv6_recv_l2tpv3(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_de
 		sfe_ipv6_sync_status(si, cm->connection, SFE_SYNC_REASON_STATS);
 		rcu_read_unlock();
 
-		sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_GRE_NEEDS_FRAGMENTATION);
+		sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_L2TPV3_NEEDS_FRAGMENTATION);
 		DEBUG_TRACE("Larger than MTU\n");
 		return 0;
 	}
