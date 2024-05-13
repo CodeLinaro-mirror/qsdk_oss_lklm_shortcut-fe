@@ -3119,12 +3119,8 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 		create_cb(4, original_cm->match_protocol,
 				&original_cm->match_src_ip,
 				original_cm->match_src_port,
-				&original_cm->match_dest_ip,
-				original_cm->match_dest_port,
-				&reply_cm->match_src_ip,
-				reply_cm->match_src_port,
-				&reply_cm->match_dest_ip,
-				reply_cm->match_dest_port,
+				&original_cm->xlate_dest_ip,
+				original_cm->xlate_dest_port,
 				&orig_conn,
 				&reply_conn);
 

@@ -2632,12 +2632,8 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 		create_cb(6, original_cm->match_protocol,
 					(uint32_t *)original_cm->match_src_ip,
 					original_cm->match_src_port,
-					(uint32_t *)original_cm->match_dest_ip,
-					original_cm->match_dest_port,
-					(uint32_t *)reply_cm->match_src_ip,
-					reply_cm->match_src_port,
-					(uint32_t *)reply_cm->match_dest_ip,
-					reply_cm->match_dest_port,
+					(uint32_t *)original_cm->xlate_dest_ip,
+					original_cm->xlate_dest_port,
 					&orig_conn,
 					&reply_conn);
 
