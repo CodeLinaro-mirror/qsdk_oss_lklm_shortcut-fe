@@ -1206,10 +1206,6 @@ sfe_pppoe_br_accel_mode_t sfe_pppoe_get_br_accel_mode(void);
  * @param	orig_src_port	Source port number in the original direcion.
  * @param	orig_dst_ip	A pointer to the destination IP address in the original direction. If IPv6, a pointer to an array of length 4.
  * @param	orig_dst_port	Destination port number in the original direcion.
- * @param	repl_src_ip	A pointer to the source IP address in the reply direction. If IPv6, a pointer to an array of length 4.
- * @param	repl_src_port	Source port number in the reply direcion.
- * @param	repl_dst_ip	A pointer to the destination IP address in the reply direction. If IPv6, a pointer to an array of length 4.
- * @param	repl_dst_port	Destination port number in the reply direcion.
  * @param	orig_conn	Pointer to where the original direction connection entry pointer will be written.
  * @param	repl_conn	Pointer to where the reply direction connection entry pointer will be written.
  */
@@ -1219,10 +1215,6 @@ typedef void (*sfe_fls_conn_create_t)(uint8_t ip_version,
 					uint16_t orig_src_port,
 					uint32_t *orig_dest_ip,
 					uint16_t orig_dest_port,
-					uint32_t *repl_src_ip,
-					uint16_t repl_src_port,
-					uint32_t *repl_dest_ip,
-					uint16_t repl_dest_port,
 					void **orig_conn,
 					void **repl_conn);
 
