@@ -842,6 +842,7 @@ static void sfe_ipv6_free_mc_dest_rcu(struct rcu_head *head)
 {
 	struct sfe_ipv6_mc_dest *mc_dest;
 	mc_dest = container_of(head, struct sfe_ipv6_mc_dest, rcu);
+	dev_put(mc_dest->xmit_dev);
 	kfree(mc_dest);
 	return;
 }
@@ -885,6 +886,7 @@ static void sfe_ipv6_free_sfe_ipv6_connection_rcu(struct rcu_head *head)
 		struct sfe_ipv6_mc_dest *cur, *tmp;
 		list_for_each_entry_safe(cur, tmp, &(c->original_match->mc_list), list) {
 			list_del_rcu(&cur->list);
+			dev_put(cur->xmit_dev);
 
 			/*
 			 * The connection c has been quiescent after being
