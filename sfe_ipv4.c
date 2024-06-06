@@ -126,7 +126,8 @@ static char *sfe_ipv4_exception_events_string[SFE_IPV4_EXCEPTION_EVENT_LAST] = {
 	"FRAG_FAILS_DF_SET",
 	"FRAG_FAILS_NON_LINEAR_SKB",
 	"FRAG_FAILS_MULTICAST_PACKET",
-	"FRAG_FAILS_BRIDGED_FLOW"
+	"FRAG_FAILS_BRIDGED_FLOW",
+	"FRAG_CHECKSUM_FAIL"
 };
 
 static struct sfe_ipv4 __si;
@@ -1057,6 +1058,10 @@ int sfe_ipv4_frag_prepare( struct sfe_ipv4 *si, struct sfe_ipv4_connection_match
 		return SFE_IPV4_EXCEPTION_EVENT_FRAG_FAILS_DF_SET;
 	}
 
+	if ((skb->ip_summed == CHECKSUM_PARTIAL) && skb_checksum_help(skb)) {
+		return SFE_IPV4_EXCEPTION_EVENT_FRAG_CHECKSUM_FAIL;
+	}
+
 	headroom = LL_RESERVED_SPACE(skb->dev);
 	tailroom = skb_tailroom(skb);
 	mtu = cm->xmit_dev_mtu;
@@ -1187,9 +1192,6 @@ void sfe_ipv4_frag(struct sfe_ipv4 *si, struct sfe_ipv4_connection_match *cm, st
 		ph->length = htons(frag_len + sizeof(*iph) + 2);
 	}
 
-	/*
-	 * TODO: Fix the udp checksum calculation for tunnels like VxLAN
-	 */
 	if (skb->ip_summed != CHECKSUM_PARTIAL) {
 		calculate_csum = true;
 		iph->check = sfe_ipv4_gen_ip_csum(iph);
