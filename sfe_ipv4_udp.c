@@ -315,7 +315,7 @@ int sfe_ipv4_recv_udp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 	}
 
 	/*
-	 * If our packet is larger than the MTU of the transmit interface then
+	 * If our packet is larger than the fragment threshold / MTU of the transmit interface then
 	 * it has to be fragmented.
 	 */
 	if (unlikely((len > cm->xmit_dev_mtu) && (!cm->up))) {

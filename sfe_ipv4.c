@@ -2626,6 +2626,12 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	if (likely(SFE_SAWF_TAG_IS_VALID(flow_sawf_tag))) {
 		original_cm->mark = msg->sawf_rule.flow_mark;
 		original_cm->svc_id = msg->sawf_rule.flow_svc_id;
+
+		if (msg->valid_flags & SFE_RULE_CREATE_FLOW_FRAG_THRESH_VALID) {
+			uint16_t frag_thresh = msg->sawf_rule.flow_frag_thresh;
+			original_cm->xmit_dev_mtu = min(frag_thresh, original_cm->xmit_dev_mtu);
+		}
+
 		original_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_MARK;
 		original_cm->sawf_valid = true;
 	}
@@ -2986,6 +2992,12 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	if (likely(SFE_SAWF_TAG_IS_VALID(return_sawf_tag))) {
 		reply_cm->mark = msg->sawf_rule.return_mark;
 		reply_cm->svc_id = msg->sawf_rule.return_svc_id;
+
+		if (msg->valid_flags & SFE_RULE_CREATE_RETURN_FRAG_THRESH_VALID) {
+			uint16_t frag_thresh = msg->sawf_rule.return_frag_thresh;
+			reply_cm->xmit_dev_mtu = min(frag_thresh, reply_cm->xmit_dev_mtu);
+		}
+
 		reply_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_MARK;
 		reply_cm->sawf_valid = true;
 	}
