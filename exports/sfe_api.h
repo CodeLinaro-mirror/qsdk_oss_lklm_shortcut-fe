@@ -124,8 +124,9 @@
 #define SFE_RULE_CREATE_TRUSTSEC_VALID     (1<<11)	/**< Trustsec fields are valid. */
 #define SFE_RULE_CREATE_QDISC_RULE_VALID   (1<<12)	/**< QDISC rule is valid. */
 #define SFE_RULE_CREATE_VLAN_FILTER_VALID  (1<<13)	/**< Bridge VLAN Filter rule is valid. */
-#define SFE_RULE_CREATE_FLOW_FRAG_THRESH_VALID	(1<<14)	/* Flow ipv4_frag_thresh is valid */
-#define SFE_RULE_CREATE_RETURN_FRAG_THRESH_VALID  (1<<15) /* Return ipv4_frag_thresh is valid */
+#define SFE_RULE_CREATE_FLOW_FRAG_THRESH_VALID	(1<<14)	/** Flow ipv4_frag_thresh is valid */
+#define SFE_RULE_CREATE_RETURN_FRAG_THRESH_VALID (1<<15) /** Return ipv4_frag_thresh is valid */
+#define SFE_RULE_CREATE_SKIP_FRAG_OFFLOAD_VALID	 (1<<16) /** Fragmentation offload is invalid */
 
 /*
  * Multicast rule flags
