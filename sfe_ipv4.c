@@ -127,7 +127,8 @@ static char *sfe_ipv4_exception_events_string[SFE_IPV4_EXCEPTION_EVENT_LAST] = {
 	"FRAG_FAILS_NON_LINEAR_SKB",
 	"FRAG_FAILS_MULTICAST_PACKET",
 	"FRAG_FAILS_BRIDGED_FLOW",
-	"FRAG_CHECKSUM_FAIL"
+	"FRAG_CHECKSUM_FAIL",
+	"FRAG_SKIP_OFFLOAD"
 };
 
 static struct sfe_ipv4 __si;
@@ -1024,6 +1025,14 @@ int sfe_ipv4_frag_prepare( struct sfe_ipv4 *si, struct sfe_ipv4_connection_match
 	uint16_t frag_len;
 	uint16_t mtu;
 	bool df;
+
+	/*
+	 * If fragmentation offload has to be skipped, exception the packets
+	 */
+	if ((cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_SKIP_FRAG_OFFLOAD)) {
+		DEBUG_TRACE("%px: sfe: Skip fragmentation offload\n", cm);
+		return SFE_IPV4_EXCEPTION_EVENT_SKIP_FRAG_OFFLOAD;
+	}
 
 	/*
 	 * If bridged flow, exception the packets
@@ -2580,6 +2589,10 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 
 	original_cm->xmit_dev_mtu = msg->conn_rule.return_mtu;
 
+	if (msg->valid_flags & SFE_RULE_CREATE_SKIP_FRAG_OFFLOAD_VALID) {
+		original_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_SKIP_FRAG_OFFLOAD;
+	}
+
 	original_cm->connection = c;
 	original_cm->counter_match = reply_cm;
 
@@ -2940,6 +2953,10 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	}
 
 	reply_cm->xmit_dev_mtu = msg->conn_rule.flow_mtu;
+
+	if (msg->valid_flags & SFE_RULE_CREATE_SKIP_FRAG_OFFLOAD_VALID) {
+                reply_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_SKIP_FRAG_OFFLOAD;
+        }
 
 	reply_cm->connection = c;
 	reply_cm->counter_match = original_cm;

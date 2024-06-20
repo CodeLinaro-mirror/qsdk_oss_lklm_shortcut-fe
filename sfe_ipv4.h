@@ -113,6 +113,8 @@ struct sfe_ipv4_vlan_filter_connection_match {
 					/* Don't send packets to FLS */
 #define SFE_IPV4_CONNECTION_MATCH_FLAG_BRIDGE_VLAN_PASSTHROUGH (1<<26)
 					/* Bridge Vlan passthrough enable */
+#define SFE_IPV4_CONNECTION_MATCH_FLAG_SKIP_FRAG_OFFLOAD (1<<27)
+					/* Skip fragmentation offload */
 
 /*
  * IPv4 multicast destination structure
@@ -406,6 +408,7 @@ enum sfe_ipv4_exception_events {
 	SFE_IPV4_EXCEPTION_EVENT_MULTICAST_PACKET_NEEDS_FRAGMENTATION,
 	SFE_IPV4_EXCEPTION_EVENT_FRAG_FAILS_BRIDGED_FLOW,
 	SFE_IPV4_EXCEPTION_EVENT_FRAG_CHECKSUM_FAIL,
+	SFE_IPV4_EXCEPTION_EVENT_SKIP_FRAG_OFFLOAD,
 	SFE_IPV4_EXCEPTION_EVENT_LAST
 };
 
