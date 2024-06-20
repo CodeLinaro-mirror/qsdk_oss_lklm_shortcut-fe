@@ -3,7 +3,7 @@
  *	Shortcut forwarding engine - IPv4 edition.
  *
  * Copyright (c) 2013-2016, 2019-2020, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -121,7 +121,13 @@ static char *sfe_ipv4_exception_events_string[SFE_IPV4_EXCEPTION_EVENT_LAST] = {
 	"L2TPV3_NO_CONNECTION",
 	"L2TPV3_IP_OPTIONS_OR_INITIAL_FRAGMENT",
 	"L2TPV3_SMALL_TTL",
-	"L2TPV3_NEEDS_FRAGMENTATION"
+	"L2TPV3_NEEDS_FRAGMENTATION",
+	"FRAG_FAILS_NOMEM",
+	"FRAG_FAILS_DF_SET",
+	"FRAG_FAILS_NON_LINEAR_SKB",
+	"FRAG_FAILS_MULTICAST_PACKET",
+	"FRAG_FAILS_BRIDGED_FLOW",
+	"FRAG_CHECKSUM_FAIL"
 };
 
 static struct sfe_ipv4 __si;
@@ -1005,6 +1011,255 @@ void sfe_ipv4_exception_stats_inc(struct sfe_ipv4 *si, enum sfe_ipv4_exception_e
        struct sfe_ipv4_stats *stats = this_cpu_ptr(si->stats_pcpu);
        stats->exception_events64[reason]++;
        stats->packets_not_forwarded64++;
+}
+
+/*
+ * sfe_ipv4_frag_prepare
+ * 	Check if SFE can fragment and allocates new SKBs for fragmentation
+ */
+int sfe_ipv4_frag_prepare( struct sfe_ipv4 *si, struct sfe_ipv4_connection_match *cm, struct sk_buff *skb, struct sk_buff_head *head, struct iphdr *iph)
+{
+	uint16_t headroom, tailroom;
+	uint16_t ip_payload_len;
+	uint16_t frag_len;
+	uint16_t mtu;
+	bool df;
+
+	/*
+	 * If bridged flow, exception the packets
+	 */
+	if ((cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_BRIDGE_FLOW)) {
+		DEBUG_TRACE("%px: sfe: Bridged flow\n", cm);
+		return SFE_IPV4_EXCEPTION_EVENT_FRAG_FAILS_BRIDGED_FLOW;
+	}
+
+	/*
+	 * If skb is non linear, exception the packets
+	 */
+	if (skb_is_nonlinear(skb)) {
+		DEBUG_TRACE("%px: sfe: Non linear packet, larger than MTU\n", cm);
+		return SFE_IPV4_EXCEPTION_EVENT_NON_LINEAR_PACKET_NEEDS_FRAGMENTATION;
+	}
+
+	/*
+	 * If traffic is multicast, exception the packets
+	 */
+	if ((cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_MULTICAST)) {
+		DEBUG_TRACE("%px: sfe: Multicast packet larger than MTU\n", cm);
+		return SFE_IPV4_EXCEPTION_EVENT_MULTICAST_PACKET_NEEDS_FRAGMENTATION;
+	}
+
+	df = !!(iph->frag_off & htons(IP_DF));
+	if (!(skb->ignore_df) && df) {
+		/*
+		 * Exception to Linux , Linux generates icmp and drops the packet
+		 */
+		DEBUG_TRACE("%px: DF bit is set\n", cm);
+		return SFE_IPV4_EXCEPTION_EVENT_FRAG_FAILS_DF_SET;
+	}
+
+	if ((skb->ip_summed == CHECKSUM_PARTIAL) && skb_checksum_help(skb)) {
+		return SFE_IPV4_EXCEPTION_EVENT_FRAG_CHECKSUM_FAIL;
+	}
+
+	headroom = LL_RESERVED_SPACE(skb->dev);
+	tailroom = skb_tailroom(skb);
+	mtu = cm->xmit_dev_mtu;
+
+	/*
+	 * Allocate fragments.
+	 */
+	frag_len = mtu - sizeof(*iph);
+	frag_len &= ~7;
+	ip_payload_len = ntohs(iph->tot_len) - sizeof(*iph);
+
+	/*
+	 * TODO: Add netdev_alloc_list for efficient list allocation.
+	 */
+	ip_payload_len -= frag_len;
+
+	while (ip_payload_len > 0) {
+		struct sk_buff *skb2;
+
+		frag_len = min(frag_len, ip_payload_len);
+		ip_payload_len -= frag_len;
+
+		skb2 = netdev_alloc_skb(skb->dev, mtu + headroom + tailroom);
+		if (!skb2) {
+			pr_warn("%px: Unable to allocate memory for new fragment.\n", skb->dev);
+			/*
+			 * Free the fragments that were allocated before
+			 */
+			dev_kfree_skb_list_fast(head);
+			return SFE_IPV4_EXCEPTION_EVENT_FRAG_FAILS_NOMEM;
+		}
+
+		skb_reserve(skb2, headroom);
+		__skb_queue_tail(head, skb2);
+	}
+
+	return SFE_IPV4_EXCEPTION_EVENT_LAST;
+}
+
+/*
+ * sfe_ipv4_frag_xmit()
+ *      Handle packet forwarding.
+ */
+static int sfe_ipv4_frag_xmit(struct sfe_ipv4 *si, struct sfe_ipv4_connection_match *cm, struct sk_buff *skb, bool fast_xmit)
+{
+	netdev_features_t features;
+
+	features = cm->features;
+	this_cpu_inc(si->stats_pcpu->packets_forwarded64);
+
+	/*
+	 * We do per packet condition check before we could fast xmit the
+	 * packet.
+	 */
+	if (likely(fast_xmit && dev_fast_xmit(skb, skb->dev, features))) {
+		this_cpu_inc(si->stats_pcpu->packets_fast_xmited64);
+		return 1;
+	}
+
+	/*
+	 * We're going to check for GSO flags when we transmit the packet so
+	 * start fetching the necessary cache line now.
+	 */
+	prefetch(skb_shinfo(skb));
+
+	/*
+	 * Mark that this packet has been fast forwarded.
+	 */
+	skb->fast_forwarded = 1;
+
+	/*
+	 * check if fast qdisc xmit is enabled and send the packet on its way.
+	 */
+	if (cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_FAST_QDISC_XMIT) {
+		if (likely(dev_fast_xmit_qdisc(skb, skb->dev, cm->qdisc_xmit_dev))) {
+			this_cpu_inc(si->stats_pcpu->packets_fast_qdisc_xmited64);
+			return 1;
+		}
+	}
+
+	dev_queue_xmit(skb);
+
+	return 1;
+}
+
+/*
+ * sfe_ipv4_frag()
+ *      API to fragment the IPv4 packets.
+ */
+void sfe_ipv4_frag(struct sfe_ipv4 *si, struct sfe_ipv4_connection_match *cm, struct sk_buff *skb, struct sk_buff_head *head, struct iphdr *iph, 				bool fast_xmit)
+{
+	uint16_t frag_len, payload_len, hdr_len;
+	uint16_t nr_frags, mtu, offset = 0;
+	struct sk_buff *frag_skb;
+	bool calculate_csum;
+	uint16_t ip_offset;
+	uint8_t *next_data;
+
+	/*
+	 * When ignore_df will override IP_DF, set IP_DF to zero
+	 */
+	iph->frag_off &= ~htons(IP_DF);
+
+	/*
+	 * skb->data is pointing to L2 Header
+	 */
+	hdr_len = (uint8_t *)iph + sizeof(*iph) - skb->data;
+	next_data = skb->data + hdr_len;
+	payload_len = skb->len - hdr_len;
+	ip_offset = hdr_len - sizeof(*iph);
+	offset = (ntohs(iph->frag_off) & IP_OFFSET) << 3;
+
+	mtu = cm->xmit_dev_mtu;
+	frag_len = mtu - sizeof(*iph);
+	frag_len &= ~7;
+
+	skb_trim(skb, frag_len + hdr_len);
+
+	iph->frag_off |= htons(IP_MF);
+	iph->tot_len = htons(frag_len + sizeof(*iph));
+	payload_len -= frag_len;
+
+	if (unlikely(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_PPPOE_ENCAP)) {
+		uint16_t pppoe_offset = ip_offset - PPPOE_SES_HLEN;
+		struct pppoe_hdr *ph;
+
+		ph = (struct pppoe_hdr *)(skb->data + pppoe_offset);
+		ph->length = htons(frag_len + sizeof(*iph) + 2);
+	}
+
+	if (skb->ip_summed != CHECKSUM_PARTIAL) {
+		calculate_csum = true;
+		iph->check = sfe_ipv4_gen_ip_csum(iph);
+	}
+
+	frag_skb = skb_peek(head);
+	nr_frags = skb_queue_len(head);
+
+	while (nr_frags > 0) {
+		struct iphdr *iph2;
+
+		nr_frags -= 1;
+		next_data += frag_len;
+		offset += frag_len;
+		frag_len = min(frag_len, payload_len);
+		payload_len -= frag_len;
+
+		/*
+		 * Copy metadata to frag_skb from skb;
+		 */
+		frag_skb->pkt_type = skb->pkt_type;
+		frag_skb->priority = skb->priority;
+		frag_skb->protocol = skb->protocol;
+		frag_skb->skb_iif = skb->skb_iif;
+		frag_skb->dev = skb->dev;
+		frag_skb->mark = skb->mark;
+		frag_skb->ip_summed = skb->ip_summed;
+		skb_copy_hash(frag_skb, skb);
+		nf_copy(frag_skb, skb);
+
+		frag_skb->mac_header = skb->mac_header;
+		frag_skb->network_header = skb->network_header;
+
+		memcpy(skb_put(frag_skb, hdr_len), skb->data, hdr_len);
+		memcpy(skb_put(frag_skb, frag_len), next_data, frag_len);
+
+		iph2 = (struct iphdr *)(frag_skb->data + ip_offset);
+		iph2->frag_off = htons((offset >> 3));
+		iph2->frag_off |= (payload_len > 0) ? htons(IP_MF) : 0;
+
+		iph2->tot_len = htons(frag_len + sizeof(*iph2));
+
+		if (unlikely(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_PPPOE_ENCAP)) {
+			uint16_t pppoe_offset = ip_offset - PPPOE_SES_HLEN;
+			struct pppoe_hdr *ph;
+
+			ph = (struct pppoe_hdr *)(frag_skb->data + pppoe_offset);
+			ph->length = htons(frag_len + sizeof(*iph2) + 2);
+		}
+
+		/*
+		 * Head SKB is set with checksum_partial when hw offload is enabled.
+		 */
+		if (calculate_csum) {
+			iph2->check = sfe_ipv4_gen_ip_csum(iph2);
+		}
+
+		frag_skb = skb_peek_next(frag_skb, head);
+	}
+
+	__skb_queue_head(head, skb);
+
+	while (skb_queue_len(head)) {
+		skb = __skb_dequeue(head);
+		sfe_ipv4_frag_xmit(si, cm, skb, fast_xmit);
+	}
+
+	return;
 }
 
 /*
@@ -2371,6 +2626,12 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	if (likely(SFE_SAWF_TAG_IS_VALID(flow_sawf_tag))) {
 		original_cm->mark = msg->sawf_rule.flow_mark;
 		original_cm->svc_id = msg->sawf_rule.flow_svc_id;
+
+		if (msg->valid_flags & SFE_RULE_CREATE_FLOW_FRAG_THRESH_VALID) {
+			uint16_t frag_thresh = msg->sawf_rule.flow_frag_thresh;
+			original_cm->xmit_dev_mtu = min(frag_thresh, original_cm->xmit_dev_mtu);
+		}
+
 		original_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_MARK;
 		original_cm->sawf_valid = true;
 	}
@@ -2731,6 +2992,12 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	if (likely(SFE_SAWF_TAG_IS_VALID(return_sawf_tag))) {
 		reply_cm->mark = msg->sawf_rule.return_mark;
 		reply_cm->svc_id = msg->sawf_rule.return_svc_id;
+
+		if (msg->valid_flags & SFE_RULE_CREATE_RETURN_FRAG_THRESH_VALID) {
+			uint16_t frag_thresh = msg->sawf_rule.return_frag_thresh;
+			reply_cm->xmit_dev_mtu = min(frag_thresh, reply_cm->xmit_dev_mtu);
+		}
+
 		reply_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_MARK;
 		reply_cm->sawf_valid = true;
 	}

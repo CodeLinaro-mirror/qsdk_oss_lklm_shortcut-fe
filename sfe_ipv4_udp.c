@@ -3,7 +3,7 @@
  *	Shortcut forwarding engine - IPv4 UDP implementation
  *
  * Copyright (c) 2013-2016, 2019-2020, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -162,6 +162,8 @@ int sfe_ipv4_recv_udp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 	u8 ingress_flags = 0;
 	sfe_fls_conn_stats_update_t update_cb;
 	bool vlan_passthrough = false;
+	bool frag_required = false;
+	struct sk_buff_head head;
 
 	/*
 	 * Is our packet too short to contain a valid UDP header?
@@ -313,15 +315,25 @@ int sfe_ipv4_recv_udp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 	}
 
 	/*
-	 * If our packet is larger than the MTU of the transmit interface then
-	 * we can't forward it easily.
+	 * If our packet is larger than the fragment threshold / MTU of the transmit interface then
+	 * it has to be fragmented.
 	 */
 	if (unlikely((len > cm->xmit_dev_mtu) && (!cm->up))) {
-		sfe_ipv4_sync_status(si, cm->connection, SFE_SYNC_REASON_STATS);
-		rcu_read_unlock();
-		sfe_ipv4_exception_stats_inc(si, SFE_IPV4_EXCEPTION_EVENT_UDP_NEEDS_FRAGMENTATION);
-		DEBUG_TRACE("%px: sfe: larger than MTU\n", cm);
-		return 0;
+		/*
+		 * TODO: Use threshold packet size if specified.
+		 */
+		skb_queue_head_init(&head);
+		ret = sfe_ipv4_frag_prepare(si, cm, skb, &head, iph);
+		if (ret != SFE_IPV4_EXCEPTION_EVENT_LAST) {
+			sfe_ipv4_sync_status(si, cm->connection, SFE_SYNC_REASON_STATS);
+			rcu_read_unlock();
+			sfe_ipv4_exception_stats_inc(si, ret);
+			sfe_ipv4_exception_stats_inc(si, SFE_IPV4_EXCEPTION_EVENT_UDP_NEEDS_FRAGMENTATION);
+			DEBUG_TRACE("%px: sfe: larger than MTU\n", cm);
+			return 0;
+		}
+
+		frag_required = true;
 	}
 
 	/*
@@ -699,8 +711,15 @@ int sfe_ipv4_recv_udp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 	 * when l2 acceleration enabled, this header was not ever set.
 	 */
 	skb_set_transport_header(skb, ihl);
-	rcu_read_unlock();
 
+	if (frag_required) {
+		sfe_ipv4_frag(si, cm, skb, &head, iph, fast_xmit);
+		WARN_ON(skb_queue_len(&head));
+		rcu_read_unlock();
+		return 1;
+	}
+
+	rcu_read_unlock();
 	this_cpu_inc(si->stats_pcpu->packets_forwarded64);
 
 	/*

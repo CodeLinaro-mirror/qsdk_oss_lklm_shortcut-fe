@@ -3,7 +3,7 @@
  *	 SFE exported function headers for SFE engine.
  *
  * Copyright (c) 2015,2016, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -124,6 +124,8 @@
 #define SFE_RULE_CREATE_TRUSTSEC_VALID     (1<<11)	/**< Trustsec fields are valid. */
 #define SFE_RULE_CREATE_QDISC_RULE_VALID   (1<<12)	/**< QDISC rule is valid. */
 #define SFE_RULE_CREATE_VLAN_FILTER_VALID  (1<<13)	/**< Bridge VLAN Filter rule is valid. */
+#define SFE_RULE_CREATE_FLOW_FRAG_THRESH_VALID	(1<<14)	/* Flow ipv4_frag_thresh is valid */
+#define SFE_RULE_CREATE_RETURN_FRAG_THRESH_VALID  (1<<15) /* Return ipv4_frag_thresh is valid */
 
 /*
  * Multicast rule flags
@@ -472,6 +474,8 @@ struct sfe_service_class_rule {
 	uint32_t return_mark;		/**< SAWF metadata information in return direction. */
 	uint8_t flow_svc_id;		/**< Service class id in flow direction. */
 	uint8_t return_svc_id;		/**< Service class id in return direction. */
+	uint16_t flow_frag_thresh;	/**< Threshold size value in flow direction. */
+	uint16_t return_frag_thresh;	/**< Threshold size value in return direction. */
 };
 
 /**
