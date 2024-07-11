@@ -3785,28 +3785,33 @@ static int sfe_ipv4_debug_dev_read_connections_connection(struct sfe_ipv4 *si, s
 #endif
 				last_sync_jiffies);
 
-	if (original_cm->ingress_vlan_hdr_cnt || original_cm->egress_vlan_hdr_cnt || reply_cm->ingress_vlan_hdr_cnt || reply_cm->egress_vlan_hdr_cnt) {
-		/*
-		 * VLAN Header is present in either of the original/reply rule.
-		 */
+	if (orig_ingress_vlan_hdr_cnt || orig_egress_vlan_hdr_cnt) {
 		ws->msg_len += snprintf(ws->msg + ws->msg_len, length - ws->msg_len,
 				"orig_in_vlan_hdr0=\"%d\" orig_in_vlan_hdr1=\"%d\" orig_in_vlan_hdr_cnt=\"%d\" "
-				"orig_eg_vlan_hdr0=\"%d\" orig_eg_vlan_hdr1=\"%d\" orig_eg_vlan_hdr_cnt=\"%d\" "
+				"orig_eg_vlan_hdr0=\"%d\" orig_eg_vlan_hdr1=\"%d\" orig_eg_vlan_hdr_cnt=\"%d\" ",
+				orig_ingress_vlan_hdr0, orig_ingress_vlan_hdr1, orig_ingress_vlan_hdr_cnt,
+				orig_egress_vlan_hdr0, orig_egress_vlan_hdr1,orig_egress_vlan_hdr_cnt);
+	}
+
+	if (reply_ingress_vlan_hdr_cnt || reply_egress_vlan_hdr_cnt) {
+		ws->msg_len += snprintf(ws->msg + ws->msg_len, length - ws->msg_len,
 				"reply_in_vlan_hdr0=\"%d\" reply_in_vlan_hdr1=\"%d\" reply_in_vlan_hdr_cnt=\"%d\" "
 				"reply_eg_vlan_hdr0=\"%d\" reply_eg_vlan_hdr1=\"%d\" reply_eg_vlan_hdr_cnt=\"%d\" ",
-				orig_ingress_vlan_hdr0, orig_ingress_vlan_hdr1, orig_ingress_vlan_hdr_cnt,
-				orig_egress_vlan_hdr0, orig_egress_vlan_hdr1,orig_egress_vlan_hdr_cnt,
 				reply_ingress_vlan_hdr0, reply_ingress_vlan_hdr1, reply_ingress_vlan_hdr_cnt,
 				reply_egress_vlan_hdr0, reply_egress_vlan_hdr1, reply_egress_vlan_hdr_cnt);
 	}
 
 #ifdef SFE_BRIDGE_VLAN_FILTERING_ENABLE
-	if (orig_cm_vf_ingress_flags || reply_cm_vf_ingress_flags) {
+	if (orig_cm_vf_ingress_flags) {
 		ws->msg_len += snprintf(ws->msg + ws->msg_len, length - ws->msg_len,
-				"orig_in_vf_flags=\"%08x\" orig_eg_vf_insert_vlan_tag=\"%s\" "
-				"reply_in_vf_flags=\"%08x\" reply_eg_vf_insert_vlan_tag=\"%s\" ",
+				"orig_in_vf_flags=\"%08x\" orig_eg_vf_insert_vlan_tag=\"%s\" ",
 				orig_cm_vf_ingress_flags,
-				(original_cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_INSERT_EGRESS_VLAN_TAG) ? "Yes" : "No",
+				(original_cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_INSERT_EGRESS_VLAN_TAG) ? "Yes" : "No");
+	}
+
+	if (reply_cm_vf_ingress_flags) {
+		ws->msg_len += snprintf(ws->msg + ws->msg_len, length - ws->msg_len,
+				"reply_in_vf_flags=\"%08x\" reply_eg_vf_insert_vlan_tag=\"%s\" ",
 				reply_cm_vf_ingress_flags,
 				(reply_cm_flags & SFE_IPV4_CONNECTION_MATCH_FLAG_INSERT_EGRESS_VLAN_TAG) ? "Yes" : "No");
 	}
@@ -3821,7 +3826,6 @@ static int sfe_ipv4_debug_dev_read_connections_connection(struct sfe_ipv4 *si, s
 		ws->msg_len += snprintf(ws->msg + ws->msg_len, length - ws->msg_len, "flow_service_class=\"%d\" flow_msduq = \"0x%x\" ",
 				flow_svc_id, flow_msduq);
 	}
-
 
 	if (reply_cm_sawf_valid) {
 		ws->msg_len += snprintf(ws->msg + ws->msg_len, length - ws->msg_len, "return_service_class=\"%d\" return_msduq = \"0x%x\" ",
