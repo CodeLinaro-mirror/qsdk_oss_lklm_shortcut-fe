@@ -729,6 +729,32 @@ int sfe_ipv4_recv_udp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 	}
 
 	/*
+	 * Set skb dst.
+	 * Linux determines the tunnel info for VxLAN-GPE from skb->dst and uses
+	 * this to get the encapsulation instruction for the packet.
+	 */
+	if (unlikely(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_VXLAN_GPE)) {
+		struct dst_entry *dst;
+		struct rtable *rt;
+		dst = dst_cache_get(&cm->dst_cache);
+		if (unlikely(!dst)) {
+			rt = ip_route_output(&init_net, ip_hdr(skb)->daddr, 0, 0, 0);
+			if (IS_ERR(rt)) {
+				DEBUG_TRACE("%px: VXLAN-GPE failed to get IPv4 route: %pI4 \n", skb, &ip_hdr(skb)->daddr);
+				rcu_read_unlock();
+				sfe_ipv4_exception_stats_inc(si, SFE_IPV4_EXCEPTION_EVENT_VXLAN_GPE_NO_ROUTE);
+				return 0;
+			}
+
+			dst = &rt->dst;
+			dst_cache_set_ip4(&cm->dst_cache, dst, ip_hdr(skb)->saddr);
+		}
+
+		skb_dst_drop(skb);
+		skb_dst_set(skb, dst);
+	}
+
+	/*
 	 * For the first packets, check if it could got fast xmit.
 	 */
 	if (unlikely(!(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_FAST_XMIT_FLOW_CHECKED)

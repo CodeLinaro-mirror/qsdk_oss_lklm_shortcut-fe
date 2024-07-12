@@ -24,6 +24,7 @@
 #define SFE_IPV4_DSCP_MASK 0x3
 #define SFE_IPV4_DSCP_SHIFT 2
 #include <linux/version.h>
+#include <net/dst_cache.h>
 
 /*
  * Size of single sfe_dump msg buffer
@@ -115,6 +116,8 @@ struct sfe_ipv4_vlan_filter_connection_match {
 					/* Bridge Vlan passthrough enable */
 #define SFE_IPV4_CONNECTION_MATCH_FLAG_SKIP_FRAG_OFFLOAD (1<<27)
 					/* Skip fragmentation offload */
+#define SFE_IPV4_CONNECTION_MATCH_FLAG_VXLAN_GPE (1<<28)
+					/* VXLAN-GPE flow */
 
 /*
  * IPv4 multicast destination structure
@@ -293,6 +296,7 @@ struct sfe_ipv4_connection_match {
 
 	bool sawf_valid;		/* Indicates mark has valid SAWF information */
 	bool ingress_trustsec_valid;	/* Indicates trustsec header is valid */
+	struct dst_cache dst_cache;     /* Destination route cache */
 };
 
 /*
@@ -412,6 +416,7 @@ enum sfe_ipv4_exception_events {
 	SFE_IPV4_EXCEPTION_EVENT_FLS_HWM_FLUSH,
 	SFE_IPV4_EXCEPTION_EVENT_TCP_CHECKSUM_ERROR,
 	SFE_IPV4_EXCEPTION_EVENT_UDP_CHECKSUM_ERROR,
+	SFE_IPV4_EXCEPTION_EVENT_VXLAN_GPE_NO_ROUTE,
 	SFE_IPV4_EXCEPTION_EVENT_LAST
 };
 
