@@ -1072,7 +1072,8 @@ enum sfe_cmn_response sfe_create_ipv4_rule_msg(struct sfe_ctx_instance_internal 
 				pr4rc.valid_flags |= PPE_RFS_V4_RULE_FLAG_QOS_VALID;
 			}
 
-			pr4rc.rule_flags |= PPE_RFS_V4_RULE_FLAG_RETURN_VALID | PPE_RFS_V4_RULE_FLAG_FLOW_VALID;
+			pr4rc.rule_flags |= PPE_RFS_V4_RULE_FLAG_RETURN_VALID | PPE_RFS_V4_RULE_FLAG_FLOW_VALID |
+						PPE_RFS_V4_RULE_FLAG_PASSIVE_FLOW;
 
 			if (ppe_rfs_ipv4_rule_create(&pr4rc) != PPE_RFS_RET_SUCCESS) {
 				DEBUG_TRACE("%p: Error in pushing PPE RFS rules\n", msg);
@@ -1710,7 +1711,8 @@ enum sfe_cmn_response sfe_create_ipv6_rule_msg(struct sfe_ctx_instance_internal 
 				pr6rc.valid_flags |= PPE_RFS_V6_RULE_FLAG_QOS_VALID;
 			}
 
-			pr6rc.rule_flags |= PPE_RFS_V6_RULE_FLAG_RETURN_VALID | PPE_RFS_V6_RULE_FLAG_FLOW_VALID;
+			pr6rc.rule_flags |= PPE_RFS_V6_RULE_FLAG_RETURN_VALID | PPE_RFS_V6_RULE_FLAG_FLOW_VALID |
+						PPE_RFS_V6_RULE_FLAG_PASSIVE_FLOW;
 
 			if (ppe_rfs_ipv6_rule_create(&pr6rc) != PPE_RFS_RET_SUCCESS) {
 				DEBUG_TRACE("%p: Error in pushing PPE RFS rules\n", msg);
