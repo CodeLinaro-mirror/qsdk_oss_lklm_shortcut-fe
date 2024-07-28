@@ -3,7 +3,7 @@
  *	Shortcut forwarding engine - IPv6 support.
  *
  * Copyright (c) 2015-2016, 2019-2020, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -132,7 +132,10 @@ static char *sfe_ipv6_exception_events_string[SFE_IPV6_EXCEPTION_EVENT_LAST] = {
 	"L2TPV3_NO_CONNECTION",
 	"L2TPV3_IP_OPTIONS_OR_INITIAL_FRAGMENT",
 	"L2TPV3_SMALL_TTL",
-	"L2TPV3_NEEDS_FRAGMENTATION"
+	"L2TPV3_NEEDS_FRAGMENTATION",
+	"FLS_HWM_FLUSH",
+	"UDP_CHECKSUM_ERROR",
+	"TCP_CHECKSUM_ERROR"
 };
 
 static struct sfe_ipv6 __si6;

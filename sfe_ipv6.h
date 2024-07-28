@@ -3,7 +3,7 @@
  *	Shortcut forwarding engine header file for IPv6.
  *
  * Copyright (c) 2015-2016, 2019-2020, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -413,6 +413,8 @@ enum sfe_ipv6_exception_events {
 	SFE_IPV6_EXCEPTION_EVENT_L2TPV3_SMALL_TTL,
 	SFE_IPV6_EXCEPTION_EVENT_L2TPV3_NEEDS_FRAGMENTATION,
 	SFE_IPV6_EXCEPTION_EVENT_FLS_HWM_FLUSH,
+	SFE_IPV6_EXCEPTION_EVENT_UDP_CHECKSUM_ERROR,
+	SFE_IPV6_EXCEPTION_EVENT_TCP_CHECKSUM_ERROR,
 	SFE_IPV6_EXCEPTION_EVENT_LAST
 };
 

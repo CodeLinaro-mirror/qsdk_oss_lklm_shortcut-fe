@@ -218,6 +218,18 @@ int sfe_ipv4_recv_udp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 	}
 
 	/*
+	 * L4 csum validation when a successful check by HW is absent in ip_summed.
+	 */
+	if (unlikely(skb->ip_summed != CHECKSUM_UNNECESSARY)) {
+		if (!sfe_udp_checksum_validate(skb, ihl, true)) {
+			rcu_read_unlock();
+			sfe_ipv4_exception_stats_inc(si, SFE_IPV4_EXCEPTION_EVENT_UDP_CHECKSUM_ERROR);
+			DEBUG_TRACE("%p: UDP v4 checksum error\n", skb);
+			return 0;
+		}
+	}
+
+	/*
 	 * Source interface validate.
 	 */
 	if (unlikely((cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_SRC_INTERFACE_CHECK) && (cm->match_dev != dev))) {

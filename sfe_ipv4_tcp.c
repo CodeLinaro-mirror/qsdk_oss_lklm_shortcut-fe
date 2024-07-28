@@ -3,7 +3,7 @@
  *	Shortcut forwarding engine - IPv4 TCP implementation
  *
  * Copyright (c) 2013-2016, 2019-2020, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -228,6 +228,18 @@ int sfe_ipv4_recv_tcp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 		DEBUG_TRACE("no connection found - slow flags: 0x%x\n",
 			    flags & (TCP_FLAG_SYN | TCP_FLAG_RST | TCP_FLAG_FIN | TCP_FLAG_ACK));
 		return 0;
+	}
+
+	/*
+	 * L4 csum validation when a successful check by HW is absent in ip_summed.
+	 */
+	if (unlikely(skb->ip_summed != CHECKSUM_UNNECESSARY)) {
+		if (!sfe_tcp_checksum_validate(skb, ihl, true)) {
+			rcu_read_unlock();
+			sfe_ipv4_exception_stats_inc(si, SFE_IPV4_EXCEPTION_EVENT_TCP_CHECKSUM_ERROR);
+			DEBUG_TRACE("%p: TCP v4 checksum error\n", skb);
+			return 0;
+		}
 	}
 
 	/*
