@@ -56,12 +56,6 @@ typedef union {
 	struct sfe_ipv6_addr	ip6[1];
 } sfe_ip_addr_t;
 
-typedef enum sfe_sync_reason {
-	SFE_SYNC_REASON_STATS,	/* Sync is to synchronize stats */
-	SFE_SYNC_REASON_FLUSH,	/* Sync is to flush a entry */
-	SFE_SYNC_REASON_DESTROY	/* Sync is to destroy a entry(requested by connection manager) */
-} sfe_sync_reason_t;
-
 /*
  * VLAN header (aka VLAN tag)
  */
@@ -126,6 +120,8 @@ struct sfe_connection_sync {
 	u32 reason;                     /* reason for stats sync message, i.e. destroy, flush, period sync */
 	u64 delta_jiffies;		/* Time to be added to the current timeout to keep the connection alive */
 };
+
+extern uint8_t sfe_fls_flush_on_hwm_enable;
 
 struct sfe_fls {
 	sfe_fls_conn_create_t create_cb;

@@ -745,7 +745,7 @@ bool sfe_ipv4_remove_connection(struct sfe_ipv4 *si, struct sfe_ipv4_connection 
  * (while called from sfe_ipv4_flush_connection())
  */
 static void sfe_ipv4_gen_sync_connection(struct sfe_ipv4 *si, struct sfe_ipv4_connection *c,
-						  struct sfe_connection_sync *sis, sfe_sync_reason_t reason,
+						  struct sfe_connection_sync *sis, sfe_rule_sync_reason_t reason,
 						  u64 now_jiffies)
 {
 	struct sfe_ipv4_connection_match *original_cm;
@@ -923,7 +923,7 @@ void sfe_ipv4_fls_clear(void)
  */
 void sfe_ipv4_sync_status(struct sfe_ipv4 *si,
 					       struct sfe_ipv4_connection *c,
-					       sfe_sync_reason_t reason)
+					       sfe_rule_sync_reason_t reason)
 {
 	struct sfe_connection_sync sis = {/*zero*/};
 	u64 now_jiffies;
@@ -955,7 +955,7 @@ void sfe_ipv4_sync_status(struct sfe_ipv4 *si,
  */
 void sfe_ipv4_flush_connection(struct sfe_ipv4 *si,
 					       struct sfe_ipv4_connection *c,
-					       sfe_sync_reason_t reason)
+					       sfe_rule_sync_reason_t reason)
 {
 	BUG_ON(!c->removed);
 
@@ -3607,7 +3607,7 @@ void sfe_ipv4_destroy_rule(struct sfe_ipv4_rule_destroy_msg *msg)
 	spin_unlock_bh(&si->lock);
 
 	if (ret) {
-		sfe_ipv4_flush_connection(si, c, SFE_SYNC_REASON_DESTROY);
+		sfe_ipv4_flush_connection(si, c, SFE_RULE_SYNC_REASON_DESTROY);
 	}
 
 	DEBUG_INFO("connection destroyed - p: %d, s: %pI4:%u, d: %pI4:%u\n",
@@ -3710,7 +3710,7 @@ another_round:
 
 	if (c) {
 		if (ret) {
-			sfe_ipv4_flush_connection(si, c, SFE_SYNC_REASON_DESTROY);
+			sfe_ipv4_flush_connection(si, c, SFE_RULE_SYNC_REASON_DESTROY);
 		}
 		goto another_round;
 	}
@@ -3774,7 +3774,7 @@ static void sfe_ipv4_periodic_sync(struct work_struct *work)
 			continue;
 		}
 
-		sfe_ipv4_gen_sync_connection(si, c, &sis, SFE_SYNC_REASON_STATS, now_jiffies);
+		sfe_ipv4_gen_sync_connection(si, c, &sis, SFE_RULE_SYNC_REASON_STATS, now_jiffies);
 		sfe_ipv4_stats_convert(conn_sync, &sis);
 
 		quota--;
