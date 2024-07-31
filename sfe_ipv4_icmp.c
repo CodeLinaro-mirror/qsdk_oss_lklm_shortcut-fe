@@ -198,7 +198,7 @@ int sfe_ipv4_recv_icmp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devi
 	spin_unlock_bh(&si->lock);
 
 	if (ret) {
-		sfe_ipv4_flush_connection(si, c, SFE_SYNC_REASON_FLUSH);
+		sfe_ipv4_flush_connection(si, c, SFE_RULE_SYNC_REASON_FLUSH);
 	}
 	rcu_read_unlock();
 	sfe_ipv4_exception_stats_inc(si, SFE_IPV4_EXCEPTION_EVENT_ICMP_FLUSHED_CONNECTION);

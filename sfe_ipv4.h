@@ -409,6 +409,7 @@ enum sfe_ipv4_exception_events {
 	SFE_IPV4_EXCEPTION_EVENT_FRAG_FAILS_BRIDGED_FLOW,
 	SFE_IPV4_EXCEPTION_EVENT_FRAG_CHECKSUM_FAIL,
 	SFE_IPV4_EXCEPTION_EVENT_SKIP_FRAG_OFFLOAD,
+	SFE_IPV4_EXCEPTION_EVENT_FLS_HWM_FLUSH,
 	SFE_IPV4_EXCEPTION_EVENT_LAST
 };
 
@@ -554,8 +555,8 @@ bool sfe_ipv4_service_class_stats_get(uint8_t sid, uint64_t *bytes, uint64_t *pa
 void sfe_ipv4_service_class_stats_inc(struct sfe_ipv4 *si, uint8_t sid, uint64_t bytes);
 void sfe_ipv4_exception_stats_inc(struct sfe_ipv4 *si, enum sfe_ipv4_exception_events reason);
 bool sfe_ipv4_remove_connection(struct sfe_ipv4 *si, struct sfe_ipv4_connection *c);
-void sfe_ipv4_flush_connection(struct sfe_ipv4 *si, struct sfe_ipv4_connection *c, sfe_sync_reason_t reason);
-void sfe_ipv4_sync_status(struct sfe_ipv4 *si, struct sfe_ipv4_connection *c, sfe_sync_reason_t reason);
+void sfe_ipv4_flush_connection(struct sfe_ipv4 *si, struct sfe_ipv4_connection *c, sfe_rule_sync_reason_t reason);
+void sfe_ipv4_sync_status(struct sfe_ipv4 *si, struct sfe_ipv4_connection *c, sfe_rule_sync_reason_t reason);
 #if defined(SFE_RFS_SUPPORTED)
 void sfe_ipv4_fill_connection_dev(struct sfe_ipv4_rule_destroy_msg *msg, struct net_device **original_dev, struct net_device **reply_dev);
 #endif

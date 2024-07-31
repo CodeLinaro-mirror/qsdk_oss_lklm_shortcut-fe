@@ -403,6 +403,7 @@ static int sfe_ipv6_frag_udp_forward(struct sfe_ipv6 *si, struct sk_buff *skb, s
 	netdev_features_t features;
 	u8 ingress_flags = 0;
 	sfe_fls_conn_stats_update_t update_cb;
+	uint8_t fls_ret;
 
 	DEBUG_TRACE("%px: sfe: sfe_ipv6_frag_udp_forward called\n", skb);
 
@@ -439,7 +440,7 @@ static int sfe_ipv6_frag_udp_forward(struct sfe_ipv6 *si, struct sk_buff *skb, s
 			spin_unlock_bh(&si->lock);
 
 			if (ret) {
-				sfe_ipv6_flush_connection(si, c, SFE_SYNC_REASON_FLUSH);
+				sfe_ipv6_flush_connection(si, c, SFE_RULE_SYNC_REASON_FLUSH);
 			}
 		}
 		sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_INVALID_SRC_IFACE);
@@ -447,9 +448,28 @@ static int sfe_ipv6_frag_udp_forward(struct sfe_ipv6 *si, struct sk_buff *skb, s
 		return 0;
 	}
 
-	update_cb = rcu_dereference(sfe_fls_info.stats_update_cb);
-	if (cm->fls_conn && update_cb) {
-		update_cb(cm->fls_conn, skb);
+	if (unlikely(cm->fls_conn && !(cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_FLS_DISABLED))){
+		update_cb = rcu_dereference(sfe_fls_info.stats_update_cb);
+		if (likely(update_cb)) {
+			fls_ret = update_cb(cm->fls_conn, skb);
+			if (!fls_ret || fls_ret == SFE_FLS_CONNECTION_FLAG_HWM_EXCEEDED)
+				cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_FLS_DISABLED;
+
+			if (fls_ret == SFE_FLS_CONNECTION_FLAG_HWM_EXCEEDED && sfe_fls_flush_on_hwm_enable) {
+				struct sfe_ipv6_connection *c = cm->connection;
+				DEBUG_TRACE("flush on source interface check failure\n");
+				spin_lock_bh(&si->lock);
+				ret = sfe_ipv6_remove_connection(si, c);
+				spin_unlock_bh(&si->lock);
+				if (ret) {
+					sfe_ipv6_flush_connection(si, c, SFE_RULE_SYNC_REASON_FLUSH_SWITCH_AE);
+				}
+				rcu_read_unlock();
+				sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_FLS_HWM_FLUSH);
+				DEBUG_TRACE("Connection flushed from SFE due to FLS HWM breach\n");
+				return 0;
+			}
+		}
 	}
 
 	/*
@@ -458,7 +478,7 @@ static int sfe_ipv6_frag_udp_forward(struct sfe_ipv6 *si, struct sk_buff *skb, s
 	 * connection we need sync its status before exception it to slow path.
 	 */
 	if (unlikely(sync_on_find)) {
-		sfe_ipv6_sync_status(si, cm->connection, SFE_SYNC_REASON_STATS);
+		sfe_ipv6_sync_status(si, cm->connection, SFE_RULE_SYNC_REASON_STATS);
 
 		sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_UDP_IP_OPTIONS_OR_INITIAL_FRAGMENT);
 		DEBUG_TRACE("Sync on find\n");
@@ -483,7 +503,7 @@ static int sfe_ipv6_frag_udp_forward(struct sfe_ipv6 *si, struct sk_buff *skb, s
 	 */
 	if (likely(!bridge_flow)) {
 		if (unlikely(iph->hop_limit < 2)) {
-			sfe_ipv6_sync_status(si, cm->connection, SFE_SYNC_REASON_STATS);
+			sfe_ipv6_sync_status(si, cm->connection, SFE_RULE_SYNC_REASON_STATS);
 
 			sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_UDP_SMALL_TTL);
 			DEBUG_TRACE("hop_limit too low\n");
@@ -496,7 +516,7 @@ static int sfe_ipv6_frag_udp_forward(struct sfe_ipv6 *si, struct sk_buff *skb, s
 	 * we can't forward it easily.
 	 */
 	if (unlikely(len > cm->xmit_dev_mtu)) {
-		sfe_ipv6_sync_status(si, cm->connection, SFE_SYNC_REASON_STATS);
+		sfe_ipv6_sync_status(si, cm->connection, SFE_RULE_SYNC_REASON_STATS);
 
 		sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_UDP_NEEDS_FRAGMENTATION);
 		DEBUG_TRACE("Larger than MTU\n");
@@ -605,7 +625,7 @@ static int sfe_ipv6_frag_udp_forward(struct sfe_ipv6 *si, struct sk_buff *skb, s
 			ret = sfe_ipv6_remove_connection(si, c);
 			spin_unlock_bh(&si->lock);
 			if (ret) {
-				sfe_ipv6_flush_connection(si, c, SFE_SYNC_REASON_FLUSH);
+				sfe_ipv6_flush_connection(si, c, SFE_RULE_SYNC_REASON_FLUSH);
 			}
 
 			sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_GSO_NOT_SUPPORTED);

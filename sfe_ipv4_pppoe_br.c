@@ -67,7 +67,7 @@ int sfe_ipv4_recv_pppoe_bridge(struct sfe_ipv4 *si, struct sk_buff *skb, struct 
 			spin_unlock_bh(&si->lock);
 
 			if (ret) {
-				sfe_ipv4_flush_connection(si, c, SFE_SYNC_REASON_FLUSH);
+				sfe_ipv4_flush_connection(si, c, SFE_RULE_SYNC_REASON_FLUSH);
 			}
 		}
 		rcu_read_unlock();

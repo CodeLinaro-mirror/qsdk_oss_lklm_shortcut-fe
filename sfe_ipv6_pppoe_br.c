@@ -70,7 +70,7 @@ int sfe_ipv6_recv_pppoe_bridge(struct sfe_ipv6 *si, struct sk_buff *skb, struct 
 			spin_unlock_bh(&si->lock);
 
 			if (ret) {
-				sfe_ipv6_flush_connection(si, c, SFE_SYNC_REASON_FLUSH);
+				sfe_ipv6_flush_connection(si, c, SFE_RULE_SYNC_REASON_FLUSH);
 			}
 		}
 		rcu_read_unlock();
