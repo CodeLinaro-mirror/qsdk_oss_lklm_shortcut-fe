@@ -273,7 +273,7 @@ int sfe_ipv6_recv_multicast(struct sfe_ipv6 *si, struct sk_buff *skb,
 		if (mc_xmit_dev->list.next == &cm->mc_list) {
 			nskb = skb;
 		} else if ((!bridge_flow && !tun_outer) || (mc_xmit_dev->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_MULTICAST_CHANGED)) {
-			nskb = skb_copy(skb, GFP_ATOMIC);
+			nskb = pskb_copy(skb, GFP_ATOMIC);
 		} else {
 			nskb = skb_clone(skb, GFP_ATOMIC);
 		}
