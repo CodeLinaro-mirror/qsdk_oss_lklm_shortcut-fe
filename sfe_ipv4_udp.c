@@ -165,6 +165,9 @@ int sfe_ipv4_recv_udp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 	bool vlan_passthrough = false;
 	bool frag_required = false;
 	struct sk_buff_head head;
+#ifdef SFE_SW_L4_CHECKSUM_VERIFICATION
+	struct net *net;
+#endif
 
 	/*
 	 * Is our packet too short to contain a valid UDP header?
@@ -220,14 +223,19 @@ int sfe_ipv4_recv_udp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 	/*
 	 * L4 csum validation when a successful check by HW is absent in ip_summed.
 	 */
-	if (unlikely(skb->ip_summed != CHECKSUM_UNNECESSARY)) {
-		if (!sfe_udp_checksum_validate(skb, ihl, true)) {
-			rcu_read_unlock();
-			sfe_ipv4_exception_stats_inc(si, SFE_IPV4_EXCEPTION_EVENT_UDP_CHECKSUM_ERROR);
-			DEBUG_TRACE("%p: UDP v4 checksum error\n", skb);
-			return 0;
+#ifdef SFE_SW_L4_CHECKSUM_VERIFICATION
+	net = dev_net(skb->dev);
+	if (unlikely(net->ct.sysctl_checksum)) {
+		if (unlikely(skb->ip_summed != CHECKSUM_UNNECESSARY)) {
+			if (!sfe_udp_checksum_validate(skb, ihl, true)) {
+				rcu_read_unlock();
+				sfe_ipv4_exception_stats_inc(si, SFE_IPV4_EXCEPTION_EVENT_UDP_CHECKSUM_ERROR);
+				DEBUG_TRACE("%p: UDP v4 checksum error\n", skb);
+				return 0;
+			}
 		}
 	}
+#endif
 
 	/*
 	 * Source interface validate.
