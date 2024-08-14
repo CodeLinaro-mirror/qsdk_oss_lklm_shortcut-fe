@@ -147,6 +147,9 @@ int sfe_ipv6_recv_udp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 	sfe_fls_conn_stats_update_t update_cb;
 	uint8_t fls_ret;
 	bool vlan_passthrough = false;
+#ifdef SFE_SW_L4_CHECKSUM_VERIFICATION
+	struct net *net;
+#endif
 
 	DEBUG_TRACE("%px: sfe: sfe_ipv6_recv_udp called.\n", skb);
 
@@ -206,6 +209,24 @@ int sfe_ipv6_recv_udp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 		}
 		DEBUG_TRACE("sfe: 4-tuple lookup successful\n");
 	}
+
+	/*
+	 * L4 csum validation when a successful check by HW is absent in ip_summed.
+	 * TODO: Revisit this check for fragment forwarding case.
+	 */
+#ifdef SFE_SW_L4_CHECKSUM_VERIFICATION
+	net = dev_net(skb->dev);
+	if (unlikely(net->ct.sysctl_checksum)) {
+		if (unlikely(skb->ip_summed != CHECKSUM_UNNECESSARY)) {
+			if (!sfe_udp_checksum_validate(skb, ihl, false)) {
+				rcu_read_unlock();
+				sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_UDP_CHECKSUM_ERROR);
+				DEBUG_TRACE("%p: UDP v6 checksum error\n", skb);
+				return 0;
+			}
+		}
+	}
+#endif
 
 	/*
 	 * Do we expect an ingress VLAN tag for this flow?
