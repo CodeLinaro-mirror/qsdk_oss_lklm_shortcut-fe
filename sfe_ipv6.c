@@ -2829,7 +2829,7 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 	/*
 	 * We set the UDP sock pointer as valid only for decap direction.
 	 */
-	if (sk && udp_sk(sk)->encap_type) {
+	if (sk && udp_sk(sk)->encap_type && sfe_ipv6_is_local_ip(si, (uint8_t *)reply_cm->match_dest_ip)) {
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 13, 0))
 		if (!atomic_add_unless(&sk->sk_refcnt, 1, 0)) {
 #else
