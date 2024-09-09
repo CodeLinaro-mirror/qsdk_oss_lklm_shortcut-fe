@@ -279,10 +279,10 @@ int sfe_ipv6_recv_udp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 	if (unlikely(cm->fls_conn && !(cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_FLS_DISABLED))){
 		if (likely(update_cb)) {
 			fls_ret = update_cb(cm->fls_conn, skb);
-			if (!fls_ret || fls_ret == SFE_FLS_CONNECTION_FLAG_HWM_EXCEEDED)
+			if (!(fls_ret & SFE_FLS_CONNECTION_FLAG_DEF_ENABLE) || fls_ret & SFE_FLS_CONNECTION_FLAG_HWM_EXCEEDED)
 				cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_FLS_DISABLED;
 
-			if (fls_ret == SFE_FLS_CONNECTION_FLAG_HWM_EXCEEDED && sfe_fls_flush_on_hwm_enable) {
+			if (fls_ret & SFE_FLS_CONNECTION_FLAG_HWM_EXCEEDED && sfe_fls_flush_on_hwm_enable) {
 				struct sfe_ipv6_connection *c = cm->connection;
 				DEBUG_TRACE("flush on source interface check failure\n");
 				spin_lock_bh(&si->lock);

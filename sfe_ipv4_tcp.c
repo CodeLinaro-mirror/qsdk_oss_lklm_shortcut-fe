@@ -275,10 +275,10 @@ int sfe_ipv4_recv_tcp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 		update_cb = rcu_dereference(sfe_fls_info.stats_update_cb);
 		if (likely(update_cb)) {
 			fls_ret = update_cb(cm->fls_conn, skb);
-			if (!fls_ret || fls_ret == SFE_FLS_CONNECTION_FLAG_HWM_EXCEEDED)
+			if (!(fls_ret & SFE_FLS_CONNECTION_FLAG_DEF_ENABLE) || fls_ret & SFE_FLS_CONNECTION_FLAG_HWM_EXCEEDED)
 				cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_FLS_DISABLED;
 
-			if (fls_ret == SFE_FLS_CONNECTION_FLAG_HWM_EXCEEDED && sfe_fls_flush_on_hwm_enable) {
+			if (fls_ret & SFE_FLS_CONNECTION_FLAG_HWM_EXCEEDED && sfe_fls_flush_on_hwm_enable) {
 				struct sfe_ipv4_connection *c = cm->connection;
 				spin_lock_bh(&si->lock);
 				ret = sfe_ipv4_remove_connection(si, c);

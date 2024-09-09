@@ -924,7 +924,6 @@ void sfe_ipv6_fls_clear(void)
 		hlist_for_each_entry_rcu(cm, lhead, hnode) {
 			cm->fls_conn = NULL;
 		}
-		break;
 	}
 	rcu_read_unlock();
 }
