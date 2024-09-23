@@ -966,6 +966,10 @@ void sfe_ipv4_flush_connection(struct sfe_ipv4 *si,
 		pr4rd.tuple.flow_ident = ntohs(c->src_port);
 		pr4rd.tuple.return_ip = ntohl(c->dest_ip);
 		pr4rd.tuple.return_ident = ntohs(c->dest_port);
+		pr4rd.conn_rule.flow_ip_xlate = ntohl(c->src_ip_xlate);
+		pr4rd.conn_rule.flow_ident_xlate = ntohs(c->src_port_xlate);
+		pr4rd.conn_rule.return_ip_xlate = ntohl(c->dest_ip_xlate);
+		pr4rd.conn_rule.return_ident_xlate = ntohs(c->dest_port_xlate);
 		pr4rd.tuple.protocol = c->protocol;
 
 		if (ppe_rfs_ipv4_rule_destroy(&pr4rd) != PPE_RFS_RET_SUCCESS) {
@@ -3256,9 +3260,10 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 
 #if defined(SFE_RFS_SUPPORTED)
 /*
- * sfe_ipv4_fill_connection_dev()
+ * sfe_ipv4_fill_connection_info()
  */
-void sfe_ipv4_fill_connection_dev(struct sfe_ipv4_rule_destroy_msg *msg, struct net_device **original_dev, struct net_device **reply_dev)
+void sfe_ipv4_fill_connection_info(struct sfe_ipv4_rule_destroy_msg *msg, struct net_device **original_dev, struct net_device **reply_dev,
+		uint32_t *flow_ip, uint16_t *flow_ident, uint32_t *return_ip, uint16_t *return_ident)
 {
 	struct sfe_ipv4 *si = &__si;
 	struct sfe_ipv4_connection *c;
@@ -3280,6 +3285,10 @@ void sfe_ipv4_fill_connection_dev(struct sfe_ipv4_rule_destroy_msg *msg, struct 
 		return;
 	}
 
+	*flow_ip = ntohl(c->src_ip_xlate);
+	*flow_ident = ntohs(c->src_port_xlate);
+	*return_ip = ntohl(c->dest_ip_xlate);
+	*return_ident = ntohs(c->dest_port_xlate);
 	*original_dev = c->original_dev;
 	*reply_dev = c->reply_dev;
 	spin_unlock_bh(&si->lock);

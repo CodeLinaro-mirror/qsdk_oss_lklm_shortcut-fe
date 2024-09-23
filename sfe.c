@@ -1115,7 +1115,8 @@ enum sfe_cmn_response sfe_destroy_ipv4_rule_msg(struct sfe_ctx_instance_internal
 	if (sfe_is_ppe_rfs_feature_enabled()) {
 		struct ppe_rfs_ipv4_rule_destroy_msg pr4rd;
 		struct sfe_ipv4_rule_destroy_msg *rule_destroy = &msg->msg.rule_destroy;
-		sfe_ipv4_fill_connection_dev(rule_destroy, &pr4rd.original_dev, &pr4rd.reply_dev);
+		sfe_ipv4_fill_connection_info(rule_destroy, &pr4rd.original_dev, &pr4rd.reply_dev,
+			&pr4rd.conn_rule.flow_ip_xlate, &pr4rd.conn_rule.flow_ident_xlate, &pr4rd.conn_rule.return_ip_xlate, &pr4rd.conn_rule.return_ident_xlate);
 
 		pr4rd.tuple.flow_ip = ntohl(rule_destroy->tuple.flow_ip);
 		pr4rd.tuple.flow_ident = ntohs(rule_destroy->tuple.flow_ident);
