@@ -132,7 +132,8 @@ static char *sfe_ipv4_exception_events_string[SFE_IPV4_EXCEPTION_EVENT_LAST] = {
 	"FRAG_SKIP_OFFLOAD",
 	"FLS_HWM_FLUSH",
 	"TCP_CHECKSUM_ERROR",
-	"UDP_CHECKSUM_ERROR"
+	"UDP_CHECKSUM_ERROR",
+	"VXLAN_GPE_NO_ROUTE"
 };
 
 static struct sfe_ipv4 __si;
@@ -864,6 +865,14 @@ static void sfe_ipv4_free_connection_rcu(struct rcu_head *head)
 			sk = (struct sock *)up;
 			sock_put(sk);
 		}
+
+		/*
+		 * Empty the dst cache memory
+		 */
+		if (c->reply_match->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_VXLAN_GPE) {
+			dst_cache_destroy(&c->reply_match->dst_cache);
+		}
+
 		dev_put(c->reply_dev);
 		kfree(c->reply_match);
 	}
@@ -890,6 +899,13 @@ static void sfe_ipv4_free_connection_rcu(struct rcu_head *head)
 			 */
 			kfree(cur);
 		}
+	}
+
+	/*
+	 * Empty the dst cache memory
+	 */
+	if (c->original_match->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_VXLAN_GPE) {
+		dst_cache_destroy(&c->original_match->dst_cache);
 	}
 
 	kfree(c->original_match);
@@ -3380,6 +3396,47 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 
 		if (trustsec_rule->sgt_valid_flags & SFE_TRUSTSEC_INGRESS_SGT_VALID) {
 			original_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_INSERT_EGRESS_TRUSTSEC_SGT;
+		}
+	}
+
+	/*
+	 * Allocating dst cache to original and reply entries based on the direction where
+	 * VxLAN-GPE flag is valid in ECM rule.
+	 * In future if any new failure condition is introduced after this, take care of
+	 * calling "dst_cache_destroy()" along with deallocating other objects.
+	 */
+	if (msg->rule_flags & SFE_RULE_CREATE_FLAG_FLOW_VXLAN_GPE) {
+		int err;
+		original_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_VXLAN_GPE;
+		err = dst_cache_init(&original_cm->dst_cache, GFP_NOWAIT | __GFP_NOWARN);
+		if (err) {
+			pr_err("Failed to initialize dst for flow match, err: %d\n", err);
+			this_cpu_inc(si->stats_pcpu->connection_create_failures64);
+			spin_unlock_bh(&si->lock);
+			kfree(reply_cm);
+			kfree(original_cm);
+			kfree(c);
+			dev_put(src_dev);
+			dev_put(dest_dev);
+			return -ENOMEM;
+		}
+	}
+
+	if (msg->rule_flags & SFE_RULE_CREATE_FLAG_RETURN_VXLAN_GPE) {
+		int err;
+		reply_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_VXLAN_GPE;
+		err = dst_cache_init(&reply_cm->dst_cache, GFP_NOWAIT | __GFP_NOWARN);
+		if (err) {
+			pr_err("Failed to initialize dst for return flow match, err: %d\n", err);
+			this_cpu_inc(si->stats_pcpu->connection_create_failures64);
+			spin_unlock_bh(&si->lock);
+			dst_cache_destroy(&original_cm->dst_cache);
+			kfree(reply_cm);
+			kfree(original_cm);
+			kfree(c);
+			dev_put(src_dev);
+			dev_put(dest_dev);
+			return -ENOMEM;
 		}
 	}
 

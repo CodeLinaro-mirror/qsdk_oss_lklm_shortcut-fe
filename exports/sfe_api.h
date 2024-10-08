@@ -106,6 +106,8 @@
 #define SFE_RULE_CREATE_FLAG_FLOW_L2_DISABLE (1<<16)		/**< Disable L2 flow processing in original flow. */
 #define SFE_RULE_CREATE_FLAG_RETURN_L2_DISABLE (1<<17)		/**< Disable L2 flow processing in return flow. */
 #define SFE_RULE_CREATE_FLAG_BRIDGE_VLAN_PASSTHROUGH  (1<<18)	/**< Bridge VLAN passthrough. */
+#define SFE_RULE_CREATE_FLAG_FLOW_VXLAN_GPE (1<<19)		/**< VXLAN-GPE rule for original flow. */
+#define SFE_RULE_CREATE_FLAG_RETURN_VXLAN_GPE (1<<20)		/**< VXLAN-GPE rule for return flow. */
 
 /*
  * Rule creation validity flags.

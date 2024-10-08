@@ -23,6 +23,7 @@
 #include <linux/etherdevice.h>
 #include <linux/version.h>
 #include <net/ip6_checksum.h>
+#include <net/ip6_route.h>
 
 #include "sfe_debug.h"
 #include "sfe_api.h"
@@ -702,6 +703,43 @@ int sfe_ipv6_recv_udp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 			service_class_id = cm->svc_id;
 			sfe_ipv6_service_class_stats_inc(si, service_class_id, len);
 		}
+	}
+
+	/*
+	 * Set the skb dst.
+	 * Linux determines the tunnel info for VxLAN-GPE from skb->dst and uses
+	 * this to get the encapsulation instruction for the packet.
+	 */
+	if (unlikely(cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_VXLAN_GPE)) {
+		struct dst_entry *dst;
+		struct flowi6 fl6;
+
+		dst = dst_cache_get(&cm->dst_cache);
+		if (unlikely(!dst)) {
+			memset(&fl6, 0, sizeof(struct flowi6));
+			memcpy(&fl6.daddr, dest_ip, sizeof(fl6.daddr));
+			memcpy(&fl6.saddr, src_ip, sizeof(fl6.saddr));
+			dst = ip6_route_output(&init_net, NULL, &fl6);
+			if (!dst) {
+				DEBUG_TRACE("%px: VXLAN-GPE failed to get IPv6 dst: %pI6 \n", skb, &dest_ip);
+				rcu_read_unlock();
+				sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_VXLAN_GPE_NO_ROUTE);
+				return 0;
+			}
+
+			if (dst->error) {
+				DEBUG_TRACE("%px: VXLAN-GPE dst error: %d \n", skb, dst->error);
+				dst_release(dst);
+				rcu_read_unlock();
+				sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_VXLAN_GPE_DST_ERROR);
+				return 0;
+			}
+
+			dst_cache_set_ip6(&cm->dst_cache, dst, &fl6.saddr);
+		}
+
+		skb_dst_drop(skb);
+		skb_dst_set(skb, dst);
 	}
 
 	/*

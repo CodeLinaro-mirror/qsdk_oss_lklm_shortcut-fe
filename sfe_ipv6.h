@@ -21,6 +21,8 @@
 #ifndef __SFE_IPV6_H
 #define __SFE_IPV6_H
 
+#include <net/dst_cache.h>
+
 #define SFE_IPV6_DSCP_MASK 0xf03f
 #define SFE_IPV6_DSCP_SHIFT 2
 
@@ -125,6 +127,8 @@ struct sfe_ipv6_vlan_filter_connection_match {
 					/* Don't send packets to FLS */
 #define SFE_IPV6_CONNECTION_MATCH_FLAG_BRIDGE_VLAN_PASSTHROUGH (1<<26)
 					/* Bridge Vlan passthrough enable */
+#define SFE_IPV6_CONNECTION_MATCH_FLAG_VXLAN_GPE (1<<27)
+					/* VXLAN-GPE flow */
 
 /*
  * IPv6 multicast destination structure
@@ -295,6 +299,7 @@ struct sfe_ipv6_connection_match {
 
 	bool sawf_valid;		/* Indicates mark has valid SAWF information. */
 	bool ingress_trustsec_valid;	/* Indicates trustsec header is valid */
+	struct dst_cache dst_cache;     /* Destination route cache */
 };
 
 /*
@@ -416,6 +421,8 @@ enum sfe_ipv6_exception_events {
 	SFE_IPV6_EXCEPTION_EVENT_FLS_HWM_FLUSH,
 	SFE_IPV6_EXCEPTION_EVENT_UDP_CHECKSUM_ERROR,
 	SFE_IPV6_EXCEPTION_EVENT_TCP_CHECKSUM_ERROR,
+	SFE_IPV6_EXCEPTION_EVENT_VXLAN_GPE_NO_ROUTE,
+	SFE_IPV6_EXCEPTION_EVENT_VXLAN_GPE_DST_ERROR,
 	SFE_IPV6_EXCEPTION_EVENT_LAST
 };
 
