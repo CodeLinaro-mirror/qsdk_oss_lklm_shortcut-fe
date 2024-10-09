@@ -2,7 +2,7 @@
  * sfe_ipv4_multicast.c
  *	Shortcut forwarding engine file for IPv4 multicast
  *
- * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -310,6 +310,10 @@ int sfe_ipv4_recv_multicast(struct sfe_ipv4 *si, struct sk_buff *skb,
 			continue;
 
 		}
+
+#if defined(SFE_PPE_QOS_SUPPORTED)
+		skb_set_int_pri(nskb, cm->int_pri);
+#endif
 
 		/*
 		 * Reset the iph and udp header
