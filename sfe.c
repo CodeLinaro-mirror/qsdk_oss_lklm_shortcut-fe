@@ -2201,6 +2201,10 @@ int sfe_recv(struct sk_buff *skb)
 		break;
 	}
 
+	/*
+	 * Non-IP and DSA protocols are handled here.
+	 */
+
 sfe_l2_parse:
 	/*
 	 * Stop L2 processing if L2 feature is disabled.
