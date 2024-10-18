@@ -1186,9 +1186,9 @@ static int sfe_ipv4_frag_xmit(struct sfe_ipv4 *si, struct sfe_ipv4_connection_ma
 void sfe_ipv4_frag(struct sfe_ipv4 *si, struct sfe_ipv4_connection_match *cm, struct sk_buff *skb, struct sk_buff_head *head, struct iphdr *iph, 				bool fast_xmit)
 {
 	uint16_t frag_len, payload_len, hdr_len;
-	uint16_t nr_frags, mtu, offset = 0;
+	uint16_t mtu, offset = 0;
 	struct sk_buff *frag_skb;
-	bool calculate_csum;
+	bool calculate_csum = false;
 	uint16_t ip_offset;
 	uint8_t *next_data;
 
@@ -1230,12 +1230,10 @@ void sfe_ipv4_frag(struct sfe_ipv4 *si, struct sfe_ipv4_connection_match *cm, st
 	}
 
 	frag_skb = skb_peek(head);
-	nr_frags = skb_queue_len(head);
 
-	while (nr_frags > 0) {
+	while (frag_skb) {
 		struct iphdr *iph2;
 
-		nr_frags -= 1;
 		next_data += frag_len;
 		offset += frag_len;
 		frag_len = min(frag_len, payload_len);
