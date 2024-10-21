@@ -3,7 +3,7 @@
  *	Shortcut forwarding engine - IPv6 support.
  *
  * Copyright (c) 2015-2016, 2019-2020, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -116,6 +116,7 @@ static char *sfe_ipv6_exception_events_string[SFE_IPV6_EXCEPTION_EVENT_LAST] = {
 	"GRE_IP_OPTIONS_OR_INITIAL_FRAGMENT",
 	"GRE_SMALL_TTL",
 	"GRE_NEEDS_FRAGMENTATION",
+	"ESP_HEADER_INCOMPLETE",
 	"ESP_NO_CONNECTION",
 	"ESP_IP_OPTIONS_OR_INITIAL_FRAGMENT",
 	"ESP_NEEDS_FRAGMENTATION",
@@ -132,7 +133,12 @@ static char *sfe_ipv6_exception_events_string[SFE_IPV6_EXCEPTION_EVENT_LAST] = {
 	"L2TPV3_NO_CONNECTION",
 	"L2TPV3_IP_OPTIONS_OR_INITIAL_FRAGMENT",
 	"L2TPV3_SMALL_TTL",
-	"L2TPV3_NEEDS_FRAGMENTATION"
+	"L2TPV3_NEEDS_FRAGMENTATION",
+	"FLS_HWM_FLUSH",
+	"UDP_CHECKSUM_ERROR",
+	"TCP_CHECKSUM_ERROR",
+	"VXLAN_GPE_NO_ROUTE",
+	"VXLAN_GPE_DST_ERROR"
 };
 
 static struct sfe_ipv6 __si6;
@@ -873,6 +879,14 @@ static void sfe_ipv6_free_sfe_ipv6_connection_rcu(struct rcu_head *head)
 			sk = (struct sock *)c->reply_match->up;
 			sock_put(sk);
 		}
+
+		/*
+		 * Empty the dst cache memory
+		 */
+		if (c->reply_match->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_VXLAN_GPE) {
+			dst_cache_destroy(&c->reply_match->dst_cache);
+		}
+
 		dev_put(c->reply_dev);
 		kfree(c->reply_match);
 	}
@@ -900,6 +914,13 @@ static void sfe_ipv6_free_sfe_ipv6_connection_rcu(struct rcu_head *head)
 		}
 	}
 
+	/*
+	 * Empty the dst cache memory
+	 */
+	if (c->original_match->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_VXLAN_GPE) {
+		dst_cache_destroy(&c->original_match->dst_cache);
+	}
+
 	kfree(c->original_match);
 	kfree(c);
 }
@@ -921,7 +942,6 @@ void sfe_ipv6_fls_clear(void)
 		hlist_for_each_entry_rcu(cm, lhead, hnode) {
 			cm->fls_conn = NULL;
 		}
-		break;
 	}
 	rcu_read_unlock();
 }
@@ -1993,6 +2013,9 @@ update_done:
 	}
 	if (msg->valid_flags & SFE_MC_RULE_CREATE_FLAG_QOS_VALID) {
 		original_cm->priority =  msg->qos_rule.flow_qos_tag;
+#if defined(SFE_PPE_QOS_SUPPORTED)
+		original_cm->int_pri = msg->qos_rule.flow_int_pri;
+#endif
 		original_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_PRIORITY_REMARK;
 	}
 	if (msg->valid_flags & SFE_MC_RULE_CREATE_FLAG_DSCP_MARKING_VALID) {
@@ -2386,16 +2409,10 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 	}
 
 	if (msg->valid_flags & SFE_RULE_CREATE_QOS_VALID) {
-#if defined(SFE_PPE_QOS_SUPPORTED)
-
-		/*
-		 * SFE_QDISC_RULE_RETURN_PPE_QDISC_FAST_XMIT flag is set when qdisc is configured in flow direction
-		 */
-		if(msg->qdisc_rule.valid_flags & SFE_QDISC_RULE_RETURN_PPE_QDISC_FAST_XMIT) {
-			original_cm->int_pri = msg->qos_rule.flow_int_pri;
-		}
-#endif
 		original_cm->priority = msg->qos_rule.flow_qos_tag;
+#if defined(SFE_PPE_QOS_SUPPORTED)
+		original_cm->int_pri = msg->qos_rule.flow_int_pri;
+#endif
 		original_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_PRIORITY_REMARK;
 	}
 
@@ -2759,16 +2776,10 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 		reply_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_MARK;
 	}
 	if (msg->valid_flags & SFE_RULE_CREATE_QOS_VALID) {
-#if defined(SFE_PPE_QOS_SUPPORTED)
-
-		/*
-		 * SFE_QDISC_RULE_FLOW_PPE_QDISC_FAST_XMIT flag is set when qdisc is configured in return direction
-		 */
-		if(msg->qdisc_rule.valid_flags & SFE_QDISC_RULE_FLOW_PPE_QDISC_FAST_XMIT) {
-			reply_cm->int_pri = msg->qos_rule.return_int_pri;
-		}
-#endif
 		reply_cm->priority = msg->qos_rule.return_qos_tag;
+#if defined(SFE_PPE_QOS_SUPPORTED)
+		reply_cm->int_pri = msg->qos_rule.return_int_pri;
+#endif
 		reply_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_PRIORITY_REMARK;
 	}
 	if (msg->valid_flags & SFE_RULE_CREATE_DSCP_MARKING_VALID) {
@@ -3152,6 +3163,47 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 
 	if (msg->rule_flags & SFE_RULE_CREATE_FLAG_RETURN_SRC_INTERFACE_CHECK_NO_FLUSH) {
 		reply_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_SRC_INTERFACE_CHECK_NO_FLUSH;
+	}
+
+	/*
+	 * Allocating dst cache to original and reply entries based on the direction where
+	 * VxLAN-GPE flag is valid in ECM rule.
+	 * In future if any new failure condition is introduced after this, take care of
+	 * calling "dst_cache_destroy()" along with deallocating other objects.
+	 */
+	if (msg->rule_flags & SFE_RULE_CREATE_FLAG_FLOW_VXLAN_GPE) {
+		int err;
+		original_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_VXLAN_GPE;
+		err = dst_cache_init(&original_cm->dst_cache, GFP_NOWAIT | __GFP_NOWARN);
+		if (err) {
+			pr_err("Failed to initialize dst for flow match, err: %d\n", err);
+			this_cpu_inc(si->stats_pcpu->connection_create_failures64);
+			spin_unlock_bh(&si->lock);
+			kfree(reply_cm);
+			kfree(original_cm);
+			kfree(c);
+			dev_put(src_dev);
+			dev_put(dest_dev);
+			return -ENOMEM;
+		}
+	}
+
+	if (msg->rule_flags & SFE_RULE_CREATE_FLAG_RETURN_VXLAN_GPE) {
+		int err;
+		reply_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_VXLAN_GPE;
+		err = dst_cache_init(&reply_cm->dst_cache, GFP_NOWAIT | __GFP_NOWARN);
+		if (err) {
+			pr_err("Failed to initialize dst for return flow match, err: %d\n", err);
+			this_cpu_inc(si->stats_pcpu->connection_create_failures64);
+			spin_unlock_bh(&si->lock);
+			dst_cache_destroy(&original_cm->dst_cache);
+			kfree(reply_cm);
+			kfree(original_cm);
+			kfree(c);
+			dev_put(src_dev);
+			dev_put(dest_dev);
+			return -ENOMEM;
+		}
 	}
 
 	/*

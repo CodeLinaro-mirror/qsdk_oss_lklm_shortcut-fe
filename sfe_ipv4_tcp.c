@@ -3,7 +3,7 @@
  *	Shortcut forwarding engine - IPv4 TCP implementation
  *
  * Copyright (c) 2013-2016, 2019-2020, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -170,6 +170,9 @@ int sfe_ipv4_recv_tcp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 	sfe_fls_conn_stats_update_t update_cb;
 	bool vlan_passthrough = false;
 	uint8_t fls_ret;
+#ifdef SFE_SW_L4_CHECKSUM_VERIFICATION
+	struct net *net;
+#endif
 
 	/*
 	 * Is our packet too short to contain a valid TCP header?
@@ -231,6 +234,23 @@ int sfe_ipv4_recv_tcp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 	}
 
 	/*
+	 * L4 csum validation when a successful check by HW is absent in ip_summed.
+	 */
+#ifdef SFE_SW_L4_CHECKSUM_VERIFICATION
+	net = dev_net(skb->dev);
+	if (unlikely(net->ct.sysctl_checksum)) {
+		if (unlikely(skb->ip_summed != CHECKSUM_UNNECESSARY)) {
+			if (!sfe_tcp_checksum_validate(skb, ihl, true)) {
+				rcu_read_unlock();
+				sfe_ipv4_exception_stats_inc(si, SFE_IPV4_EXCEPTION_EVENT_TCP_CHECKSUM_ERROR);
+				DEBUG_TRACE("%p: TCP v4 checksum error\n", skb);
+				return 0;
+			}
+		}
+	}
+#endif
+
+	/*
 	 * Source interface validate.
 	 */
 	if (unlikely((cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_SRC_INTERFACE_CHECK) && (cm->match_dev != dev))) {
@@ -255,10 +275,10 @@ int sfe_ipv4_recv_tcp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 		update_cb = rcu_dereference(sfe_fls_info.stats_update_cb);
 		if (likely(update_cb)) {
 			fls_ret = update_cb(cm->fls_conn, skb);
-			if (!fls_ret || fls_ret == SFE_FLS_CONNECTION_FLAG_HWM_EXCEEDED)
+			if (!(fls_ret & SFE_FLS_CONNECTION_FLAG_DEF_ENABLE) || fls_ret & SFE_FLS_CONNECTION_FLAG_HWM_EXCEEDED)
 				cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_FLS_DISABLED;
 
-			if (fls_ret == SFE_FLS_CONNECTION_FLAG_HWM_EXCEEDED && sfe_fls_flush_on_hwm_enable) {
+			if (fls_ret & SFE_FLS_CONNECTION_FLAG_HWM_EXCEEDED && sfe_fls_flush_on_hwm_enable) {
 				struct sfe_ipv4_connection *c = cm->connection;
 				spin_lock_bh(&si->lock);
 				ret = sfe_ipv4_remove_connection(si, c);
@@ -872,6 +892,32 @@ int sfe_ipv4_recv_tcp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 			service_class_id = cm->svc_id;
 			sfe_ipv4_service_class_stats_inc(si, service_class_id, len);
 		}
+	}
+
+	/*
+	 * Set skb dst.
+	 * Linux determines the tunnel info for VxLAN-GPE from skb->dst and uses
+	 * this to get the encapsulation instruction for the packet.
+	 */
+	if (unlikely(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_VXLAN_GPE)) {
+		struct dst_entry *dst;
+		struct rtable *rt;
+		dst = dst_cache_get(&cm->dst_cache);
+		if (unlikely(!dst)) {
+			rt = ip_route_output(&init_net, ip_hdr(skb)->daddr, 0, 0, 0);
+			if (IS_ERR(rt)) {
+				DEBUG_TRACE("%px: VXLAN-GPE failed to get IPv4 route: %pI4 \n", skb, &ip_hdr(skb)->daddr);
+				rcu_read_unlock();
+				sfe_ipv4_exception_stats_inc(si, SFE_IPV4_EXCEPTION_EVENT_VXLAN_GPE_NO_ROUTE);
+				return 0;
+			}
+
+			dst = &rt->dst;
+			dst_cache_set_ip4(&cm->dst_cache, dst, ip_hdr(skb)->saddr);
+		}
+
+		skb_dst_drop(skb);
+		skb_dst_set(skb, dst);
 	}
 
 	/*

@@ -60,6 +60,9 @@ ifdef SFE_BRIDGE_VLAN_FILTERING_ENABLE
 ccflags-y += -DSFE_BRIDGE_VLAN_FILTERING_ENABLE
 endif
 
+#Uncomment the below line to enable the L4 checksum verification by software
+#ccflags-y += -DSFE_SW_L4_CHECKSUM_VERIFICATION
+
 ifndef SFE_256M_PROFILE
 ifndef SFE_16M_PROFILE
 ccflags-y += -DSFE_IPSEC_ENABLE

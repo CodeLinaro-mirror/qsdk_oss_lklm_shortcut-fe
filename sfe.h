@@ -3,7 +3,7 @@
  *	Shortcut forwarding engine.
  *
  * Copyright (c) 2013-2016, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -388,6 +388,8 @@ static inline bool sfe_dev_is_bridge(struct net_device *dev)
 }
 
 void sfe_recv_undo_parse_l2(struct net_device *dev, struct sk_buff *skb, struct sfe_l2_info *l2_info);
+bool sfe_tcp_checksum_validate(struct sk_buff *skb, unsigned int ihl, bool is_v4);
+bool sfe_udp_checksum_validate(struct sk_buff *skb, unsigned int ihl, bool is_v4);
 
 int sfe_init_if(void);
 void sfe_exit_if(void);

@@ -31,6 +31,7 @@
 #include "sfe_ipv6_esp.h"
 #include "sfe_vlan.h"
 #include "sfe_trustsec.h"
+#include "sfe_pppoe.h"
 
 /*
  * sfe_ipv6_recv_esp()
@@ -46,10 +47,21 @@ int sfe_ipv6_recv_esp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 	struct net_device *xmit_dev;
 	struct inet6_protocol *ipprot;
 	netdev_features_t features;
+	bool vlan_passthrough = false;
 	bool bridge_flow;
 	bool passthrough;
 	bool fast_xmit;
 	bool ret;
+	u8 ingress_flags = 0;
+
+	/*
+	 * Is our packet too short to contain a valid ESP header?
+	 */
+	if (!pskb_may_pull(skb, (sizeof(struct ip_esp_hdr) + ihl))) {
+		sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_ESP_HEADER_INCOMPLETE);
+		DEBUG_TRACE("%px: packet too short for ESP header\n", skb);
+		return 0;
+	}
 
 	/*
 	 * Read the IP address from the iphdr, and set the src/dst ports to 0.
@@ -119,11 +131,19 @@ int sfe_ipv6_recv_esp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 	/*
 	 * Do we expect an ingress VLAN tag for this flow?
 	 */
-	if (unlikely(!sfe_vlan_validate_ingress_tag(skb, cm->ingress_vlan_hdr_cnt, cm->ingress_vlan_hdr, l2_info, 0))) {
-		rcu_read_unlock();
-		sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_INGRESS_VLAN_TAG_MISMATCH);
-		DEBUG_TRACE("VLAN tag mismatch. skb=%px\n", skb);
-		return 0;
+#ifdef SFE_BRIDGE_VLAN_FILTERING_ENABLE
+	ingress_flags = cm->vlan_filter_rule.ingress_flags;
+#endif
+	if (unlikely(!sfe_vlan_validate_ingress_tag(skb, cm->ingress_vlan_hdr_cnt, cm->ingress_vlan_hdr, l2_info, ingress_flags))) {
+		if (!(cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_BRIDGE_VLAN_PASSTHROUGH)) {
+			rcu_read_unlock();
+			sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_INGRESS_VLAN_TAG_MISMATCH);
+			DEBUG_TRACE("VLAN tag mismatch. skb=%px\n", skb);
+			return 0;
+		}
+
+		vlan_passthrough = true;
+		this_cpu_inc(si->stats_pcpu->bridge_vlan_passthorugh_forwarded64);
 	}
 
 	/*
@@ -153,6 +173,55 @@ int sfe_ipv6_recv_esp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 		 * Update the iphdr pointer with the uncloned skb's data area.
 		 */
 		iph = (struct ipv6hdr *)skb->data;
+	}
+
+	/*
+	 * For PPPoE packets, match server MAC and session id
+	 */
+	if (unlikely(cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_PPPOE_DECAP)) {
+		struct ethhdr *eth;
+		bool pppoe_match;
+
+		if (unlikely(!sfe_l2_parse_flag_check(l2_info, SFE_L2_PARSE_FLAGS_PPPOE_INGRESS))) {
+			rcu_read_unlock();
+			DEBUG_TRACE("%px: PPPoE header not present in pcaket for PPPoE rule\n", skb);
+			sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_INCORRECT_PPPOE_PARSING);
+			return 0;
+		}
+
+		eth = eth_hdr(skb);
+
+		pppoe_match = (cm->pppoe_session_id == sfe_l2_pppoe_session_id_get(l2_info)) &&
+				ether_addr_equal((u8*)cm->pppoe_remote_mac, (u8*)eth->h_source);
+
+		if (unlikely(!pppoe_match)) {
+			DEBUG_TRACE("%px: PPPoE sessions ID %d and %d or MAC %pM and %pM did not match\n",
+					skb, cm->pppoe_session_id, sfe_l2_pppoe_session_id_get(l2_info),
+					cm->pppoe_remote_mac, eth->h_source);
+			rcu_read_unlock();
+			sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_INVALID_PPPOE_SESSION);
+			return 0;
+		}
+
+		skb->protocol = htons(l2_info->protocol);
+		this_cpu_inc(si->stats_pcpu->pppoe_decap_packets_forwarded64);
+	} else if (unlikely(sfe_l2_parse_flag_check(l2_info, SFE_L2_PARSE_FLAGS_PPPOE_INGRESS))) {
+
+		/*
+		 * If packet contains PPPoE header but CME doesn't contain PPPoE flag yet we are exceptioning the packet to linux
+		 */
+		if (unlikely(!bridge_flow)) {
+			rcu_read_unlock();
+			DEBUG_TRACE("%px: CME doesn't contain PPPoE flag but packet has PPPoE header\n", skb);
+			sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_PPPOE_NOT_SET_IN_CME);
+			return 0;
+		}
+
+		/*
+		 * For bridged flows when packet contains PPPoE header, restore the header back and forward to xmit interface
+		 */
+		__skb_push(skb, PPPOE_SES_HLEN);
+		this_cpu_inc(si->stats_pcpu->pppoe_bridge_packets_forwarded64);
 	}
 
 	/*
@@ -245,6 +314,25 @@ int sfe_ipv6_recv_esp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 
 	xmit_dev = cm->xmit_dev;
 	skb->dev = xmit_dev;
+
+	/*
+	 * For bridged flows when packet contains the VLan header, restore the header back and forward
+	 * we do this here, to make sure PPPOE header is restored before VLAN header(s) is restored for pppoe over vlan passthrough use cases
+	 */
+	if (unlikely(vlan_passthrough)) {
+		struct ethhdr *eth = eth_hdr(skb);
+		__skb_push(skb, l2_info->vlan_hdr_cnt * VLAN_HLEN);
+		skb_reset_network_header(skb);
+		skb->protocol = eth->h_proto;
+	}
+
+	/*
+	 * For PPPoE flow, add PPPoE header before L2 header is added
+	 */
+	if (unlikely(cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_PPPOE_ENCAP)) {
+		sfe_pppoe_add_header(skb, cm->pppoe_session_id, PPP_IPV6);
+		this_cpu_inc(si->stats_pcpu->pppoe_encap_packets_forwarded64);
+	}
 
 	/*
 	 * Check to see if we need to add VLAN tags

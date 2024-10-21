@@ -30,6 +30,8 @@
 #if (LINUX_VERSION_CODE > KERNEL_VERSION(6, 6, 0))
 #include <net/tcx.h>
 #endif
+#include <net/ip6_checksum.h>
+#include <net/tcp.h>
 #if defined(SFE_RFS_SUPPORTED)
 #include <ppe_rfs.h>
 #endif
@@ -319,6 +321,77 @@ bool sfe_dev_has_hw_csum(struct net_device *dev)
 	}
 
 	return true;
+}
+
+/*
+ * sfe_tcp_checksum_validate()
+ *	Calculate and validate checksum for tcp in SW.
+ */
+bool sfe_tcp_checksum_validate(struct sk_buff *skb, unsigned int ihl, bool is_v4)
+{
+	skb_pull(skb, ihl);
+	skb_reset_transport_header(skb);
+
+	if (is_v4) {
+		if (unlikely(skb_checksum_init(skb, IPPROTO_TCP, inet_compute_pseudo))) {
+			DEBUG_TRACE("%px: TCP v4 checksum initilization failed", skb);
+			goto fail;
+		}
+	} else {
+		if (unlikely(skb_checksum_init(skb, IPPROTO_TCP, ip6_compute_pseudo))) {
+			DEBUG_TRACE("%px: TCP v6 checksum initilization failed", skb);
+			goto fail;
+		}
+	}
+
+	if (unlikely(tcp_checksum_complete(skb))) {
+		DEBUG_TRACE("%px: TCP %s checksum validation failed", skb, is_v4 ? "v4" : "v6");
+		goto fail;
+	}
+
+	skb_push(skb, ihl);
+	return true;
+
+fail:
+	skb_push(skb, ihl);
+	return false;
+}
+
+/*
+ * sfe_udp_checksum_validate()
+ *	Calculate and validate checksum for udp in SW.
+ */
+bool sfe_udp_checksum_validate(struct sk_buff *skb, unsigned int ihl, bool is_v4)
+{
+	skb_pull(skb, ihl);
+	skb_reset_transport_header(skb);
+
+	UDP_SKB_CB(skb)->partial_cov = 0;
+	UDP_SKB_CB(skb)->cscov = skb->len;
+
+	if (is_v4) {
+		if (unlikely(skb_checksum_init_zero_check(skb, IPPROTO_UDP, udp_hdr(skb)->check, inet_compute_pseudo))) {
+			DEBUG_TRACE("%px: UDP v4 checksum initilization failed", skb);
+			goto fail;
+		}
+	} else {
+		if (unlikely(udp6_csum_init(skb, udp_hdr(skb), IPPROTO_UDP))) {
+			DEBUG_TRACE("%px: UDP v6 checksum initilization failed", skb);
+			goto fail;
+		}
+	}
+
+	if (unlikely(udp_lib_checksum_complete(skb))) {
+		DEBUG_TRACE("%px: UDP %s checksum validation failed", skb, is_v4 ? "v4" : "v6");
+		goto fail;
+	}
+
+	skb_push(skb, ihl);
+	return true;
+
+fail:
+	skb_push(skb, ihl);
+	return false;
 }
 
 /*
@@ -1120,7 +1193,8 @@ enum sfe_cmn_response sfe_destroy_ipv4_rule_msg(struct sfe_ctx_instance_internal
 	if (sfe_is_ppe_rfs_feature_enabled()) {
 		struct ppe_rfs_ipv4_rule_destroy_msg pr4rd;
 		struct sfe_ipv4_rule_destroy_msg *rule_destroy = &msg->msg.rule_destroy;
-		sfe_ipv4_fill_connection_dev(rule_destroy, &pr4rd.original_dev, &pr4rd.reply_dev);
+		sfe_ipv4_fill_connection_info(rule_destroy, &pr4rd.original_dev, &pr4rd.reply_dev,
+			&pr4rd.conn_rule.flow_ip_xlate, &pr4rd.conn_rule.flow_ident_xlate, &pr4rd.conn_rule.return_ip_xlate, &pr4rd.conn_rule.return_ident_xlate);
 
 		pr4rd.tuple.flow_ip = ntohl(rule_destroy->tuple.flow_ip);
 		pr4rd.tuple.flow_ident = ntohs(rule_destroy->tuple.flow_ident);

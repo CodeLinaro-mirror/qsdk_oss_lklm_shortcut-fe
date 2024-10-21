@@ -3,7 +3,7 @@
  *	Shortcut forwarding engine file for IPv6 UDP
  *
  * Copyright (c) 2015-2016, 2019-2020, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -23,6 +23,7 @@
 #include <linux/etherdevice.h>
 #include <linux/version.h>
 #include <net/ip6_checksum.h>
+#include <net/ip6_route.h>
 
 #include "sfe_debug.h"
 #include "sfe_api.h"
@@ -147,6 +148,9 @@ int sfe_ipv6_recv_udp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 	sfe_fls_conn_stats_update_t update_cb;
 	uint8_t fls_ret;
 	bool vlan_passthrough = false;
+#ifdef SFE_SW_L4_CHECKSUM_VERIFICATION
+	struct net *net;
+#endif
 
 	DEBUG_TRACE("%px: sfe: sfe_ipv6_recv_udp called.\n", skb);
 
@@ -208,6 +212,24 @@ int sfe_ipv6_recv_udp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 	}
 
 	/*
+	 * L4 csum validation when a successful check by HW is absent in ip_summed.
+	 * TODO: Revisit this check for fragment forwarding case.
+	 */
+#ifdef SFE_SW_L4_CHECKSUM_VERIFICATION
+	net = dev_net(skb->dev);
+	if (unlikely(net->ct.sysctl_checksum)) {
+		if (unlikely(skb->ip_summed != CHECKSUM_UNNECESSARY)) {
+			if (!sfe_udp_checksum_validate(skb, ihl, false)) {
+				rcu_read_unlock();
+				sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_UDP_CHECKSUM_ERROR);
+				DEBUG_TRACE("%p: UDP v6 checksum error\n", skb);
+				return 0;
+			}
+		}
+	}
+#endif
+
+	/*
 	 * Do we expect an ingress VLAN tag for this flow?
 	 */
 #ifdef SFE_BRIDGE_VLAN_FILTERING_ENABLE
@@ -258,10 +280,10 @@ int sfe_ipv6_recv_udp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 	if (unlikely(cm->fls_conn && !(cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_FLS_DISABLED))){
 		if (likely(update_cb)) {
 			fls_ret = update_cb(cm->fls_conn, skb);
-			if (!fls_ret || fls_ret == SFE_FLS_CONNECTION_FLAG_HWM_EXCEEDED)
+			if (!(fls_ret & SFE_FLS_CONNECTION_FLAG_DEF_ENABLE) || fls_ret & SFE_FLS_CONNECTION_FLAG_HWM_EXCEEDED)
 				cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_FLS_DISABLED;
 
-			if (fls_ret == SFE_FLS_CONNECTION_FLAG_HWM_EXCEEDED && sfe_fls_flush_on_hwm_enable) {
+			if (fls_ret & SFE_FLS_CONNECTION_FLAG_HWM_EXCEEDED && sfe_fls_flush_on_hwm_enable) {
 				struct sfe_ipv6_connection *c = cm->connection;
 				DEBUG_TRACE("flush on source interface check failure\n");
 				spin_lock_bh(&si->lock);
@@ -681,6 +703,43 @@ int sfe_ipv6_recv_udp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 			service_class_id = cm->svc_id;
 			sfe_ipv6_service_class_stats_inc(si, service_class_id, len);
 		}
+	}
+
+	/*
+	 * Set the skb dst.
+	 * Linux determines the tunnel info for VxLAN-GPE from skb->dst and uses
+	 * this to get the encapsulation instruction for the packet.
+	 */
+	if (unlikely(cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_VXLAN_GPE)) {
+		struct dst_entry *dst;
+		struct flowi6 fl6;
+
+		dst = dst_cache_get(&cm->dst_cache);
+		if (unlikely(!dst)) {
+			memset(&fl6, 0, sizeof(struct flowi6));
+			memcpy(&fl6.daddr, dest_ip, sizeof(fl6.daddr));
+			memcpy(&fl6.saddr, src_ip, sizeof(fl6.saddr));
+			dst = ip6_route_output(&init_net, NULL, &fl6);
+			if (!dst) {
+				DEBUG_TRACE("%px: VXLAN-GPE failed to get IPv6 dst: %pI6 \n", skb, &dest_ip);
+				rcu_read_unlock();
+				sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_VXLAN_GPE_NO_ROUTE);
+				return 0;
+			}
+
+			if (dst->error) {
+				DEBUG_TRACE("%px: VXLAN-GPE dst error: %d \n", skb, dst->error);
+				dst_release(dst);
+				rcu_read_unlock();
+				sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_VXLAN_GPE_DST_ERROR);
+				return 0;
+			}
+
+			dst_cache_set_ip6(&cm->dst_cache, dst, &fl6.saddr);
+		}
+
+		skb_dst_drop(skb);
+		skb_dst_set(skb, dst);
 	}
 
 	/*
