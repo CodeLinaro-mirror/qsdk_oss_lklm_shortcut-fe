@@ -3188,6 +3188,38 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 		}
 	}
 
+	if (disable_l2_flow) {
+		if (!reply_cm->top_interface_dev || is_vlan_dev(reply_cm->top_interface_dev)) {
+			reply_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_WRITE_L2_HDR;
+
+			/*
+			 * If our dev writes Ethernet headers then we can write a really fast
+			 * version.
+			 */
+			if (src_dev->header_ops) {
+				if (src_dev->header_ops->create == eth_header) {
+					reply_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_WRITE_FAST_ETH_HDR;
+				}
+			}
+		}
+	}
+
+	if (disable_l2_return) {
+		if (!original_cm->top_interface_dev || is_vlan_dev(original_cm->top_interface_dev)) {
+			original_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_WRITE_L2_HDR;
+
+			/*
+			 * If our dev writes Ethernet headers then we can write a really fast
+			 * version.
+			 */
+			if (dest_dev->header_ops) {
+				if (dest_dev->header_ops->create == eth_header) {
+					original_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_WRITE_FAST_ETH_HDR;
+				}
+			}
+		}
+	}
+
 #ifdef SFE_BRIDGE_VLAN_FILTERING_ENABLE
 	/*
 	 * Add Bridge VLAN Filter rule in reply_cm
