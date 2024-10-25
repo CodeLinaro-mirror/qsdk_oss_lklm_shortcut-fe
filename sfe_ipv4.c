@@ -17,7 +17,7 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
-
+#include <linux/debug_mem_usage.h>
 #include <linux/module.h>
 #include <linux/sysfs.h>
 #include <linux/skbuff.h>
@@ -4649,6 +4649,7 @@ static unsigned int sfe_ipv4_local_out(void *priv, struct sk_buff *skb, const st
 	DEBUG_TRACE("%px: sfe: sfe_ipv4_local_out hook called.\n", skb);
 
 	if (likely(skb->skb_iif)) {
+		mem_debug_update_skb(skb);
 		return sfe_ipv4_recv(skb->dev, skb, &l2_info, true) ? NF_STOLEN : NF_ACCEPT;
 	}
 

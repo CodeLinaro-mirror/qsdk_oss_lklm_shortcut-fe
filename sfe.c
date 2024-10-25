@@ -18,6 +18,7 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+#include <linux/debug_mem_usage.h>
 #include <linux/module.h>
 #include <linux/version.h>
 #include <linux/sysfs.h>
@@ -2119,6 +2120,8 @@ int sfe_recv(struct sk_buff *skb)
 	struct net_device *dev;
 	struct sfe_l2_info l2_info;
 	int ret;
+
+	mem_debug_update_skb(skb);
 
 	dev = skb->dev;
 
