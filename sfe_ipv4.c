@@ -2234,6 +2234,9 @@ update_done:
 	}
 	if (msg->valid_flags & SFE_MC_RULE_CREATE_FLAG_QOS_VALID) {
 		original_cm->priority =  msg->qos_rule.flow_qos_tag;
+#if defined(SFE_PPE_QOS_SUPPORTED)
+		original_cm->int_pri = msg->qos_rule.flow_int_pri;
+#endif
 		original_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_PRIORITY_REMARK;
 	}
 	if (msg->valid_flags & SFE_MC_RULE_CREATE_FLAG_DSCP_MARKING_VALID) {
@@ -2656,16 +2659,10 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	}
 
 	if (msg->valid_flags & SFE_RULE_CREATE_QOS_VALID) {
-#if defined(SFE_PPE_QOS_SUPPORTED)
-
-		/*
-		 * SFE_QDISC_RULE_RETURN_PPE_QDISC_FAST_XMIT flag is set when qdisc is configured in flow direction
-		 */
-		if(msg->qdisc_rule.valid_flags & SFE_QDISC_RULE_RETURN_PPE_QDISC_FAST_XMIT) {
-			original_cm->int_pri = msg->qos_rule.flow_int_pri;
-		}
-#endif
 		original_cm->priority =  msg->qos_rule.flow_qos_tag;
+#if defined(SFE_PPE_QOS_SUPPORTED)
+		original_cm->int_pri = msg->qos_rule.flow_int_pri;
+#endif
 		original_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_PRIORITY_REMARK;
 	}
 
@@ -3029,16 +3026,10 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	}
 
 	if (msg->valid_flags & SFE_RULE_CREATE_QOS_VALID) {
-#if defined(SFE_PPE_QOS_SUPPORTED)
-
-		/*
-		 * SFE_QDISC_RULE_FLOW_PPE_QDISC_FAST_XMIT flag is set when qdisc is configured in return direction
-		 */
-		if(msg->qdisc_rule.valid_flags & SFE_QDISC_RULE_FLOW_PPE_QDISC_FAST_XMIT) {
-			reply_cm->int_pri = msg->qos_rule.return_int_pri;
-		}
-#endif
 		reply_cm->priority =  msg->qos_rule.return_qos_tag;
+#if defined(SFE_PPE_QOS_SUPPORTED)
+		reply_cm->int_pri = msg->qos_rule.return_int_pri;
+#endif
 		reply_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_PRIORITY_REMARK;
 	}
 
