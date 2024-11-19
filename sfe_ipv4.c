@@ -686,6 +686,14 @@ bool sfe_ipv4_remove_connection(struct sfe_ipv4 *si, struct sfe_ipv4_connection 
 	}
 
 	/*
+	 * dereference the decap direction top_interface_dev
+	 */
+	if (c->original_match->top_interface_dev) {
+		dev_put(c->original_match->top_interface_dev);
+	}
+
+
+	/*
 	 * If qdisc_xmit_dev is present, dereference qdisc net dev.
 	 */
 	if (c->original_match->qdisc_xmit_dev) {
@@ -2420,7 +2428,6 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	u32 ingress_vlan_tag;
 	u32 egress_vlan_tag;
 #endif
-
 	/*
 	 * Check if L2 features need to be disabled
 	 */
@@ -2602,6 +2609,9 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	}
 
 	original_cm->xmit_dev = dest_dev;
+
+	original_cm->top_interface_dev = NULL;
+	reply_cm->top_interface_dev = NULL;
 
 	/*
 	 * Enable qdisc fast xmit path if single qdisc is present on non-bottom interface.
@@ -3238,8 +3248,7 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	 */
 	original_cm->proto = NULL;
 	reply_cm->proto = NULL;
-	original_cm->top_interface_dev = NULL;
-	reply_cm->top_interface_dev = NULL;
+
 
 #ifdef SFE_GRE_TUN_ENABLE
 	if ((IPPROTO_GRE == tuple->protocol) && !(reply_cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_PASSTHROUGH)) {
@@ -3286,7 +3295,9 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 		rcu_read_lock();
 		reply_cm->proto = rcu_dereference(inet_protos[IPPROTO_IPV6]);
 		rcu_read_unlock();
-		reply_cm->top_interface_dev = dev_get_by_index(&init_net, msg->conn_rule.return_top_interface_num);
+		if (!reply_cm->top_interface_dev) {
+			reply_cm->top_interface_dev = dev_get_by_index(&init_net, msg->conn_rule.return_top_interface_num);
+		}
 
 		if (unlikely(!reply_cm->top_interface_dev)) {
 			DEBUG_WARN("%px: Unable to find top_interface_dev corresponding to %d\n", msg,
