@@ -1379,9 +1379,11 @@ int sfe_ipv4_recv(struct net_device *dev, struct sk_buff *skb, struct sfe_l2_inf
 	 * Usually TCP ACK's(with length 18(eth)+20(IP)+20(TCP) < 64) have ethernet padding set.
 	 */
 	if (likely(!skb->data_len)) {
-		skb->len = tot_len;
-		skb_set_tail_pointer(skb, tot_len);
-		len = tot_len;
+		if (unlikely(tot_len < len)) {
+			l2_info->trimmed_len = len - tot_len;
+			__skb_trim(skb, tot_len);
+			len = tot_len;
+		}
 	}
 
 	/*
