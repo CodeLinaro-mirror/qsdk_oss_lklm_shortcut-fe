@@ -1775,9 +1775,25 @@ static inline bool sfe_ipv4_is_same_dest(struct sfe_ipv4_mc_dest *md1, struct sf
 }
 
 /*
+ * sfe_ipv4_update_mc_dest_addr
+ *  In mcuc case, the dest mac address could be changed, need use the new one.
+ */
+void sfe_ipv4_update_mc_dest_addr(struct sfe_ipv4_connection_match *cm, u8 *mac_addr)
+{
+	struct sfe_ipv4_mc_dest *cur;
+	list_for_each_entry_rcu(cur, &(cm->mc_list), list) {
+		if ((cur->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_WRITE_L2_HDR)
+			&& !ether_addr_equal((u8 *)cur->xmit_dest_mac, mac_addr)) {
+			ether_addr_copy((u8 *)cur->xmit_dest_mac, mac_addr);
+		}
+	}
+}
+
+/*
  * sfe_ipv4_add_mc_dest_tail()
- *	Add mc dest to the tail.
- * return 0 successful, return 1 failed.
+ *	remove the same dest if existing.
+ *	add the new dest to the tail
+ * return 0.
  */
 int sfe_ipv4_add_mc_dest_tail(struct sfe_ipv4_connection_match *cm, struct sfe_ipv4_mc_dest *mc_dest)
 {
@@ -1785,30 +1801,34 @@ int sfe_ipv4_add_mc_dest_tail(struct sfe_ipv4_connection_match *cm, struct sfe_i
 
 	list_for_each_entry_rcu(cur, &(cm->mc_list), list) {
 		if (sfe_ipv4_is_same_dest(cur, mc_dest)) {
-			DEBUG_WARN("%px: The tail new destination[%s] already exists in the list\n",
-					cm, mc_dest->xmit_dev->name);
-			return 1;
+			list_del_rcu(&cur->list);
+			call_rcu(&cur->rcu, sfe_ipv4_free_mc_dest_rcu);
+			break;
 		}
 	}
+
 	list_add_tail_rcu(&(mc_dest->list), &(cm->mc_list));
+
 	return 0;
 }
 
 /*
  * sfe_ipv4_add_mc_dest_head()
- *	Add mc dest to the head.
- * return 0 successful, return 1 failed.
+ *	remove the same dest if existing.
+ *	add the new dest to the head.
+ * return 0.
  */
 int sfe_ipv4_add_mc_dest_head(struct sfe_ipv4_connection_match *cm, struct sfe_ipv4_mc_dest *mc_dest)
 {
 	struct sfe_ipv4_mc_dest *cur;
 	list_for_each_entry_rcu(cur, &(cm->mc_list), list) {
 		if (sfe_ipv4_is_same_dest(cur, mc_dest)) {
-			DEBUG_WARN("%px: The head new destination[%s] already exists in the list\n",
-					cm, mc_dest->xmit_dev->name);
-			return 1;
+			list_del_rcu(&cur->list);
+			call_rcu(&cur->rcu, sfe_ipv4_free_mc_dest_rcu);
+			break;
 		}
 	}
+
 	list_add_rcu(&(mc_dest->list), &(cm->mc_list));
 
 	return 0;
@@ -2022,6 +2042,8 @@ int sfe_ipv4_update_mc_dest(struct sfe_ipv4_connection_match *cm, struct sfe_ipv
 			}
 		}
 	}
+
+	sfe_ipv4_update_mc_dest_addr(cm, (u8 *)msg->dest_mac);
 	return 0;
 }
 
