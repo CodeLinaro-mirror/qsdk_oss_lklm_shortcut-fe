@@ -718,6 +718,10 @@ bool sfe_ipv6_remove_connection(struct sfe_ipv6 *si, struct sfe_ipv6_connection 
 	/*
 	 * If qdisc_xmit_dev is present, dereference qdisc net dev.
 	 */
+	if (c->original_match->top_interface_dev) {
+		dev_put(c->original_match->top_interface_dev);
+	}
+
 	if (c->original_match->qdisc_xmit_dev) {
 		dev_put(c->original_match->xmit_dev);
 	}
@@ -2385,6 +2389,9 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 
 	original_cm->xmit_dev = dest_dev;
 
+	original_cm->top_interface_dev = NULL;
+	reply_cm->top_interface_dev = NULL;
+
 	/*
 	 * Enable qdisc fast xmit path if single qdisc is present on non-bottom interface.
 	 * For qdisc is enabled on bottom interface alone, we use dev_queue_xmit() instead to transmit to bottom interface.
@@ -3061,8 +3068,6 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 	 */
 	original_cm->proto = NULL;
 	reply_cm->proto = NULL;
-	original_cm->top_interface_dev = NULL;
-	reply_cm->top_interface_dev = NULL;
 
 #ifdef SFE_GRE_TUN_ENABLE
 	if ((IPPROTO_GRE == tuple->protocol) && !(reply_cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_PASSTHROUGH)) {
@@ -3149,8 +3154,13 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 		rcu_read_lock();
 		reply_cm->proto = rcu_dereference(inet6_protos[tuple->protocol]);
 		rcu_read_unlock();
-		reply_cm->top_interface_dev = dev_get_by_index(&init_net, msg->conn_rule.return_top_interface_num);
 
+		/*
+		 * If top dev is not present already
+		 */
+		if (!reply_cm->top_interface_dev) {
+			reply_cm->top_interface_dev = dev_get_by_index(&init_net, msg->conn_rule.return_top_interface_num);
+		}
 		if (unlikely(!reply_cm->top_interface_dev)) {
 			DEBUG_WARN("%px: Unable to find top_interface_dev corresponding to %d\n", msg,
 						msg->conn_rule.return_top_interface_num);
