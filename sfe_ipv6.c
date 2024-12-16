@@ -718,6 +718,10 @@ bool sfe_ipv6_remove_connection(struct sfe_ipv6 *si, struct sfe_ipv6_connection 
 	/*
 	 * If qdisc_xmit_dev is present, dereference qdisc net dev.
 	 */
+	if (c->original_match->top_interface_dev) {
+		dev_put(c->original_match->top_interface_dev);
+	}
+
 	if (c->original_match->qdisc_xmit_dev) {
 		dev_put(c->original_match->xmit_dev);
 	}
@@ -1541,20 +1545,38 @@ static inline bool sfe_ipv6_is_same_dest(struct sfe_ipv6_mc_dest *md1, struct sf
 }
 
 /*
+ * sfe_ipv6_update_mc_dest_addr
+ *  In mcuc case, the dest mac address could be changed, need use the new one.
+ */
+void sfe_ipv6_update_mc_dest_addr(struct sfe_ipv6_connection_match *cm, u8 *mac_addr)
+{
+	struct sfe_ipv6_mc_dest *cur;
+
+	list_for_each_entry_rcu(cur, &(cm->mc_list), list) {
+		if ((cur->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_WRITE_L2_HDR)
+			&& !ether_addr_equal((u8 *)cur->xmit_dest_mac, mac_addr)) {
+			ether_addr_copy((u8 *)cur->xmit_dest_mac, mac_addr);
+		}
+	}
+}
+
+/*
  * sfe_ipv6_add_mc_dest_tail()
- *	Add mc dest to the tail.
- * return 0 successful, return 1 failed.
+ *	remove the same dest if existing.
+ *	add the new dest to the tail.
+ * return 0 .
  */
 int sfe_ipv6_add_mc_dest_tail(struct sfe_ipv6_connection_match *cm, struct sfe_ipv6_mc_dest *mc_dest) {
 	struct sfe_ipv6_mc_dest *cur;
 
 	list_for_each_entry_rcu(cur, &(cm->mc_list), list) {
 		if (sfe_ipv6_is_same_dest(cur, mc_dest)) {
-			DEBUG_WARN("%px: The tail new destination[%s] already exists in the list\n",
-					cm, mc_dest->xmit_dev->name);
-			return 1;
+			list_del_rcu(&cur->list);
+			call_rcu(&cur->rcu, sfe_ipv6_free_mc_dest_rcu);
+			break;
 		}
 	}
+
 	list_add_tail_rcu(&mc_dest->list, &cm->mc_list);
 
 	return 0;
@@ -1563,17 +1585,18 @@ int sfe_ipv6_add_mc_dest_tail(struct sfe_ipv6_connection_match *cm, struct sfe_i
 
 /*
  * sfe_ipv6_add_mc_dest_head()
- *	Add mc dest to the head.
- * return 0 successful, return 1 failed.
+ *	remove the same dest if existing.
+ *	add mc dest to the head.
+ * return 0.
  */
 int sfe_ipv6_add_mc_dest_head(struct sfe_ipv6_connection_match *cm, struct sfe_ipv6_mc_dest *mc_dest) {
 
 	struct sfe_ipv6_mc_dest *cur;
 	list_for_each_entry_rcu(cur, &(cm->mc_list), list) {
 		if (sfe_ipv6_is_same_dest(cur, mc_dest)) {
-			DEBUG_WARN("%px: The head new destination[%s] already exists in the list\n",
-					cm, mc_dest->xmit_dev->name);
-			return 1;
+			list_del_rcu(&cur->list);
+			call_rcu(&cur->rcu, sfe_ipv6_free_mc_dest_rcu);
+			break;
 		}
 	}
 
@@ -1785,6 +1808,8 @@ int sfe_ipv6_update_mc_dest(struct sfe_ipv6_connection_match *cm, struct sfe_ipv
 			}
 		}
 	}
+
+	sfe_ipv6_update_mc_dest_addr(cm, (u8 *)msg->dest_mac);
 	return 0;
 }
 
@@ -2363,6 +2388,9 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 	original_cm->xlate_dest_port =  msg->conn_rule.return_ident_xlate;
 
 	original_cm->xmit_dev = dest_dev;
+
+	original_cm->top_interface_dev = NULL;
+	reply_cm->top_interface_dev = NULL;
 
 	/*
 	 * Enable qdisc fast xmit path if single qdisc is present on non-bottom interface.
@@ -3040,8 +3068,6 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 	 */
 	original_cm->proto = NULL;
 	reply_cm->proto = NULL;
-	original_cm->top_interface_dev = NULL;
-	reply_cm->top_interface_dev = NULL;
 
 #ifdef SFE_GRE_TUN_ENABLE
 	if ((IPPROTO_GRE == tuple->protocol) && !(reply_cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_PASSTHROUGH)) {
@@ -3128,8 +3154,13 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 		rcu_read_lock();
 		reply_cm->proto = rcu_dereference(inet6_protos[tuple->protocol]);
 		rcu_read_unlock();
-		reply_cm->top_interface_dev = dev_get_by_index(&init_net, msg->conn_rule.return_top_interface_num);
 
+		/*
+		 * If top dev is not present already
+		 */
+		if (!reply_cm->top_interface_dev) {
+			reply_cm->top_interface_dev = dev_get_by_index(&init_net, msg->conn_rule.return_top_interface_num);
+		}
 		if (unlikely(!reply_cm->top_interface_dev)) {
 			DEBUG_WARN("%px: Unable to find top_interface_dev corresponding to %d\n", msg,
 						msg->conn_rule.return_top_interface_num);
