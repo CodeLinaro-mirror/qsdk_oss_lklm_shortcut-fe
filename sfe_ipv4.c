@@ -2476,6 +2476,8 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	u32 ingress_vlan_tag;
 	u32 egress_vlan_tag;
 #endif
+	int status = 0;
+
 	/*
 	 * Check if L2 features need to be disabled
 	 */
@@ -2515,18 +2517,17 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 		DEBUG_WARN("%px: Unable to find dest_dev corresponding to %d\n", msg,
 						return_interface_num);
 		this_cpu_inc(si->stats_pcpu->connection_create_failures64);
-		dev_put(src_dev);
-		return -EINVAL;
+		status = -EINVAL;
+		goto src_dev_put;
 	}
 
 	if (unlikely((dest_dev->reg_state != NETREG_REGISTERED) ||
 		     (src_dev->reg_state != NETREG_REGISTERED))) {
-		dev_put(src_dev);
-		dev_put(dest_dev);
 		DEBUG_WARN("%px: src_dev=%s and dest_dev=%s are unregistered\n", msg,
 						src_dev->name, dest_dev->name);
 		this_cpu_inc(si->stats_pcpu->connection_create_failures64);
-		return -EINVAL;
+		status = -EINVAL;
+		goto dst_dev_put;
 	}
 
 	/*
@@ -2536,30 +2537,24 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	if (unlikely(!c)) {
 		DEBUG_WARN("%px: memory allocation of connection entry failed\n", msg);
 		this_cpu_inc(si->stats_pcpu->connection_create_failures64);
-		dev_put(src_dev);
-		dev_put(dest_dev);
-		return -ENOMEM;
+		status = -ENOMEM;
+		goto dst_dev_put;
 	}
 
 	original_cm = (struct sfe_ipv4_connection_match *)kzalloc(sizeof(struct sfe_ipv4_connection_match), GFP_ATOMIC);
 	if (unlikely(!original_cm)) {
 		DEBUG_WARN("%px: memory allocation of connection match entry failed\n", msg);
 		this_cpu_inc(si->stats_pcpu->connection_create_failures64);
-		kfree(c);
-		dev_put(src_dev);
-		dev_put(dest_dev);
-		return -ENOMEM;
+		status = -ENOMEM;
+		goto free_conn_obj;
 	}
 
 	reply_cm = (struct sfe_ipv4_connection_match *)kzalloc(sizeof(struct sfe_ipv4_connection_match), GFP_ATOMIC);
 	if (unlikely(!reply_cm)) {
 		DEBUG_WARN("%px: memory allocation of connection match entry failed\n", msg);
 		this_cpu_inc(si->stats_pcpu->connection_create_failures64);
-		kfree(original_cm);
-		kfree(c);
-		dev_put(src_dev);
-		dev_put(dest_dev);
-		return -ENOMEM;
+		status = -ENOMEM;
+		goto free_original_cm;
 	}
 
 	this_cpu_inc(si->stats_pcpu->connection_create_requests64);
@@ -2570,17 +2565,14 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	 * Check to see if max number of connection limit reached.
 	 */
 	if (si->num_connections  >= sfe_ipv4_max_conn_count()) {
-		spin_unlock_bh(&si->lock);
 		this_cpu_inc(si->stats_pcpu->connection_create_requests_overflow64);
-		kfree(reply_cm);
-		kfree(original_cm);
-		kfree(c);
-		dev_put(src_dev);
-		dev_put(dest_dev);
 		if (net_ratelimit()) {
 			DEBUG_WARN("%px: Maximum connection count(%d), reached %d\n", msg, sfe_ipv4_max_conn_count(), si->num_connections);
 		}
-		return -EPERM;
+
+		spin_unlock_bh(&si->lock);
+		status = -EPERM;
+		goto free_reply_cm;
 	}
 
 	/*
@@ -2605,20 +2597,14 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 		sfe_ipv4_update_protocol_state(c_old, msg);
 		spin_unlock_bh(&si->lock);
 
-		kfree(reply_cm);
-		kfree(original_cm);
-		kfree(c);
-
-		dev_put(src_dev);
-		dev_put(dest_dev);
-
 		DEBUG_TRACE("%px: connection already exists -  p:%d\n"
 			    "  s: %s:%pM:%pI4:%u, d: %s:%pM:%pI4:%u\n",
 			    msg, tuple->protocol,
 			    src_dev->name, msg->conn_rule.flow_mac, &tuple->flow_ip, ntohs(tuple->flow_ident),
 			    dest_dev->name, msg->conn_rule.return_mac, &tuple->return_ip, ntohs(tuple->return_ident));
 
-		return -EADDRINUSE;
+		status = -EADDRINUSE;
+		goto free_reply_cm;
 	}
 
 	/*
@@ -2781,8 +2767,11 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 		 */
 		if (!((msg->rule_flags & SFE_RULE_CREATE_FLAG_USE_RETURN_BOTTOM_INTERFACE) ||
 					(msg->conn_rule.return_interface_num == msg->conn_rule.return_top_interface_num))) {
+			this_cpu_inc(si->stats_pcpu->connection_create_failures64);
+			spin_unlock_bh(&si->lock);
 			DEBUG_TRACE("%px: original_cm: Bridge VLAN insert egress VLAN Tag is not set, as bottom interface is not set.\n", msg);
-			return -EPERM;
+			status = -EPERM;
+			goto free_reply_cm;
 		}
 
 		/*
@@ -2804,13 +2793,9 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 					SFE_VLAN_ID_NOT_CONFIGURED, SFE_VLAN_ID_NOT_CONFIGURED)) {
 			this_cpu_inc(si->stats_pcpu->connection_create_failures64);
 			spin_unlock_bh(&si->lock);
-			kfree(reply_cm);
-			kfree(original_cm);
-			kfree(c);
-			dev_put(src_dev);
-			dev_put(dest_dev);
 			DEBUG_WARN("%px: More than %d VLAN & VLAN Filter rules are not allowed\n", msg, SFE_MAX_VLAN_DEPTH);
-			return -EPERM;
+			status = -EPERM;
+			goto free_reply_cm;
 		}
 
 		if (!(msg->flow_vlan_filter_rule.egress_flags & SFE_VLAN_FILTER_FLAG_EGRESS_UNTAGGED) &&
@@ -3154,13 +3139,8 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	 * __udp4_lib_lookup() holds a reference for this sock object,
 	 * which will be released in sfe_ipv4_free_connection_rcu()
 	 */
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 13, 0))
-	sk = __udp4_lib_lookup(net, reply_cm->xlate_src_ip, reply_cm->xlate_src_port,
-			reply_cm->match_dest_ip, reply_cm->match_dest_port, src_if_idx, &udp_table);
-#else
 	sk = __udp4_lib_lookup(net, reply_cm->xlate_src_ip, reply_cm->xlate_src_port,
 			reply_cm->match_dest_ip, reply_cm->match_dest_port, src_if_idx, 0, &udp_table, NULL);
-#endif
 
 	rcu_read_unlock();
 
@@ -3168,16 +3148,9 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	 * We set the UDP sock pointer as valid only for decap direction.
 	 */
 	if (sk && udp_sk(sk)->encap_type && sfe_ipv4_is_local_ip(si, reply_cm->match_dest_ip)) {
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 13, 0))
-		if (!atomic_add_unless(&sk->sk_refcnt, 1, 0)) {
-#else
 		if (!refcount_inc_not_zero(&sk->sk_refcnt)) {
-#endif
 			this_cpu_inc(si->stats_pcpu->connection_create_failures64);
 			spin_unlock_bh(&si->lock);
-			kfree(reply_cm);
-			kfree(original_cm);
-			kfree(c);
 
 			DEBUG_TRACE("%px: sfe: unable to take reference for socket(%px)  p:%d\n"
 				    "  s: %s:%pM:%pI4:%u, d: %s:%pM:%pI4:%u\n",
@@ -3185,10 +3158,8 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 				    src_dev->name, msg->conn_rule.flow_mac, &tuple->flow_ip, ntohs(tuple->flow_ident),
 				    dest_dev->name, msg->conn_rule.return_mac, &tuple->return_ip, ntohs(tuple->return_ident));
 
-			dev_put(src_dev);
-			dev_put(dest_dev);
-
-			return -ESHUTDOWN;
+			status = -ESHUTDOWN;
+			goto free_reply_cm;
 		}
 
 		rcu_assign_pointer(reply_cm->up, udp_sk(sk));
@@ -3270,8 +3241,11 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 		 */
 		if (!((msg->rule_flags & SFE_RULE_CREATE_FLAG_USE_FLOW_BOTTOM_INTERFACE) ||
 					(msg->conn_rule.flow_interface_num == msg->conn_rule.flow_top_interface_num))) {
+			this_cpu_inc(si->stats_pcpu->connection_create_failures64);
+			spin_unlock_bh(&si->lock);
 			DEBUG_TRACE("%px: reply_cm: Bridge VLAN insert egress VLAN Tag is not set, as bottom interface is not set.\n", msg);
-			return -EPERM;
+			status = -EPERM;
+			goto sk_refcount_dec;
 		}
 
 		/*
@@ -3292,13 +3266,9 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 					SFE_VLAN_ID_NOT_CONFIGURED, SFE_VLAN_ID_NOT_CONFIGURED)) {
 			this_cpu_inc(si->stats_pcpu->connection_create_failures64);
 			spin_unlock_bh(&si->lock);
-			kfree(reply_cm);
-			kfree(original_cm);
-			kfree(c);
-			dev_put(src_dev);
-			dev_put(dest_dev);
 			DEBUG_WARN("%px: More than %d VLAN & VLAN Filter rules are not allowed\n", msg, SFE_MAX_VLAN_DEPTH);
-			return -EPERM;
+			status = -EPERM;
+			goto sk_refcount_dec;
 		}
 
 		if (!(msg->return_vlan_filter_rule.egress_flags & SFE_VLAN_FILTER_FLAG_EGRESS_UNTAGGED) &&
@@ -3327,13 +3297,9 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 		if (unlikely(!reply_cm->proto)) {
 			this_cpu_inc(si->stats_pcpu->connection_create_failures64);
 			spin_unlock_bh(&si->lock);
-			kfree(reply_cm);
-			kfree(original_cm);
-			kfree(c);
-			dev_put(src_dev);
-			dev_put(dest_dev);
 			DEBUG_WARN("sfe: GRE proto handler is not registered\n");
-			return -EPERM;
+			status = -EPERM;
+			goto sk_refcount_dec;
 		}
 	}
 #endif
@@ -3347,13 +3313,9 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 		if (unlikely(!reply_cm->proto)) {
 			this_cpu_inc(si->stats_pcpu->connection_create_failures64);
 			spin_unlock_bh(&si->lock);
-			kfree(reply_cm);
-			kfree(original_cm);
-			kfree(c);
-			dev_put(src_dev);
-			dev_put(dest_dev);
 			DEBUG_WARN("sfe: L2TP proto handler is not registered\n");
-			return -EPERM;
+			status = -EPERM;
+			goto sk_refcount_dec;
 		}
 	}
 #endif
@@ -3372,12 +3334,8 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 						msg->conn_rule.return_top_interface_num);
 			this_cpu_inc(si->stats_pcpu->connection_create_failures64);
 			spin_unlock_bh(&si->lock);
-			kfree(reply_cm);
-			kfree(original_cm);
-			kfree(c);
-			dev_put(src_dev);
-			dev_put(dest_dev);
-			return -EINVAL;
+			status = -EINVAL;
+			goto sk_refcount_dec;
 		}
 	}
 
@@ -3387,13 +3345,11 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 		rcu_read_unlock();
 
 		if (unlikely(!reply_cm->proto)) {
-			kfree(reply_cm);
-			kfree(original_cm);
-			kfree(c);
-			dev_put(src_dev);
-			dev_put(dest_dev);
+			this_cpu_inc(si->stats_pcpu->connection_create_failures64);
+			spin_unlock_bh(&si->lock);
 			DEBUG_WARN("sfe: ESP proto handler is not registered\n");
-			return -EPERM;
+			status = -EPERM;
+			goto sk_refcount_dec;
 		}
 	}
 
@@ -3469,12 +3425,8 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 			pr_err("Failed to initialize dst for flow match, err: %d\n", err);
 			this_cpu_inc(si->stats_pcpu->connection_create_failures64);
 			spin_unlock_bh(&si->lock);
-			kfree(reply_cm);
-			kfree(original_cm);
-			kfree(c);
-			dev_put(src_dev);
-			dev_put(dest_dev);
-			return -ENOMEM;
+			status = -ENOMEM;
+			goto sk_refcount_dec;
 		}
 	}
 
@@ -3486,13 +3438,8 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 			pr_err("Failed to initialize dst for return flow match, err: %d\n", err);
 			this_cpu_inc(si->stats_pcpu->connection_create_failures64);
 			spin_unlock_bh(&si->lock);
-			dst_cache_destroy(&original_cm->dst_cache);
-			kfree(reply_cm);
-			kfree(original_cm);
-			kfree(c);
-			dev_put(src_dev);
-			dev_put(dest_dev);
-			return -ENOMEM;
+			status = -ENOMEM;
+			goto free_original_dst;
 		}
 	}
 
@@ -3683,7 +3630,32 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 		   c, original_cm->vlan_filter_rule.ingress_vlan_tag, original_cm->vlan_filter_rule.ingress_flags,
 		   reply_cm->vlan_filter_rule.ingress_vlan_tag, reply_cm->vlan_filter_rule.ingress_flags);
 #endif
-	return 0;
+	return status;
+
+free_original_dst:
+	dst_cache_destroy(&original_cm->dst_cache);
+
+sk_refcount_dec:
+	if (reply_cm->up) {
+		sock_put(sk);
+	}
+
+free_reply_cm:
+	kfree(reply_cm);
+
+free_original_cm:
+	kfree(original_cm);
+
+free_conn_obj:
+	kfree(c);
+
+dst_dev_put:
+	dev_put(dest_dev);
+
+src_dev_put:
+	dev_put(src_dev);
+
+	return status;
 }
 
 #if defined(SFE_RFS_SUPPORTED)
