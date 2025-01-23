@@ -3,7 +3,7 @@
  *	 SFE exported function headers for SFE engine.
  *
  * Copyright (c) 2015,2016, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2025 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -224,6 +224,8 @@
 		/**< SAWF mark in the flow direction is valid. */
 #define SFE_SAWF_MARK_RETURN_VALID      (1<<1)
 		/**< SAWF mark in the return direction is valid. */
+#define SFE_SAWF_MARK_DEPRIO            (1<<2)
+		/**< SAWF mark is being set to reset queue of this flow */
 
 /**
  * @}
