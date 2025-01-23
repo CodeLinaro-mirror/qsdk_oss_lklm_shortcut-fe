@@ -3,7 +3,7 @@
  *	Shortcut forwarding engine - IPv6 support.
  *
  * Copyright (c) 2015-2016, 2019-2020, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2025 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -1484,16 +1484,26 @@ void sfe_ipv6_mark_rule_update(struct sfe_connection_mark *mark)
 		if (mark->flags & SFE_SAWF_MARK_FLOW_VALID) {
 			c->original_match->mark = mark->flow_mark;
 			c->original_match->svc_id = mark->flow_svc_id;
-			c->original_match->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_MARK;
-			c->original_match->sawf_valid = true;
+			if (mark->flags & SFE_SAWF_MARK_DEPRIO) {
+				c->original_match->flags &= ~SFE_IPV6_CONNECTION_MATCH_FLAG_MARK;
+				c->original_match->sawf_valid = false;
+			} else {
+				c->original_match->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_MARK;
+				c->original_match->sawf_valid = true;
+			}
 		}
 
 		if (c->reply_match) {
 			if (mark->flags & SFE_SAWF_MARK_RETURN_VALID) {
 				c->reply_match->mark = mark->return_mark;
 				c->reply_match->svc_id = mark->return_svc_id;
-				c->reply_match->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_MARK;
-				c->reply_match->sawf_valid = true;
+				if (mark->flags & SFE_SAWF_MARK_DEPRIO) {
+					c->reply_match->flags &= ~SFE_IPV6_CONNECTION_MATCH_FLAG_MARK;
+					c->reply_match->sawf_valid = false;
+				} else {
+					c->reply_match->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_MARK;
+					c->reply_match->sawf_valid = true;
+				}
 			}
 		}
 		spin_unlock_bh(&si->lock);
