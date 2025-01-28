@@ -981,6 +981,35 @@ void sfe_ipv6_sync_status(struct sfe_ipv6 *si,
 	sync_rule_callback(&sis);
 }
 
+#if defined(SFE_RFS_SUPPORTED)
+/*
+ * sfe_destroy_ipv6_ppe_rfs_rule()
+ *	Destroy RFS rule in PPE.
+*/
+static void sfe_destroy_ipv6_ppe_rfs_rule(struct sfe_ipv6_connection_match *match_dir) {
+
+	struct ppe_rfs_ipv6_rule_destroy_msg pr6rd = {0};
+
+	pr6rd.tuple.protocol = match_dir->match_protocol;
+	pr6rd.tuple.flow_ip[0] = ntohl(match_dir->match_src_ip[0].addr[3]);
+	pr6rd.tuple.flow_ip[1] = ntohl(match_dir->match_src_ip[0].addr[2]);
+	pr6rd.tuple.flow_ip[2] = ntohl(match_dir->match_src_ip[0].addr[1]);
+	pr6rd.tuple.flow_ip[3] = ntohl(match_dir->match_src_ip[0].addr[0]);
+	pr6rd.tuple.flow_ident = ntohs(match_dir->match_src_port);
+	pr6rd.tuple.return_ip[0] = ntohl(match_dir->match_dest_ip[0].addr[3]);
+	pr6rd.tuple.return_ip[1] = ntohl(match_dir->match_dest_ip[0].addr[2]);
+	pr6rd.tuple.return_ip[2] = ntohl(match_dir->match_dest_ip[0].addr[1]);
+	pr6rd.tuple.return_ip[3] = ntohl(match_dir->match_dest_ip[0].addr[0]);
+	pr6rd.tuple.return_ident = ntohs(match_dir->match_dest_port);
+
+	if (ppe_rfs_ipv6_rule_destroy(&pr6rd) != PPE_RFS_RET_SUCCESS) {
+		DEBUG_INFO("%p: Error while deleting PPE RFS IPv6 rule\n", &pr6rd);
+	}
+
+	return;
+}
+#endif
+
 /*
  * sfe_ipv6_flush_connection()
  *	Flush a connection and free all associated resources.
@@ -1001,29 +1030,20 @@ void sfe_ipv6_flush_connection(struct sfe_ipv6 *si,
 
 #if defined(SFE_RFS_SUPPORTED)
 	if (sfe_is_ppe_rfs_feature_enabled()) {
-		struct ppe_rfs_ipv6_rule_destroy_msg pr6rd;
+		struct sfe_ipv6_connection_match *flow_match = c->original_match;
+		struct sfe_ipv6_connection_match *return_match = c->reply_match;
 
-		pr6rd.tuple.flow_ip[0] = ntohl(c->src_ip[0].addr[3]);
-		pr6rd.tuple.flow_ip[1] = ntohl(c->src_ip[0].addr[2]);
-		pr6rd.tuple.flow_ip[2] = ntohl(c->src_ip[0].addr[1]);
-		pr6rd.tuple.flow_ip[3] = ntohl(c->src_ip[0].addr[0]);
-		pr6rd.tuple.flow_ident = ntohs(c->src_port);
-		pr6rd.tuple.return_ip[0] = ntohl(c->dest_ip[0].addr[3]);
-		pr6rd.tuple.return_ip[1] = ntohl(c->dest_ip[0].addr[2]);
-		pr6rd.tuple.return_ip[2] = ntohl(c->dest_ip[0].addr[1]);
-		pr6rd.tuple.return_ip[3] = ntohl(c->dest_ip[0].addr[0]);
-		pr6rd.tuple.return_ident = ntohs(c->dest_port);
-		pr6rd.tuple.protocol = c->protocol;
-
-		pr6rd.original_dev = c->original_dev;
-		pr6rd.reply_dev = c->reply_dev;
-
-		if (ppe_rfs_ipv6_rule_destroy(&pr6rd) != PPE_RFS_RET_SUCCESS) {
-			DEBUG_INFO("%p: Error in deleting IPv6 PPE RFS rules\n", &pr6rd);
+		/*
+		 * Delete RFS rule in either direction if rfs is present in that direction.
+		 */
+		if (flow_match->rfs_enabled) {
+			sfe_destroy_ipv6_ppe_rfs_rule(flow_match);
+		}
+		if (return_match->rfs_enabled) {
+			sfe_destroy_ipv6_ppe_rfs_rule(return_match);
 		}
 	}
 #endif
-
 	/*
 	 * Release our hold of the source and dest devices and free the memory
 	 * for our connection objects.
@@ -2032,6 +2052,13 @@ update_done:
 	original_cm->connection = c;
 	original_cm->counter_match = NULL;
 
+#if defined(SFE_RFS_SUPPORTED)
+	original_cm->rfs_enabled = false;
+	original_cm->flow_mtu = msg->conn_rule.flow_mtu;
+	original_cm->flow_interface_num = msg->conn_rule.flow_interface_num;
+	original_cm->flow_top_interface_num = msg->conn_rule.flow_top_interface_num;
+#endif
+
 	if (msg->valid_flags & SFE_RULE_CREATE_MARK_VALID) {
 		original_cm->mark = msg->mark_rule.flow_mark;
 		original_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_MARK;
@@ -2377,6 +2404,16 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 
 	original_cm->top_interface_dev = NULL;
 	reply_cm->top_interface_dev = NULL;
+
+#if defined(SFE_RFS_SUPPORTED)
+	original_cm->rfs_enabled = false;
+	original_cm->flow_mtu = msg->conn_rule.flow_mtu;
+	original_cm->return_mtu = msg->conn_rule.return_mtu;
+	original_cm->flow_interface_num = msg->conn_rule.flow_interface_num;
+	original_cm->flow_top_interface_num = msg->conn_rule.flow_top_interface_num;
+	original_cm->return_interface_num = msg->conn_rule.return_interface_num;
+	original_cm->return_top_interface_num = msg->conn_rule.return_top_interface_num;
+#endif
 
 	/*
 	 * Enable qdisc fast xmit path if single qdisc is present on non-bottom interface.
@@ -2728,6 +2765,16 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 	reply_cm->match_src_port = (msg->rule_flags & SFE_RULE_CREATE_FLAG_NO_SRC_IDENT) ? 0 : msg->conn_rule.return_ident_xlate;
 
 	reply_cm->xmit_dev = src_dev;
+
+#if defined(SFE_RFS_SUPPORTED)
+	reply_cm->rfs_enabled = false;
+	reply_cm->flow_mtu = msg->conn_rule.return_mtu;
+	reply_cm->return_mtu = msg->conn_rule.flow_mtu;
+	reply_cm->flow_interface_num = msg->conn_rule.return_interface_num;
+	reply_cm->flow_top_interface_num = msg->conn_rule.return_top_interface_num;
+	reply_cm->return_interface_num = msg->conn_rule.flow_interface_num;
+	reply_cm->return_top_interface_num = msg->conn_rule.flow_top_interface_num;
+#endif
 
 	rcu_read_lock();
 	create_cb = rcu_dereference(sfe_fls_info.create_cb);
@@ -3384,27 +3431,43 @@ src_dev_put:
 
 #if defined(SFE_RFS_SUPPORTED)
 /*
- * sfe_ipv6_fill_connection_dev()
+ * sfe_ipv6_connection_rule_rfs_valid_set()
+ *	Set the value of rfs parameter to true.
  */
-void sfe_ipv6_fill_connection_dev(struct sfe_ipv6_rule_destroy_msg *msg, struct net_device **original_dev, struct net_device **reply_dev)
-{
+void sfe_ipv6_connection_rule_rfs_valid_set(struct sfe_ipv6_connection_match *match) {
 	struct sfe_ipv6 *si = &__si6;
-	struct sfe_ipv6_connection *c;
-	struct sfe_ipv6_5tuple *tuple = &msg->tuple;
 
-	spin_lock_bh(&si->lock);
-	c = sfe_ipv6_find_connection(si, tuple->protocol, (struct sfe_ipv6_addr *)tuple->flow_ip, tuple->flow_ident,
-				     (struct sfe_ipv6_addr *)tuple->return_ip, tuple->return_ident);
-	if (!c) {
-		*original_dev = NULL;
-		*reply_dev = NULL;
-		spin_unlock_bh(&si->lock);
+	if (!match) {
+		DEBUG_TRACE("match connection does not exist");
 		return;
 	}
-
-	*original_dev = c->original_dev;
-	*reply_dev = c->reply_dev;
+	spin_lock_bh(&si->lock);
+	match->rfs_enabled = true;
 	spin_unlock_bh(&si->lock);
+
+	return;
+}
+
+/*
+ * sfe_ipv6_connection_rule_get()
+ *	Get value of rfs parameter from connection entry.
+ */
+struct sfe_ipv6_connection *sfe_ipv6_connection_rule_get_by_tuple(struct sfe_ipv6_5tuple *tuple) {
+	struct sfe_ipv6 *si = &__si6;
+	struct sfe_ipv6_connection *c;
+
+	spin_lock_bh(&si->lock);
+	c = sfe_ipv6_find_connection(si, tuple->protocol,
+			(struct sfe_ipv6_addr *)tuple->flow_ip, tuple->flow_ident,
+			(struct sfe_ipv6_addr *)tuple->return_ip, tuple->return_ident);
+	if (!c) {
+		DEBUG_TRACE("connection does not exist - p: %d, s: %pI6:%u, d: %pI6:%u\n",
+			    tuple->protocol, tuple->flow_ip, ntohs(tuple->flow_ident),
+			    tuple->return_ip, ntohs(tuple->return_ident));
+	}
+	spin_unlock_bh(&si->lock);
+
+	return c;
 }
 #endif
 

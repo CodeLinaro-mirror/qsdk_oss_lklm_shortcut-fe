@@ -971,6 +971,33 @@ void sfe_ipv4_sync_status(struct sfe_ipv4 *si,
 	sync_rule_callback(&sis);
 }
 
+#if defined(SFE_RFS_SUPPORTED)
+/*
+ * sfe_destroy_ipv4_ppe_rfs_rule()
+ *	Destroy RFS rule in PPE.
+*/
+static void sfe_destroy_ipv4_ppe_rfs_rule(struct sfe_ipv4_connection_match *match_dir) {
+
+	struct ppe_rfs_ipv4_rule_destroy_msg pr4rd;
+
+	pr4rd.tuple.protocol = match_dir->match_protocol;
+	pr4rd.tuple.flow_ip = ntohl(match_dir->match_src_ip);
+	pr4rd.tuple.flow_ident = ntohs(match_dir->match_src_port);
+	pr4rd.tuple.return_ip = ntohl(match_dir->match_dest_ip);
+	pr4rd.tuple.return_ident = ntohs(match_dir->match_dest_port);
+	pr4rd.conn_rule.flow_ip_xlate = ntohl(match_dir->xlate_src_ip);
+	pr4rd.conn_rule.flow_ident_xlate = ntohs(match_dir->xlate_src_port);
+	pr4rd.conn_rule.return_ip_xlate = ntohl(match_dir->xlate_dest_ip);
+	pr4rd.conn_rule.return_ident_xlate = ntohs(match_dir->xlate_dest_port);
+
+	if (ppe_rfs_ipv4_rule_destroy(&pr4rd) != PPE_RFS_RET_SUCCESS) {
+		DEBUG_INFO("%p: Error in deleting PPE RFS rule\n", &pr4rd);
+	}
+
+	return;
+}
+#endif
+
 /*
  * sfe_ipv4_flush_connection()
  *	Flush a connection and free all associated resources.
@@ -991,27 +1018,20 @@ void sfe_ipv4_flush_connection(struct sfe_ipv4 *si,
 
 #if defined(SFE_RFS_SUPPORTED)
 	if (sfe_is_ppe_rfs_feature_enabled()) {
-		struct ppe_rfs_ipv4_rule_destroy_msg pr4rd;
+		struct sfe_ipv4_connection_match *flow_match = c->original_match;
+		struct sfe_ipv4_connection_match *return_match = c->reply_match;
 
-		pr4rd.original_dev = c->original_dev;
-		pr4rd.reply_dev = c->reply_dev;
-
-		pr4rd.tuple.flow_ip = ntohl(c->src_ip);
-		pr4rd.tuple.flow_ident = ntohs(c->src_port);
-		pr4rd.tuple.return_ip = ntohl(c->dest_ip);
-		pr4rd.tuple.return_ident = ntohs(c->dest_port);
-		pr4rd.conn_rule.flow_ip_xlate = ntohl(c->src_ip_xlate);
-		pr4rd.conn_rule.flow_ident_xlate = ntohs(c->src_port_xlate);
-		pr4rd.conn_rule.return_ip_xlate = ntohl(c->dest_ip_xlate);
-		pr4rd.conn_rule.return_ident_xlate = ntohs(c->dest_port_xlate);
-		pr4rd.tuple.protocol = c->protocol;
-
-		if (ppe_rfs_ipv4_rule_destroy(&pr4rd) != PPE_RFS_RET_SUCCESS) {
-			DEBUG_INFO("%p: Error in deleting ppe rules\n", &pr4rd);
+		/*
+		 * Delete RFS rule in either direction if rfs is present in that direction.
+		 */
+		if (flow_match->rfs_enabled) {
+			sfe_destroy_ipv4_ppe_rfs_rule(flow_match);
+		}
+		if (return_match && return_match->rfs_enabled) {
+			sfe_destroy_ipv4_ppe_rfs_rule(return_match);
 		}
 	}
 #endif
-
 	/*
 	 * Release our hold of the source and dest devices and free the memory
 	 * for our connection objects.
@@ -2276,6 +2296,13 @@ update_done:
 	original_cm->connection = c;
 	original_cm->counter_match = NULL;
 
+#if defined(SFE_RFS_SUPPORTED)
+	original_cm->rfs_enabled = false;
+	original_cm->flow_mtu = msg->conn_rule.flow_mtu;
+	original_cm->flow_interface_num = msg->conn_rule.flow_interface_num;
+	original_cm->flow_top_interface_num = msg->conn_rule.flow_top_interface_num;
+#endif
+
 	if (msg->valid_flags & SFE_RULE_CREATE_MARK_VALID) {
 		original_cm->mark = msg->mark_rule.flow_mark;
 		original_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_MARK;
@@ -2624,6 +2651,16 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	original_cm->xlate_src_port = msg->conn_rule.flow_ident_xlate;
 	original_cm->xlate_dest_ip = msg->conn_rule.return_ip_xlate;
 	original_cm->xlate_dest_port = msg->conn_rule.return_ident_xlate;
+
+#if defined(SFE_RFS_SUPPORTED)
+	original_cm->rfs_enabled = false;
+	original_cm->flow_mtu = msg->conn_rule.flow_mtu;
+	original_cm->return_mtu = msg->conn_rule.return_mtu;
+	original_cm->flow_interface_num = msg->conn_rule.flow_interface_num;
+	original_cm->flow_top_interface_num = msg->conn_rule.flow_top_interface_num;
+	original_cm->return_interface_num = msg->conn_rule.return_interface_num;
+	original_cm->return_top_interface_num = msg->conn_rule.return_top_interface_num;
+#endif
 
 	if (tuple->protocol == IPPROTO_GRE) {
 		/*
@@ -2998,6 +3035,16 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	reply_cm->xlate_src_port = tuple->return_ident;
 	reply_cm->xlate_dest_ip = tuple->flow_ip;
 	reply_cm->xlate_dest_port = tuple->flow_ident;
+
+#if defined(SFE_RFS_SUPPORTED)
+	reply_cm->rfs_enabled = false;
+	reply_cm->flow_mtu = msg->conn_rule.return_mtu;
+	reply_cm->return_mtu = msg->conn_rule.flow_mtu;
+	reply_cm->flow_interface_num = msg->conn_rule.return_interface_num;
+	reply_cm->flow_top_interface_num = msg->conn_rule.return_top_interface_num;
+	reply_cm->return_interface_num = msg->conn_rule.flow_interface_num;
+	reply_cm->return_top_interface_num = msg->conn_rule.flow_top_interface_num;
+#endif
 
 	if (tuple->protocol == IPPROTO_GRE) {
 		/*
@@ -3660,38 +3707,40 @@ src_dev_put:
 
 #if defined(SFE_RFS_SUPPORTED)
 /*
- * sfe_ipv4_fill_connection_info()
+ * sfe_ipv4_connection_rule_rfs_valid_set()
+ *	Set the value of rfs parameter to true.
  */
-void sfe_ipv4_fill_connection_info(struct sfe_ipv4_rule_destroy_msg *msg, struct net_device **original_dev, struct net_device **reply_dev,
-		uint32_t *flow_ip, uint16_t *flow_ident, uint32_t *return_ip, uint16_t *return_ident)
-{
+void sfe_ipv4_connection_rule_rfs_valid_set(struct sfe_ipv4_connection_match *match) {
 	struct sfe_ipv4 *si = &__si;
-	struct sfe_ipv4_connection *c;
-	struct sfe_ipv4_5tuple *tuple = &msg->tuple;
 
-	this_cpu_inc(si->stats_pcpu->connection_destroy_requests64);
-	spin_lock_bh(&si->lock);
-
-	/*
-	 * Check to see if we have a flow that matches the rule we're trying
-	 * to destroy.  If there isn't then we can't destroy it.
-	 */
-	c = sfe_ipv4_find_connection(si, tuple->protocol, tuple->flow_ip, tuple->flow_ident,
-					      tuple->return_ip, tuple->return_ident);
-	if (!c) {
-		*original_dev = NULL;
-		*reply_dev = NULL;
-		spin_unlock_bh(&si->lock);
+	if (!match) {
+		DEBUG_TRACE("match connection does not exist\n");
 		return;
 	}
-
-	*flow_ip = ntohl(c->src_ip_xlate);
-	*flow_ident = ntohs(c->src_port_xlate);
-	*return_ip = ntohl(c->dest_ip_xlate);
-	*return_ident = ntohs(c->dest_port_xlate);
-	*original_dev = c->original_dev;
-	*reply_dev = c->reply_dev;
+	spin_lock_bh(&si->lock);
+	match->rfs_enabled = true;
 	spin_unlock_bh(&si->lock);
+	return;
+}
+
+/*
+ * sfe_ipv4_connection_rule_get()
+ *	Gets the pointer to the sfe connection corresponding to 5 tuple.
+ */
+struct sfe_ipv4_connection *sfe_ipv4_connection_rule_get_by_tuple(struct sfe_ipv4_5tuple *tuple) {
+	struct sfe_ipv4 *si = &__si;
+	struct sfe_ipv4_connection *c;
+
+	spin_lock_bh(&si->lock);
+	c = sfe_ipv4_find_connection(si, tuple->protocol, tuple->flow_ip, tuple->flow_ident, tuple->return_ip, tuple->return_ident);
+	if (!c) {
+		DEBUG_TRACE("connection does not exist - p: %d, s: %pI4:%u, d: %pI4:%u\n",
+			    tuple->protocol, &tuple->flow_ip, ntohs(tuple->flow_ident),
+			    &tuple->return_ip, ntohs(tuple->return_ident));
+	}
+	spin_unlock_bh(&si->lock);
+
+	return c;
 }
 #endif
 

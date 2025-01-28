@@ -25,6 +25,9 @@
 #define SFE_IPV4_DSCP_SHIFT 2
 #include <linux/version.h>
 #include <net/dst_cache.h>
+#if defined(SFE_RFS_SUPPORTED)
+#include <ppe_rfs.h>
+#endif
 
 /*
  * Size of single sfe_dump msg buffer
@@ -297,6 +300,17 @@ struct sfe_ipv4_connection_match {
 	bool sawf_valid;		/* Indicates mark has valid SAWF information */
 	bool ingress_trustsec_valid;	/* Indicates trustsec header is valid */
 	struct dst_cache dst_cache;     /* Destination route cache */
+
+#if defined(SFE_RFS_SUPPORTED)
+	bool rfs_enabled;		/* Stores information of RFS eligibility for the connection entry. */
+	u32 flow_mtu;			/* Store flow mtu to pass directly to RFS create rule. */
+	u32 return_mtu;			/* Store return mtu to pass directly to RFS create rule. */
+	s32 flow_interface_num;		/* Store namely interface number to pass directly to RFS create rule. */
+	s32 flow_top_interface_num;	/* Store namely interface number to pass directly to RFS create rule. */
+	s32 return_interface_num;	/* Store namely interface number to pass directly to RFS create rule. */
+	s32 return_top_interface_num;	/* Store namely interface number to pass directly to RFS create rule. */
+
+#endif
 };
 
 /*
@@ -566,8 +580,8 @@ bool sfe_ipv4_remove_connection(struct sfe_ipv4 *si, struct sfe_ipv4_connection 
 void sfe_ipv4_flush_connection(struct sfe_ipv4 *si, struct sfe_ipv4_connection *c, sfe_rule_sync_reason_t reason);
 void sfe_ipv4_sync_status(struct sfe_ipv4 *si, struct sfe_ipv4_connection *c, sfe_rule_sync_reason_t reason);
 #if defined(SFE_RFS_SUPPORTED)
-void sfe_ipv4_fill_connection_info(struct sfe_ipv4_rule_destroy_msg *msg, struct net_device **original_dev, struct net_device **reply_dev, uint32_t *flow_ip,
-				uint16_t *flow_ident, uint32_t *return_ip, uint16_t *return_ident);
+void sfe_ipv4_connection_rule_rfs_valid_set(struct sfe_ipv4_connection_match *match);
+struct sfe_ipv4_connection *sfe_ipv4_connection_rule_get_by_tuple(struct sfe_ipv4_5tuple *tuple);
 #endif
 struct sfe_ipv4_connection_match *
 sfe_ipv4_find_connection_match_rcu(struct sfe_ipv4 *si, struct net_device *dev, u8 protocol,
