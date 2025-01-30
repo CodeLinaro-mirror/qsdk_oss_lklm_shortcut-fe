@@ -132,7 +132,8 @@ struct sfe_ipv6_vlan_filter_connection_match {
 					/* Bridge Vlan passthrough enable */
 #define SFE_IPV6_CONNECTION_MATCH_FLAG_VXLAN_GPE (1<<27)
 					/* VXLAN-GPE flow */
-
+#define SFE_IPV6_CONNECTION_MATCH_FLAG_PPE_TUN_VP_VALID (1<<28)
+					/* TUN VP valid */
 /*
  * IPv6 multicast destination structure
  */
@@ -484,6 +485,7 @@ struct sfe_ipv6_stats {
 	u64 fragment_id_timeout64;	/*Number of fragment id timeouts. */
 	u64 fragment_exception64;	/*Number of fragment exception to host. */
 	u64 bridge_vlan_passthrough_forwarded64;	/* Number of IPV6 bridge vlan passthrough packets forwarded */
+	u64 ppe_tun_vp_tx64;				/* Number of IPV6 packets queued to PPE tunnel VP  */
 };
 
 /*

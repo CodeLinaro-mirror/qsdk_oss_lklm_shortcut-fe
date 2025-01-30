@@ -463,6 +463,7 @@ static void sfe_ipv4_update_summary_stats(struct sfe_ipv4 *si,  struct sfe_ipv4_
 		stats->pppoe_bridge_packets_3tuple_forwarded64 += s->pppoe_bridge_packets_3tuple_forwarded64;
 		stats->connection_create_requests_overflow64 += s->connection_create_requests_overflow64;
 		stats->bridge_vlan_passthrough_forwarded64 += s->bridge_vlan_passthrough_forwarded64;
+		stats->ppe_tun_vp_tx64 += s->ppe_tun_vp_tx64;
 	}
 
 }
@@ -2734,6 +2735,10 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 		original_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_SKIP_FRAG_OFFLOAD;
 	}
 
+	if (msg->rule_flags & SFE_RULE_CREATE_FLAG_FLOW_DEST_TUN_VP) {
+               original_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_PPE_TUN_VP_VALID;
+	}
+
 	original_cm->connection = c;
 	original_cm->counter_match = reply_cm;
 
@@ -3136,6 +3141,10 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	if (msg->valid_flags & SFE_RULE_CREATE_SKIP_FRAG_OFFLOAD_VALID) {
                 reply_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_SKIP_FRAG_OFFLOAD;
         }
+
+	if (msg->rule_flags & SFE_RULE_CREATE_FLAG_RETURN_DEST_TUN_VP) {
+               reply_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_PPE_TUN_VP_VALID;
+	}
 
 	reply_cm->connection = c;
 	reply_cm->counter_match = original_cm;
@@ -4463,7 +4472,8 @@ static int sfe_ipv4_debug_dev_read_stats(struct sfe_ipv4 *si, struct sfe_ipv4_de
 			      "pppoe_bridge_pkts_fwded=\"%llu\" "
 			      "pppoe_bridge_pkts_3tuple_fwded=\"%llu\" "
 			      "connection_create_requests_overflow64=\"%llu\" "
-			      "bridge_vlan_passthrough_forwarded64=\"%llu\" />\n",
+			      "bridge_vlan_passthrough_forwarded64=\"%llu\" />\n"
+			      "ppe_tun_vp_tx64 =\"%llu\" />\n",
 				num_conn,
 				stats.packets_dropped64,
 				stats.packets_fast_xmited64,
@@ -4483,7 +4493,8 @@ static int sfe_ipv4_debug_dev_read_stats(struct sfe_ipv4 *si, struct sfe_ipv4_de
 				stats.pppoe_bridge_packets_forwarded64,
 				stats.pppoe_bridge_packets_3tuple_forwarded64,
 				stats.connection_create_requests_overflow64,
-				stats.bridge_vlan_passthrough_forwarded64);
+				stats.bridge_vlan_passthrough_forwarded64,
+				stats.ppe_tun_vp_tx64);
 
         ws->msgp = ws->msg;
 
