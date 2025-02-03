@@ -1036,10 +1036,10 @@ void sfe_ipv6_flush_connection(struct sfe_ipv6 *si,
 		/*
 		 * Delete RFS rule in either direction if rfs is present in that direction.
 		 */
-		if (flow_match->rfs_enabled) {
+		if (flow_match && flow_match->rfs_enabled) {
 			sfe_destroy_ipv6_ppe_rfs_rule(flow_match);
 		}
-		if (return_match->rfs_enabled) {
+		if (return_match && return_match->rfs_enabled) {
 			sfe_destroy_ipv6_ppe_rfs_rule(return_match);
 		}
 	}
