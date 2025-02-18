@@ -462,7 +462,7 @@ static void sfe_ipv4_update_summary_stats(struct sfe_ipv4 *si,  struct sfe_ipv4_
 		stats->pppoe_bridge_packets_forwarded64 += s->pppoe_bridge_packets_forwarded64;
 		stats->pppoe_bridge_packets_3tuple_forwarded64 += s->pppoe_bridge_packets_3tuple_forwarded64;
 		stats->connection_create_requests_overflow64 += s->connection_create_requests_overflow64;
-		stats->bridge_vlan_passthorugh_forwarded64 += s->bridge_vlan_passthorugh_forwarded64;
+		stats->bridge_vlan_passthrough_forwarded64 += s->bridge_vlan_passthrough_forwarded64;
 	}
 
 }
@@ -4404,7 +4404,7 @@ static int sfe_ipv4_debug_dev_read_stats(struct sfe_ipv4 *si, struct sfe_ipv4_de
 			      "pppoe_bridge_pkts_fwded=\"%llu\" "
 			      "pppoe_bridge_pkts_3tuple_fwded=\"%llu\" "
 			      "connection_create_requests_overflow64=\"%llu\" "
-			      "bridge_vlan_passthorugh_forwarded64=\"%llu\" />\n",
+			      "bridge_vlan_passthrough_forwarded64=\"%llu\" />\n",
 				num_conn,
 				stats.packets_dropped64,
 				stats.packets_fast_xmited64,
@@ -4424,7 +4424,7 @@ static int sfe_ipv4_debug_dev_read_stats(struct sfe_ipv4 *si, struct sfe_ipv4_de
 				stats.pppoe_bridge_packets_forwarded64,
 				stats.pppoe_bridge_packets_3tuple_forwarded64,
 				stats.connection_create_requests_overflow64,
-				stats.bridge_vlan_passthorugh_forwarded64);
+				stats.bridge_vlan_passthrough_forwarded64);
 
         ws->msgp = ws->msg;
 

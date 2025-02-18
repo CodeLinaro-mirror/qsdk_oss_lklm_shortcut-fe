@@ -3,7 +3,7 @@
  *	Shortcut forwarding engine header file for IPv6.
  *
  * Copyright (c) 2015-2016, 2019-2020, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2025 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -469,7 +469,7 @@ struct sfe_ipv6_stats {
 	u64 fragment_dropped64;		/*Number of fragments dropped. */
 	u64 fragment_id_timeout64;	/*Number of fragment id timeouts. */
 	u64 fragment_exception64;	/*Number of fragment exception to host. */
-	u64 bridge_vlan_passthorugh_forwarded64;	/* Number of IPV6 bridge vlan passthrough packets forwarded */
+	u64 bridge_vlan_passthrough_forwarded64;	/* Number of IPV6 bridge vlan passthrough packets forwarded */
 };
 
 /*

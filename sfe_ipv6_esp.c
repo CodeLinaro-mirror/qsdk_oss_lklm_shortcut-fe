@@ -2,7 +2,7 @@
  * sfe_ipv6_esp.c
  *	Shortcut forwarding engine - IPv6 ESP implementation
  *
- * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2023, 2025 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -143,7 +143,7 @@ int sfe_ipv6_recv_esp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 		}
 
 		vlan_passthrough = true;
-		this_cpu_inc(si->stats_pcpu->bridge_vlan_passthorugh_forwarded64);
+		this_cpu_inc(si->stats_pcpu->bridge_vlan_passthrough_forwarded64);
 	}
 
 	/*
