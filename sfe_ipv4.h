@@ -3,7 +3,7 @@
  *	Shortcut forwarding engine header file for IPv4.
  *
  * Copyright (c) 2013-2016, 2019-2020, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2025 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -455,7 +455,7 @@ struct sfe_ipv4_stats {
 	u64 pppoe_bridge_packets_forwarded64;	/* Number of IPv4 PPPoE bridge packets forwarded */
 	u64 pppoe_bridge_packets_3tuple_forwarded64;    /* Number of IPv4 PPPoE bridge packets forwarded based on 3-tuple info */
 	u64 connection_create_requests_overflow64;	/* Number of IPV4 connection create requests after reaching max limit */
-	u64 bridge_vlan_passthorugh_forwarded64;	/* Number of IPV4 bridge vlan passthrough packets forwarded */
+	u64 bridge_vlan_passthrough_forwarded64;	/* Number of IPV4 bridge vlan passthrough packets forwarded */
 };
 
 /*

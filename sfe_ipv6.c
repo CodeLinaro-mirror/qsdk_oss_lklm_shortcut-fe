@@ -480,7 +480,7 @@ static void sfe_ipv6_update_summary_stats(struct sfe_ipv6 *si, struct sfe_ipv6_s
 		stats->fragment_dropped64 += s->fragment_dropped64;
 		stats->fragment_id_timeout64 += s->fragment_id_timeout64;
 		stats->fragment_exception64 += s->fragment_exception64;
-		stats->bridge_vlan_passthorugh_forwarded64 += s->bridge_vlan_passthorugh_forwarded64;
+		stats->bridge_vlan_passthrough_forwarded64 += s->bridge_vlan_passthrough_forwarded64;
 	}
 }
 
@@ -4124,7 +4124,7 @@ static int sfe_ipv6_debug_dev_read_stats(struct sfe_ipv6 *si, struct sfe_ipv6_de
 			      "fragments_dropped=\"%llu\" "
 			      "fragment_id_timeout=\"%llu\" "
 			      "fragments_exception=\"%llu\" "
-			      "bridge_vlan_passthorugh_forwarded64=\"%llu\" />\n",
+			      "bridge_vlan_passthrough_forwarded64=\"%llu\" />\n",
 				num_conn,
 				stats.packets_dropped64,
 				stats.packets_fast_xmited64,
@@ -4152,7 +4152,7 @@ static int sfe_ipv6_debug_dev_read_stats(struct sfe_ipv6 *si, struct sfe_ipv6_de
 				stats.fragment_dropped64,
 				stats.fragment_id_timeout64,
 				stats.fragment_exception64,
-				stats.bridge_vlan_passthorugh_forwarded64);
+				stats.bridge_vlan_passthrough_forwarded64);
 
 	ws->msgp = ws->msg;
 
