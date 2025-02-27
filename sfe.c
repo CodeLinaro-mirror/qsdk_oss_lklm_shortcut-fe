@@ -980,11 +980,13 @@ enum sfe_cmn_response sfe_create_ipv4_mc_rule_msg(struct sfe_ctx_instance_intern
 	struct net_device *src_dev = NULL;
 	enum sfe_cmn_response ret = SFE_CMN_RESPONSE_ACK;
 	bool is_routed = true;
+	sfe_response_t sfe_response = SFE_RET_SUCCESS;
 
 	if (!(msg->msg.rule_create.valid_flags & SFE_RULE_CREATE_CONN_VALID)) {
 		DEBUG_TRACE("%p: SFE_RULE_CREATE_CONN_VALID \n", msg);
 		ret = SFE_CMN_RESPONSE_EMSG;
 		sfe_incr_exceptions(SFE_EXCEPTION_CONNECTION_INVALID);
+		msg->cm.error = SFE_RET_EXCEPTION_CONNECTION_INVALID;
 		goto failed_ret;
 	}
 
@@ -995,6 +997,7 @@ enum sfe_cmn_response sfe_create_ipv4_mc_rule_msg(struct sfe_ctx_instance_intern
 		if (!sfe_is_l2_feature_enabled()) {
 			ret = SFE_CMN_RESPONSE_EINTERFACE;
 			sfe_incr_exceptions(SFE_EXCEPTION_NOT_SUPPORT_BRIDGE);
+			msg->cm.error = SFE_RET_EXCEPTION_NOT_SUPPORT_BRIDGE;
 			goto failed_ret;
 		}
 		is_routed = false;
@@ -1009,12 +1012,14 @@ enum sfe_cmn_response sfe_create_ipv4_mc_rule_msg(struct sfe_ctx_instance_intern
 		}
 		ret = SFE_CMN_RESPONSE_EINTERFACE;
 		sfe_incr_exceptions(SFE_EXCEPTION_SRC_DEV_NOT_L3);
+		msg->cm.error = SFE_RET_EXCEPTION_SRC_DEV_NOT_L3;
 		goto failed_ret;
 	}
 
 	DEBUG_TRACE("%p: Received a MC create rule msg\n", msg);
 
-	if (!sfe_ipv4_create_mc_rule(&msg->msg.mc_rule_create)) {
+	sfe_response = sfe_ipv4_create_mc_rule(&msg->msg.mc_rule_create);
+	if (sfe_response == SFE_RET_SUCCESS) {
 		/* success */
 		ret = SFE_CMN_RESPONSE_ACK;
 #if defined(SFE_RFS_SUPPORTED)
@@ -1039,6 +1044,7 @@ enum sfe_cmn_response sfe_create_ipv4_mc_rule_msg(struct sfe_ctx_instance_intern
 		/* Failed */
 		ret = SFE_CMN_RESPONSE_EMSG;
 		sfe_incr_exceptions(SFE_EXCEPTION_CREATE_FAILED);
+		msg->cm.error = sfe_response;
 	}
 
 
@@ -1066,11 +1072,13 @@ enum sfe_cmn_response sfe_create_ipv4_rule_msg(struct sfe_ctx_instance_internal 
 	enum sfe_cmn_response ret = SFE_CMN_RESPONSE_ACK;
 	bool is_routed = true;
 	bool cfg_err;
+	sfe_response_t sfe_response = SFE_RET_SUCCESS;
 
 
 	if (!(msg->msg.rule_create.valid_flags & SFE_RULE_CREATE_CONN_VALID)) {
 		ret = SFE_CMN_RESPONSE_EMSG;
 		sfe_incr_exceptions(SFE_EXCEPTION_CONNECTION_INVALID);
+		msg->cm.error = SFE_RET_EXCEPTION_CONNECTION_INVALID;
 		goto failed_ret;
 	}
 
@@ -1079,6 +1087,7 @@ enum sfe_cmn_response sfe_create_ipv4_rule_msg(struct sfe_ctx_instance_internal 
 		if (!(msg->msg.rule_create.valid_flags & SFE_RULE_CREATE_TCP_VALID)) {
 			ret = SFE_CMN_RESPONSE_EMSG;
 			sfe_incr_exceptions(SFE_EXCEPTION_TCP_INVALID);
+			msg->cm.error = SFE_RET_EXCEPTION_TCP_INVALID;
 			goto failed_ret;
 		}
 		break;
@@ -1097,6 +1106,7 @@ enum sfe_cmn_response sfe_create_ipv4_rule_msg(struct sfe_ctx_instance_internal 
 	default:
 		ret = SFE_CMN_RESPONSE_EMSG;
 		sfe_incr_exceptions(SFE_EXCEPTION_PROTOCOL_NOT_SUPPORT);
+		msg->cm.error = SFE_RET_EXCEPTION_PROTOCOL_NOT_SUPPORT;
 		goto failed_ret;
 	}
 
@@ -1107,6 +1117,7 @@ enum sfe_cmn_response sfe_create_ipv4_rule_msg(struct sfe_ctx_instance_internal 
 		if (!sfe_is_l2_feature_enabled()) {
 			ret = SFE_CMN_RESPONSE_EINTERFACE;
 			sfe_incr_exceptions(SFE_EXCEPTION_NOT_SUPPORT_BRIDGE);
+			msg->cm.error = SFE_RET_EXCEPTION_NOT_SUPPORT_BRIDGE;
 			goto failed_ret;
 		}
 
@@ -1120,6 +1131,7 @@ enum sfe_cmn_response sfe_create_ipv4_rule_msg(struct sfe_ctx_instance_internal 
 	if (!src_dev || !sfe_routed_dev_allow(src_dev, is_routed, true)) {
 		ret = SFE_CMN_RESPONSE_EINTERFACE;
 		sfe_incr_exceptions(SFE_EXCEPTION_SRC_DEV_NOT_L3);
+		msg->cm.error = SFE_RET_EXCEPTION_SRC_DEV_NOT_L3;
 		goto failed_ret;
 	}
 
@@ -1130,6 +1142,7 @@ enum sfe_cmn_response sfe_create_ipv4_rule_msg(struct sfe_ctx_instance_internal 
 	if (cfg_err) {
 		ret = SFE_CMN_RESPONSE_EMSG;
 		sfe_incr_exceptions(SFE_EXCEPTION_CFG_ERR);
+		msg->cm.error = SFE_RET_EXCEPTION_CFG_ERR;
 		goto failed_ret;
 	}
 
@@ -1140,6 +1153,7 @@ enum sfe_cmn_response sfe_create_ipv4_rule_msg(struct sfe_ctx_instance_internal 
 	if (!dest_dev || !sfe_routed_dev_allow(dest_dev, is_routed, true)) {
 		ret = SFE_CMN_RESPONSE_EINTERFACE;
 		sfe_incr_exceptions(SFE_EXCEPTION_DEST_DEV_NOT_L3);
+		msg->cm.error = SFE_RET_EXCEPTION_DEST_DEV_NOT_L3;
 		goto failed_ret;
 	}
 
@@ -1150,10 +1164,12 @@ enum sfe_cmn_response sfe_create_ipv4_rule_msg(struct sfe_ctx_instance_internal 
 	if (cfg_err) {
 		ret = SFE_CMN_RESPONSE_EMSG;
 		sfe_incr_exceptions(SFE_EXCEPTION_CFG_ERR);
+		msg->cm.error = SFE_RET_EXCEPTION_CFG_ERR;
 		goto failed_ret;
 	}
 
-	if (!sfe_ipv4_create_rule(&msg->msg.rule_create)) {
+	sfe_response = sfe_ipv4_create_rule(&msg->msg.rule_create);
+	if (sfe_response == SFE_RET_SUCCESS) {
 		/* success */
 		ret = SFE_CMN_RESPONSE_ACK;
 #if defined(SFE_RFS_SUPPORTED)
@@ -1187,6 +1203,7 @@ enum sfe_cmn_response sfe_create_ipv4_rule_msg(struct sfe_ctx_instance_internal 
 		/* Failed */
 		ret = SFE_CMN_RESPONSE_EMSG;
 		sfe_incr_exceptions(SFE_EXCEPTION_CREATE_FAILED);
+		msg->cm.error = sfe_response;
 	}
 
 	/*
@@ -1298,6 +1315,7 @@ sfe_tx_status_t sfe_sync_ipv4_stats_many_msg(struct sfe_ctx_instance_internal *s
 	if (sfe_ipv4_sync_invoke(nicsm->index)) {
 		return SFE_TX_SUCCESS;
 	}
+	msg->cm.error = SFE_RET_TX_FAILURE;
 	return SFE_TX_FAILURE;
 }
 
@@ -1322,6 +1340,7 @@ sfe_tx_status_t sfe_ipv4_tx(struct sfe_ctx_instance *sfe_ctx, struct sfe_ipv4_ms
 	response = sfe_alloc_response_msg(SFE_MSG_TYPE_IPV4, msg);
 	if (!response) {
 		sfe_incr_exceptions(SFE_EXCEPTION_ENQUEUE_FAILED);
+		msg->cm.error = SFE_RET_EXCEPTION_ENQUEUE_FAILED;
 		return SFE_TX_FAILURE_QUEUE;
 	}
 
@@ -1650,10 +1669,12 @@ enum sfe_cmn_response sfe_create_ipv6_mc_rule_msg(struct sfe_ctx_instance_intern
 	enum sfe_cmn_response ret = SFE_CMN_RESPONSE_ACK;
 	bool is_routed = true;
 	bool cfg_err;
+	sfe_response_t sfe_response = SFE_RET_SUCCESS;
 
 	if (!(msg->msg.rule_create.valid_flags & SFE_RULE_CREATE_CONN_VALID)) {
 		ret = SFE_CMN_RESPONSE_EMSG;
 		sfe_incr_exceptions(SFE_EXCEPTION_CONNECTION_INVALID);
+		msg->cm.error = SFE_RET_EXCEPTION_CONNECTION_INVALID;
 		goto failed_ret;
 	}
 
@@ -1664,6 +1685,7 @@ enum sfe_cmn_response sfe_create_ipv6_mc_rule_msg(struct sfe_ctx_instance_intern
 		if (!sfe_is_l2_feature_enabled()) {
 			ret = SFE_CMN_RESPONSE_EINTERFACE;
 			sfe_incr_exceptions(SFE_EXCEPTION_NOT_SUPPORT_BRIDGE);
+			msg->cm.error = SFE_RET_EXCEPTION_NOT_SUPPORT_BRIDGE;
 			goto failed_ret;
 		}
 		is_routed = false;
@@ -1676,6 +1698,7 @@ enum sfe_cmn_response sfe_create_ipv6_mc_rule_msg(struct sfe_ctx_instance_intern
 	if (!src_dev || !sfe_routed_dev_allow(src_dev, is_routed, false)) {
 		ret = SFE_CMN_RESPONSE_EINTERFACE;
 		sfe_incr_exceptions(SFE_EXCEPTION_SRC_DEV_NOT_L3);
+		msg->cm.error = SFE_RET_EXCEPTION_SRC_DEV_NOT_L3;
 		goto failed_ret;
 	}
 
@@ -1686,10 +1709,12 @@ enum sfe_cmn_response sfe_create_ipv6_mc_rule_msg(struct sfe_ctx_instance_intern
 	if (cfg_err) {
 		ret = SFE_CMN_RESPONSE_EMSG;
 		sfe_incr_exceptions(SFE_EXCEPTION_CFG_ERR);
+		msg->cm.error = SFE_RET_EXCEPTION_CFG_ERR;
 		goto failed_ret;
 	}
 
-	if (!sfe_ipv6_create_mc_rule(&msg->msg.mc_rule_create)) {
+	sfe_response = sfe_ipv6_create_mc_rule(&msg->msg.mc_rule_create);
+	if (sfe_response == SFE_RET_SUCCESS) {
 		/* SFE success */
 		ret = SFE_CMN_RESPONSE_ACK;
 #if defined(SFE_RFS_SUPPORTED)
@@ -1713,6 +1738,7 @@ enum sfe_cmn_response sfe_create_ipv6_mc_rule_msg(struct sfe_ctx_instance_intern
 		/* Failed */
 		ret = SFE_CMN_RESPONSE_EMSG;
 		sfe_incr_exceptions(SFE_EXCEPTION_CREATE_FAILED);
+		msg->cm.error = sfe_response;
 	}
 
 	/*
@@ -1782,10 +1808,12 @@ enum sfe_cmn_response sfe_create_ipv6_rule_msg(struct sfe_ctx_instance_internal 
 	enum sfe_cmn_response ret = SFE_CMN_RESPONSE_ACK;
 	bool is_routed = true;
 	bool cfg_err;
+	sfe_response_t sfe_response = SFE_RET_SUCCESS;
 
 	if (!(msg->msg.rule_create.valid_flags & SFE_RULE_CREATE_CONN_VALID)) {
 		ret = SFE_CMN_RESPONSE_EMSG;
 		sfe_incr_exceptions(SFE_EXCEPTION_CONNECTION_INVALID);
+		msg->cm.error = SFE_RET_EXCEPTION_CONNECTION_INVALID;
 		goto failed_ret;
 	}
 
@@ -1796,6 +1824,7 @@ enum sfe_cmn_response sfe_create_ipv6_rule_msg(struct sfe_ctx_instance_internal 
 		if (!sfe_is_l2_feature_enabled()) {
 			ret = SFE_CMN_RESPONSE_EINTERFACE;
 			sfe_incr_exceptions(SFE_EXCEPTION_NOT_SUPPORT_BRIDGE);
+			msg->cm.error = SFE_RET_EXCEPTION_NOT_SUPPORT_BRIDGE;
 			goto failed_ret;
 		}
 		is_routed = false;
@@ -1807,6 +1836,7 @@ enum sfe_cmn_response sfe_create_ipv6_rule_msg(struct sfe_ctx_instance_internal 
 		if (!(msg->msg.rule_create.valid_flags & SFE_RULE_CREATE_TCP_VALID)) {
 			ret = SFE_CMN_RESPONSE_EMSG;
 			sfe_incr_exceptions(SFE_EXCEPTION_TCP_INVALID);
+			msg->cm.error = SFE_RET_EXCEPTION_TCP_INVALID;
 			goto failed_ret;
 		}
 
@@ -1827,6 +1857,7 @@ enum sfe_cmn_response sfe_create_ipv6_rule_msg(struct sfe_ctx_instance_internal 
 	default:
 		ret = SFE_CMN_RESPONSE_EMSG;
 		sfe_incr_exceptions(SFE_EXCEPTION_PROTOCOL_NOT_SUPPORT);
+		msg->cm.error = SFE_RET_EXCEPTION_PROTOCOL_NOT_SUPPORT;
 		goto failed_ret;
 	}
 
@@ -1837,6 +1868,7 @@ enum sfe_cmn_response sfe_create_ipv6_rule_msg(struct sfe_ctx_instance_internal 
 	if (!src_dev || !sfe_routed_dev_allow(src_dev, is_routed, false)) {
 		ret = SFE_CMN_RESPONSE_EINTERFACE;
 		sfe_incr_exceptions(SFE_EXCEPTION_SRC_DEV_NOT_L3);
+		msg->cm.error = SFE_RET_EXCEPTION_SRC_DEV_NOT_L3;
 		goto failed_ret;
 	}
 
@@ -1847,6 +1879,7 @@ enum sfe_cmn_response sfe_create_ipv6_rule_msg(struct sfe_ctx_instance_internal 
 	if (cfg_err) {
 		ret = SFE_CMN_RESPONSE_EMSG;
 		sfe_incr_exceptions(SFE_EXCEPTION_CFG_ERR);
+		msg->cm.error = SFE_RET_EXCEPTION_CFG_ERR;
 		goto failed_ret;
 	}
 
@@ -1857,6 +1890,7 @@ enum sfe_cmn_response sfe_create_ipv6_rule_msg(struct sfe_ctx_instance_internal 
 	if (!dest_dev || !sfe_routed_dev_allow(dest_dev, is_routed, false)) {
 		ret = SFE_CMN_RESPONSE_EINTERFACE;
 		sfe_incr_exceptions(SFE_EXCEPTION_DEST_DEV_NOT_L3);
+		msg->cm.error = SFE_RET_EXCEPTION_DEST_DEV_NOT_L3;
 		goto failed_ret;
 	}
 
@@ -1867,10 +1901,12 @@ enum sfe_cmn_response sfe_create_ipv6_rule_msg(struct sfe_ctx_instance_internal 
 	if (cfg_err) {
 		ret = SFE_CMN_RESPONSE_EMSG;
 		sfe_incr_exceptions(SFE_EXCEPTION_CFG_ERR);
+		msg->cm.error = SFE_RET_EXCEPTION_CFG_ERR;
 		goto failed_ret;
 	}
 
-	if (!sfe_ipv6_create_rule(&msg->msg.rule_create)) {
+	sfe_response = sfe_ipv6_create_rule(&msg->msg.rule_create);
+	if (sfe_response == SFE_RET_SUCCESS) {
 		/* SFE success */
 		ret = SFE_CMN_RESPONSE_ACK;
 #if defined(SFE_RFS_SUPPORTED)
@@ -1904,6 +1940,7 @@ enum sfe_cmn_response sfe_create_ipv6_rule_msg(struct sfe_ctx_instance_internal 
 		/* Failed */
 		ret = SFE_CMN_RESPONSE_EMSG;
 		sfe_incr_exceptions(SFE_EXCEPTION_CREATE_FAILED);
+		msg->cm.error = sfe_response;
 	}
 
 	/*
@@ -2015,6 +2052,7 @@ sfe_tx_status_t sfe_sync_ipv6_stats_many_msg(struct sfe_ctx_instance_internal *s
 	if (sfe_ipv6_sync_invoke(nicsm->index)) {
 		return SFE_TX_SUCCESS;
 	}
+	msg->cm.error = SFE_RET_TX_FAILURE;
 	return SFE_TX_FAILURE;
 }
 
@@ -2039,6 +2077,7 @@ sfe_tx_status_t sfe_ipv6_tx(struct sfe_ctx_instance *sfe_ctx, struct sfe_ipv6_ms
 	response = sfe_alloc_response_msg(SFE_MSG_TYPE_IPV6, msg);
 	if (!response) {
 		sfe_incr_exceptions(SFE_EXCEPTION_ENQUEUE_FAILED);
+		msg->cm.error = SFE_RET_EXCEPTION_ENQUEUE_FAILED;
 		return SFE_TX_FAILURE_QUEUE;
 	}
 
