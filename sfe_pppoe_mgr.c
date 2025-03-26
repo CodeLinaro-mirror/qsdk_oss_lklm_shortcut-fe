@@ -58,13 +58,13 @@ static bool sfe_pppoe_mgr_get_session_info(struct net_device *dev, struct pppoe_
 		ppp_release_channels(channel, 1);
 		return false;
 	}
-
+#ifdef SFE_SUPPORT_PPPOE
 	if (pppoe_channel_addressing_get(channel[0], addressing)) {
 		DEBUG_WARN("%s: failed to get addressing information\n", dev->name);
 		ppp_release_channels(channel, 1);
 		return false;
 	}
-
+#endif
 	DEBUG_TRACE("dev=%px %s %d: opt_dev=%px opt_dev_name=%s opt_dev_ifindex=%d opt_ifindex=%d\n",
 			dev, dev->name, dev->ifindex,
 			addressing->dev, addressing->dev->name, addressing->dev->ifindex, addressing->ifindex);
@@ -73,7 +73,9 @@ static bool sfe_pppoe_mgr_get_session_info(struct net_device *dev, struct pppoe_
 	 * pppoe_channel_addressing_get returns held device.
 	 * So, put it back here.
 	 */
+#ifdef SFE_SUPPORT_PPPOE
 	dev_put(addressing->dev);
+#endif
 	ppp_release_channels(channel, 1);
 	return true;
 }
