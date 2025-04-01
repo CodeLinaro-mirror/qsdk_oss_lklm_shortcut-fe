@@ -90,39 +90,13 @@
  *   skb->vlan_tci = 0
  *   l2_info->vlan_hdr_cnt = 0
  *   l2_info->protocol = ETH_P_IP
- *
- * case 4: VLAN based DSA frame(eg: the tag is 81000c01):
- * When entering this function:
- * ----+-----------------+-----|-----+-----+---------
- *     |DMAC    |SMAC    |81|00|0c|01|08|00|45|00|
- * ----+-----------------+-----A-----+-----+---------
- *                            skb->data
- *   skb->protocol = ntohs(ETH_P_XDSA)
- *   skb->vlan_proto = 0
- *   skb->vlan_tci = 0
- * When exiting:
- * ----+-----------------+-----------+-----+---------
- *     |DMAC    |SMAC    |81|00|0c|01|08|00|45|00|
- * ----+-----------------+-----------+-----A---------
- *                                        skb->data
- *   skb->protocol = ntohs(ETH_P_IP)
- *   skb->vlan_proto = 0
- *   skb->vlan_tci = 0
- *   l2_info->vlan_hdr_cnt = 1
- *   l2_info->vlan_hdr[0].tpid = ntohs(ETH_P_XDSA)
- *   l2_info->vlan_hdr[0].tci = 0x0c01
- *   l2_info->protocol = ETH_P_IP
- *
  */
 static inline bool sfe_vlan_check_and_parse_tag(struct sk_buff *skb, struct sfe_l2_info *l2_info)
 {
 	struct vlan_hdr *vhdr;
 
-	while ((skb->protocol == htons(ETH_P_8021AD) || skb->protocol == htons(ETH_P_8021Q)
-#ifdef SFE_DSA_ACCEL_ENABLE
-				|| skb->protocol == htons(ETH_P_XDSA)
-#endif
-				) && l2_info->vlan_hdr_cnt < SFE_MAX_VLAN_DEPTH) {
+	while ((skb->protocol == htons(ETH_P_8021AD) || skb->protocol == htons(ETH_P_8021Q)) &&
+			l2_info->vlan_hdr_cnt < SFE_MAX_VLAN_DEPTH) {
 		if (unlikely(!pskb_may_pull(skb, VLAN_HLEN))) {
 			return false;
 		}
@@ -261,19 +235,7 @@ static inline bool sfe_vlan_validate_ingress_tag(
 	}
 
 	for (i = 0; i < l2_info->vlan_hdr_cnt; i++) {
-		/*
-		 * VLAN tpid in the packet:
-		 * 1. Should be same as the configured tpid in the connection rule. OR
-		 * 2. Should be equal to ETH_P_XDSA. This is so because, at ingress skb->protocol
-		 * is set to ETH_P_XDSA, but packet has 8021Q vlan hdr.
-		 * And in case we have to exception to host, it should reset back 8021Q hdr
-		 * in the packet, and skb->protocol as ETH_P_XDSA.
-		 */
-		if (unlikely((vlan_hdr[i].tpid != l2_info->vlan_hdr[i].tpid))
-#ifdef SFE_DSA_ACCEL_ENABLE
-				&& l2_info->vlan_hdr[i].tpid != ntohs(ETH_P_XDSA)
-#endif
-				) {
+		if (unlikely(vlan_hdr[i].tpid != l2_info->vlan_hdr[i].tpid)) {
 			return false;
 		}
 
