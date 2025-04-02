@@ -1,0 +1,33 @@
+load("//build/kernel/kleaf:kernel.bzl", "ddk_headers")
+
+package(
+    default_visibility = [
+        "//visibility:public",
+    ],
+)
+
+# DDK Headers for SFE
+ddk_headers(
+    name = "sfe_headers",
+    hdrs = glob([
+        "sfe_debug.h",
+        "sfe_flow_cookie.h",
+        "sfe.h",
+        "sfe_ipv4_*.h",  # All IPv4-related headers
+        "sfe_ipv6_*.h",  # All IPv6-related headers
+        "sfe_pppoe*.h",  # All PPPoE-related headers
+        "sfe_vlan.h",    # VLAN-related headers
+        "sfe_*.h", # Any other SFE-related headers
+	"exports/sfe_api.h",
+    ]),
+    includes = [
+        ".",  # Current directory
+	"exports",  # Correct relative path
+    ],
+)
+
+load(":define_modules.bzl", "define_qca_nss_sfe")
+
+# Define modules for sfe directory check
+define_qca_nss_sfe()
+
