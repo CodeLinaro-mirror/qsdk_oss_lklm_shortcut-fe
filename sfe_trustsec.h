@@ -47,12 +47,12 @@ static inline bool sfe_trustsec_check_and_parse_sgt(struct sk_buff *skb, struct 
 		return false;
 	}
 
-	if (thdr->meta_hdr_ver != TRUSTSEC_META_HDR_VERSION) {
+	if (thdr->meta_hdr_ver != TRUSTSEC_HDR_VERSION) {
 		DEBUG_TRACE("%px: version: %u is different than supported one\n", skb, thdr->meta_hdr_ver);
 		return false;
 	}
 
-	if (thdr->meta_hdr_len != TRUSTSEC_META_HDR_LEN) {
+	if (thdr->meta_hdr_len != TRUSTSEC_HDR_LEN) {
 		DEBUG_TRACE("%px: trustsec header length: %u is different than supported one\n",
 											skb, thdr->meta_hdr_len);
 		return false;
