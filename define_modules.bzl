@@ -61,7 +61,7 @@ def _define_modules(target, variant):
             "-DSFE_BRIDGE_VLAN_FILTERING_ENABLE=1",
             #"-DSFE_IPSEC_ENABLE=1",
             #"-DSFE_GRE_ENABLE=1",
-            "-DSFE_DSLLITE_ENABLE=1",
+            #"-DSFE_DSLLITE_ENABLE=1",
 	    "-Wno-parentheses-equality",
 	    "-Wno-strict-prototypes",     # Suppress strict prototypes warning
 	    "-Wno-uninitialized",         # Suppress uninitialized variable warning
