@@ -355,7 +355,8 @@ int sfe_ipv4_recv_udp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 	 * If our packet is larger than the fragment threshold / MTU of the transmit interface then
 	 * it has to be fragmented.
 	 */
-	if (unlikely((len > cm->xmit_dev_mtu) && (!cm->up))) {
+	DEBUG_TRACE("skb_len = %u, MTU = %u, skb_is_gso = %d\n", len, cm->xmit_dev_mtu, skb_is_gso(skb));
+	if (unlikely((len > cm->xmit_dev_mtu) && (!cm->up) && !skb_is_gso(skb))) {
 		/*
 		 * TODO: Use threshold packet size if specified.
 		 */
