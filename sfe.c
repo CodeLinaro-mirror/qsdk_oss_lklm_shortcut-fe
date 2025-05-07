@@ -2282,6 +2282,10 @@ int sfe_recv(struct sk_buff *skb)
 		DEBUG_TRACE("No need to further progress MAP packets: %s skb=%px\n", dev->name, skb);
 		return 0;
 
+	case ETH_P_XDSA:
+		DEBUG_TRACE("No need to further progress DSA packets: %s skb=%px\n", dev->name, skb);
+		return 0;
+
 	default:
 		break;
 	}
