@@ -1018,13 +1018,18 @@ enum sfe_cmn_response sfe_create_ipv4_mc_rule_msg(struct sfe_ctx_instance_intern
 		/* success */
 		ret = SFE_CMN_RESPONSE_ACK;
 #if defined(SFE_RFS_SUPPORTED)
-                struct sfe_ipv4_connection *conn = sfe_ipv4_connection_rule_get_by_tuple(&msg->msg.mc_rule_create.tuple);
-                struct sfe_ipv4_connection_match *flow_match = conn->original_match;
+                struct sfe_ipv4_connection *conn;
+                struct sfe_ipv4_connection_match *flow_match;
 		s32 flow_interface_num = msg->msg.rule_create.conn_rule.flow_interface_num;
 		s32 return_interface_num = msg->msg.rule_create.conn_rule.return_interface_num;
 		u32 return_qos_tag = 0;
 		bool is_mcast = true;
 
+		conn = sfe_ipv4_connection_rule_get_by_tuple(&msg->msg.mc_rule_create.tuple);
+		if (!conn) {
+			goto failed_ret;
+		}
+		flow_match = conn->original_match;
 
 		if (sfe_is_ppe_rfs_feature_enabled()) {
 			if (ppe_rfs_rule_eligible_get(flow_interface_num, return_interface_num, is_mcast)) {
@@ -1040,7 +1045,6 @@ enum sfe_cmn_response sfe_create_ipv4_mc_rule_msg(struct sfe_ctx_instance_intern
 		ret = SFE_CMN_RESPONSE_EMSG;
 		sfe_incr_exceptions(SFE_EXCEPTION_CREATE_FAILED);
 	}
-
 
 failed_ret:
 	if (src_dev) {
@@ -1158,12 +1162,18 @@ enum sfe_cmn_response sfe_create_ipv4_rule_msg(struct sfe_ctx_instance_internal 
 		ret = SFE_CMN_RESPONSE_ACK;
 #if defined(SFE_RFS_SUPPORTED)
 		if (sfe_is_ppe_rfs_feature_enabled()) {
-			struct sfe_ipv4_connection *conn = sfe_ipv4_connection_rule_get_by_tuple(&msg->msg.rule_create.tuple);
-			struct sfe_ipv4_connection_match *flow_match = conn->original_match;
-			struct sfe_ipv4_connection_match *return_match = conn->reply_match;
+			struct sfe_ipv4_connection *conn;
+			struct sfe_ipv4_connection_match *flow_match, *return_match;
 			s32 flow_interface_num = msg->msg.rule_create.conn_rule.flow_interface_num;
 			s32 return_interface_num = msg->msg.rule_create.conn_rule.return_interface_num;
 			bool is_mcast = false;
+
+			conn = sfe_ipv4_connection_rule_get_by_tuple(&msg->msg.rule_create.tuple);
+			if (!conn) {
+				goto failed_ret;
+			}
+			flow_match = conn->original_match;
+			return_match = conn->reply_match;
 
 			/*
 			 * Push RFS rule in either direction if rfs is eligible in that direction.
@@ -1693,12 +1703,18 @@ enum sfe_cmn_response sfe_create_ipv6_mc_rule_msg(struct sfe_ctx_instance_intern
 		/* SFE success */
 		ret = SFE_CMN_RESPONSE_ACK;
 #if defined(SFE_RFS_SUPPORTED)
-                struct sfe_ipv6_connection *conn = sfe_ipv6_connection_rule_get_by_tuple(&msg->msg.mc_rule_create.tuple);
-                struct sfe_ipv6_connection_match *flow_match = conn->original_match;
+                struct sfe_ipv6_connection *conn;
+                struct sfe_ipv6_connection_match *flow_match;
 		s32 flow_interface_num = msg->msg.rule_create.conn_rule.flow_interface_num;
 		s32 return_interface_num = msg->msg.rule_create.conn_rule.return_interface_num;
 		u32 return_qos_tag = 0;
 		bool is_mcast = true;
+
+		conn = sfe_ipv6_connection_rule_get_by_tuple(&msg->msg.mc_rule_create.tuple);
+		if (!conn) {
+			goto failed_ret;
+		}
+		flow_match = conn->original_match;
 
 		if (sfe_is_ppe_rfs_feature_enabled()) {
 			if (ppe_rfs_rule_eligible_get(flow_interface_num, return_interface_num, is_mcast)) {
@@ -1875,12 +1891,18 @@ enum sfe_cmn_response sfe_create_ipv6_rule_msg(struct sfe_ctx_instance_internal 
 		ret = SFE_CMN_RESPONSE_ACK;
 #if defined(SFE_RFS_SUPPORTED)
 		if (sfe_is_ppe_rfs_feature_enabled()) {
-			struct sfe_ipv6_connection *conn = sfe_ipv6_connection_rule_get_by_tuple(&msg->msg.rule_create.tuple);
-			struct sfe_ipv6_connection_match *flow_match = conn->original_match;
-			struct sfe_ipv6_connection_match *return_match = conn->reply_match;
+			struct sfe_ipv6_connection *conn;
+			struct sfe_ipv6_connection_match *flow_match, *return_match;
 			s32 flow_interface_num = msg->msg.rule_create.conn_rule.flow_interface_num;
 			s32 return_interface_num = msg->msg.rule_create.conn_rule.return_interface_num;
 			bool is_mcast = false;
+
+			conn = sfe_ipv6_connection_rule_get_by_tuple(&msg->msg.rule_create.tuple);
+			if (!conn) {
+				goto failed_ret;
+			}
+			flow_match = conn->original_match;
+			return_match = conn->reply_match;
 
 			/*
 			 * Push RFS rule in either direction if rfs is eligible in that direction.
