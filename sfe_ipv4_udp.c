@@ -190,20 +190,20 @@ int sfe_ipv4_recv_udp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 #ifdef CONFIG_NF_FLOW_COOKIE
 	cm = si->sfe_flow_cookie_table[skb->flow_cookie & SFE_FLOW_COOKIE_MASK].match;
 	if (unlikely(!cm)) {
-		cm = sfe_ipv4_find_connection_match_rcu(si, dev, IPPROTO_UDP, src_ip, src_port, dest_ip, dest_port);
+		cm = sfe_ipv4_find_connection_match_rcu(si, dev, l2_info, IPPROTO_UDP, src_ip, src_port, dest_ip, dest_port);
 	}
 #else
 	/*
 	 * 5-tuple lookup for UDP flow.
 	 */
-	cm = sfe_ipv4_find_connection_match_rcu(si, dev, IPPROTO_UDP, src_ip, src_port, dest_ip, dest_port);
+	cm = sfe_ipv4_find_connection_match_rcu(si, dev, l2_info, IPPROTO_UDP, src_ip, src_port, dest_ip, dest_port);
 #endif
 	if (unlikely(!cm)) {
 
 		/*
 		 * Try a 4-tuple lookup; required for tunnels like vxlan.
 		 */
-		cm = sfe_ipv4_find_connection_match_rcu(si, dev, IPPROTO_UDP, src_ip, 0, dest_ip, dest_port);
+		cm = sfe_ipv4_find_connection_match_rcu(si, dev, l2_info, IPPROTO_UDP, src_ip, 0, dest_ip, dest_port);
 		if (unlikely(!cm)) {
 			rcu_read_unlock();
 			sfe_ipv4_exception_stats_inc(si, SFE_IPV4_EXCEPTION_EVENT_UDP_NO_CONNECTION);

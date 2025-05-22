@@ -321,6 +321,7 @@ struct sfe_ipv6_connection {
 	__be16 src_port_xlate;		/* Src port post-translation */
 	__be16 dest_port;		/* Dest port pre-translation */
 	__be16 dest_port_xlate;		/* Dest port post-translation */
+	u32 flow_rule_id;					/**< Serial number used to talk with ecm. */
 	struct sfe_ipv6_connection_match *original_match;
 					/* Original direction matching structure */
 	struct net_device *original_dev;
@@ -608,10 +609,15 @@ void sfe_ipv6_exception_stats_inc(struct sfe_ipv6 *si, enum sfe_ipv6_exception_e
 void sfe_ipv6_service_class_stats_inc(struct sfe_ipv6 *si, uint8_t sid, uint64_t bytes);
 #if defined(SFE_RFS_SUPPORTED)
 void sfe_ipv6_connection_rule_rfs_valid_set(struct sfe_ipv6_connection_match *match);
-struct sfe_ipv6_connection *sfe_ipv6_connection_rule_get_by_tuple(struct sfe_ipv6_5tuple *tuple);
+struct sfe_ipv6_connection *sfe_ipv6_connection_rule_get_by_tuple(struct sfe_ipv6_tuple *tuple);
 #endif
 struct sfe_ipv6_connection_match *
-sfe_ipv6_find_connection_match_rcu(struct sfe_ipv6 *si, struct net_device *dev, u8 protocol,
+sfe_ipv6_find_connection_match_rcu(struct sfe_ipv6 *si, struct net_device *dev,
+					struct sfe_l2_info *l2_info, u8 protocol,
+					struct sfe_ipv6_addr *src_ip, __be16 src_port,
+					struct sfe_ipv6_addr *dest_ip, __be16 dest_port);
+
+struct sfe_ipv6_connection *sfe_ipv6_find_connection(struct sfe_ipv6 *si, u32 flow_rule_id, u32 protocol,
 					struct sfe_ipv6_addr *src_ip, __be16 src_port,
 					struct sfe_ipv6_addr *dest_ip, __be16 dest_port);
 

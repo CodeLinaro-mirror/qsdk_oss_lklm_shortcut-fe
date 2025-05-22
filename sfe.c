@@ -671,6 +671,7 @@ void sfe_ipv4_stats_convert(struct sfe_ipv4_conn_sync *sync_msg, struct sfe_conn
 	 * Fill expiration time to extend, in unit of msec
 	 */
 	sync_msg->inc_ticks = (((u32)sis->delta_jiffies) * MSEC_PER_SEC)/HZ;
+	sync_msg->flow_rule_id = sis->flow_rule_id;
 
 	/*
 	 * Fill other information
@@ -976,6 +977,7 @@ static void sfe_create_ipv4_ppe_rfs_rule(struct sfe_ipv4_connection_match *match
 	pr4rc.tuple.flow_ident = ntohs(match_dir->match_src_port);
 	pr4rc.tuple.return_ip = ntohl(match_dir->match_dest_ip);
 	pr4rc.tuple.return_ident = ntohs(match_dir->match_dest_port);
+	pr4rc.tuple.flow_rule_id = match_dir->connection->flow_rule_id;
 	pr4rc.conn_rule.flow_ip_xlate = ntohl(match_dir->xlate_src_ip);
 	pr4rc.conn_rule.flow_ident_xlate = ntohs(match_dir->xlate_src_port);
 	pr4rc.conn_rule.return_ip_xlate = ntohl(match_dir->xlate_dest_ip);
@@ -1026,6 +1028,7 @@ static void sfe_destroy_ipv4_ppe_rfs_rule(struct sfe_ipv4_connection_match *matc
 	pr4rd.tuple.flow_ident = ntohs(match_dir->match_src_port);
 	pr4rd.tuple.return_ip = ntohl(match_dir->match_dest_ip);
 	pr4rd.tuple.return_ident = ntohs(match_dir->match_dest_port);
+	pr4rd.tuple.flow_rule_id = match_dir->connection->flow_rule_id;
 	pr4rd.conn_rule.flow_ip_xlate = ntohl(match_dir->xlate_src_ip);
 	pr4rd.conn_rule.flow_ident_xlate = ntohs(match_dir->xlate_src_port);
 	pr4rd.conn_rule.return_ip_xlate = ntohl(match_dir->xlate_dest_ip);
@@ -1252,7 +1255,9 @@ enum sfe_cmn_response sfe_create_ipv4_rule_msg(struct sfe_ctx_instance_internal 
 #if defined(SFE_RFS_SUPPORTED)
 		if (sfe_is_ppe_rfs_feature_enabled()) {
 			struct sfe_ipv4_connection *conn;
-			struct sfe_ipv4_connection_match *flow_match, *return_match;
+			struct sfe_ipv4_connection_match *flow_match;
+			struct sfe_ipv4_connection_match *return_match;
+
 			s32 flow_interface_num = msg->msg.rule_create.conn_rule.flow_interface_num;
 			s32 return_interface_num = msg->msg.rule_create.conn_rule.return_interface_num;
 			bool is_mcast = false;
@@ -1319,7 +1324,8 @@ enum sfe_cmn_response sfe_destroy_ipv4_mc_rule_msg(struct sfe_ctx_instance_inter
 {
 #if defined(SFE_RFS_SUPPORTED)
 	if (sfe_is_ppe_rfs_feature_enabled()) {
-		struct sfe_ipv4_connection *conn = sfe_ipv4_connection_rule_get_by_tuple(&msg->msg.rule_destroy.tuple);
+		struct sfe_ipv4_connection *conn =
+			sfe_ipv4_connection_rule_get_by_tuple(&msg->msg.rule_destroy.tuple);
 		struct sfe_ipv4_connection_match *flow_match;
 
 		if (!conn) {
@@ -1676,6 +1682,7 @@ void sfe_ipv6_stats_convert(struct sfe_ipv6_conn_sync *sync_msg, struct sfe_conn
 	 * Fill expiration time to extend, in unit of msec
 	 */
 	sync_msg->inc_ticks = (((u32)sis->delta_jiffies) * MSEC_PER_SEC)/HZ;
+	sync_msg->flow_rule_id = sis->flow_rule_id;
 
 	/*
 	 * Fill other information
@@ -1720,6 +1727,7 @@ static void sfe_create_ipv6_ppe_rfs_rule(struct sfe_ipv6_connection_match *match
 	pr6rc.tuple.return_ip[2] = ntohl(match_dir->match_dest_ip[0].addr[1]);
 	pr6rc.tuple.return_ip[3] = ntohl(match_dir->match_dest_ip[0].addr[0]);
 	pr6rc.tuple.return_ident = ntohs(match_dir->match_dest_port);
+	pr6rc.tuple.flow_rule_id = match_dir->connection->flow_rule_id;
 	pr6rc.conn_rule.flow_interface_num = match_dir->flow_interface_num;
 	pr6rc.conn_rule.return_interface_num = match_dir->return_interface_num;
 	pr6rc.conn_rule.flow_top_interface_num = match_dir->flow_top_interface_num;
@@ -1771,6 +1779,7 @@ static void sfe_destroy_ipv6_ppe_rfs_rule(struct sfe_ipv6_connection_match *matc
 	pr6rd.tuple.return_ip[2] = ntohl(match_dir->match_dest_ip[0].addr[1]);
 	pr6rd.tuple.return_ip[3] = ntohl(match_dir->match_dest_ip[0].addr[0]);
 	pr6rd.tuple.return_ident = ntohs(match_dir->match_dest_port);
+	pr6rd.tuple.flow_rule_id = match_dir->connection->flow_rule_id;
 
 	if (ppe_rfs_ipv6_rule_destroy(&pr6rd) != PPE_RFS_RET_SUCCESS) {
 		DEBUG_INFO("%p: Error while deleting PPE RFS IPv6 rule\n", &pr6rd);

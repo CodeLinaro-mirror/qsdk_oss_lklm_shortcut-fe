@@ -1015,7 +1015,7 @@ int sfe_ipv6_recv_udp_frag(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_
 	/*
 	 * Look for a connection match.
 	 */
-	cm = sfe_ipv6_find_connection_match_rcu(si, dev, IPPROTO_UDP, src_ip, src_port, dest_ip, dest_port);
+	cm = sfe_ipv6_find_connection_match_rcu(si, dev, l2_info, IPPROTO_UDP, src_ip, src_port, dest_ip, dest_port);
 	if (unlikely(!cm)) {
 		rcu_read_unlock();
 		sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_UDP_NO_CONNECTION);

@@ -112,6 +112,7 @@ struct sfe_connection_sync {
 	u32 dest_new_byte_count;
 	u32 reason;                     /* reason for stats sync message, i.e. destroy, flush, period sync */
 	u64 delta_jiffies;		/* Time to be added to the current timeout to keep the connection alive */
+	u32 flow_rule_id;		/* Unique number defined in connection manager */
 };
 
 extern uint8_t sfe_fls_flush_on_hwm_enable;

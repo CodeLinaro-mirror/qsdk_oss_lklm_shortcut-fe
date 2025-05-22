@@ -37,6 +37,10 @@ int max_ipv6_conn = SFE_MAX_CONNECTION_NUM;
 module_param(max_ipv6_conn, int, S_IRUGO);
 MODULE_PARM_DESC(max_ipv6_conn, "Max number of IPv6 connections");
 
+int sixth_tuple_enable;
+module_param(sixth_tuple_enable, int, S_IRUGO);
+MODULE_PARM_DESC(sixth_tuple_enable, "Sixth tuple enabled or not");
+
 /*
  * sfe_init()
  *	Initialize SFE engine.

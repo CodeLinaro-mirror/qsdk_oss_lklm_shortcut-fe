@@ -2,19 +2,8 @@
  * sfe_ipv6_esp.c
  *	Shortcut forwarding engine - IPv6 ESP implementation
  *
- * Copyright (c) 2022-2023, 2025 Qualcomm Innovation Center, Inc. All rights reserved.
- *
- * Permission to use, copy, modify, and/or distribute this software for any
- * purpose with or without fee is hereby granted, provided that the above
- * copyright notice and this permission notice appear in all copies.
- *
- * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
- * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
- * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
- * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
- * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
- * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
- * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+ * SPDX-License-Identifier: ISC
  */
 
 #include <linux/debug_mem_usage.h>
@@ -77,10 +66,10 @@ int sfe_ipv6_recv_esp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 #ifdef CONFIG_NF_FLOW_COOKIE
 	cm = si->sfe_flow_cookie_table[skb->flow_cookie & SFE_FLOW_COOKIE_MASK].match;
 	if (unlikely(!cm)) {
-		cm = sfe_ipv6_find_connection_match_rcu(si, dev, IPPROTO_ESP, src_ip, 0, dest_ip, 0);
+		cm = sfe_ipv6_find_connection_match_rcu(si, dev, l2_info, IPPROTO_ESP, src_ip, 0, dest_ip, 0);
 	}
 #else
-	cm = sfe_ipv6_find_connection_match_rcu(si, dev, IPPROTO_ESP, src_ip, 0, dest_ip, 0);
+	cm = sfe_ipv6_find_connection_match_rcu(si, dev, l2_info, IPPROTO_ESP, src_ip, 0, dest_ip, 0);
 #endif
 	if (unlikely(!cm)) {
 		rcu_read_unlock();

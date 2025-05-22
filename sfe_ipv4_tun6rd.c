@@ -58,10 +58,10 @@ int sfe_ipv4_recv_tun6rd(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_de
 #ifdef CONFIG_NF_FLOW_COOKIE
 	cm = si->sfe_flow_cookie_table[skb->flow_cookie & SFE_FLOW_COOKIE_MASK].match;
 	if (unlikely(!cm)) {
-		cm = sfe_ipv4_find_connection_match_rcu(si, dev, IPPROTO_IPV6, src_ip, src_port, dest_ip, dest_port);
+		cm = sfe_ipv4_find_connection_match_rcu(si, dev, l2_info, IPPROTO_IPV6, src_ip, src_port, dest_ip, dest_port);
 	}
 #else
-	cm = sfe_ipv4_find_connection_match_rcu(si, dev, IPPROTO_IPV6, src_ip, src_port, dest_ip, dest_port);
+	cm = sfe_ipv4_find_connection_match_rcu(si, dev, l2_info, IPPROTO_IPV6, src_ip, src_port, dest_ip, dest_port);
 #endif
 	if (unlikely(!cm)) {
 		rcu_read_unlock();

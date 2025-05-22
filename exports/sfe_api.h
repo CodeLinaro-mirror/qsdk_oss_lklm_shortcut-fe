@@ -339,13 +339,14 @@ struct sfe_cmn_msg {
 /**
  * Common 5-tuple structure.
  */
-struct sfe_ipv4_5tuple {
+struct sfe_ipv4_tuple {
 	__be32 flow_ip;		/**< Flow IP address. */
 	__be32 return_ip;	/**< Return IP address. */
 	__be16 flow_ident;	/**< Flow identifier, e.g., TCP/UDP port. */
 	__be16 return_ident;	/**< Return identifier, e.g., TCP/UDP port. */
 	u8 protocol;		/**< Protocol number. */
 	u8 reserved[3];		/**< Reserved; padding for alignment. */
+	u32 flow_rule_id;	/**< Unique number defined in connection manager. */
 };
 
 /**
@@ -542,6 +543,7 @@ struct sfe_rule_update_msg {
 	__be16 src_port;	/**< Source port number. */
 	__be16 dest_port;	/**< Destination port number. */
 
+	u32 flow_rule_id;	/**< Unique number defined in connection manager. */
 	u32 flags;		/**< State of marks. */
 
 	union {
@@ -570,8 +572,7 @@ struct sfe_ipv4_rule_create_msg {
 	u32 valid_flags;				/**< Bit flags associated with paramater validity. */
 	u32 rule_flags;					/**< Bit flags associated with the rule. */
 
-	struct sfe_ipv4_5tuple tuple;			/**< Holds values of 5-tuple. */
-
+	struct sfe_ipv4_tuple tuple;			/**< Holds values of 5-tuple. */
 	struct sfe_ipv4_connection_rule conn_rule;	/**< Basic connection-specific data. */
 	struct sfe_protocol_tcp_rule tcp_rule;		/**< TCP-related acceleration parameters. */
 	struct sfe_pppoe_rule pppoe_rule;		/**< PPPoE-related acceleration parameters. */
@@ -601,7 +602,7 @@ struct sfe_ipv4_rule_create_msg {
  * IPv4 rule destroy submessage structure.
  */
 struct sfe_ipv4_rule_destroy_msg {
-	struct sfe_ipv4_5tuple tuple;	/**< Holds values of 5-tuple. */
+	struct sfe_ipv4_tuple tuple;	/**< Holds values of 5-tuple. */
 };
 
 /*
@@ -632,7 +633,7 @@ struct sfe_ipv4_mc_rule_create_msg {
 	u32 valid_flags;				/**< Bit flags associated with paramater validity. */
 	u32 rule_flags;					/**< Bit flags associated with the rule. */
 
-	struct sfe_ipv4_5tuple tuple;           /**< Holds values of the 5 tuple. */
+	struct sfe_ipv4_tuple tuple;           /**< Holds values of the 5 tuple. */
 	struct sfe_ipv4_connection_rule conn_rule;	/**< Basic connection-specific data. */
 	struct sfe_pppoe_rule pppoe_rule;		/**< PPPoE-related acceleration parameters. */
 	struct sfe_qos_rule qos_rule;			/**< QoS-related acceleration parameters. */
@@ -654,7 +655,7 @@ struct sfe_ipv4_mc_rule_create_msg {
  *      IPv4 multicast rule for destroy sub-messages.
  */
 struct sfe_ipv4_mc_rule_destroy_msg {
-	struct sfe_ipv4_5tuple tuple;           /**< Holds values of the 5 tuple. */
+	struct sfe_ipv4_tuple tuple;           /**< Holds values of the 5 tuple. */
 };
 
 /**
@@ -695,6 +696,7 @@ struct sfe_ipv4_conn_sync {
 	u8 flags;			/**< Bit flags associated with the rule. */
 	u32 qos_tag;			/**< QoS tag. */
 	u32 cause;			/**< Flush cause. */
+	u32 flow_rule_id;		/**< Unique number defined in connection manager. */
 };
 
 /**
@@ -738,7 +740,7 @@ struct sfe_ipv4_msg {
 struct sfe_ipv4_single_conn_stats {
 	struct net_device *org_dev;		/**< Source netdevice */
 	struct net_device *reply_dev;		/**< Desination netdevice */
-	struct sfe_ipv4_5tuple tuple;		/**< Conn tuple information */
+	struct sfe_ipv4_tuple tuple;		/**< Conn tuple information */
 	u64 rx_packet_count;			/**< Rx packets */
 	u64 rx_byte_count;			/**< Rx bytes */
 	u64 tx_packet_count;			/**< Tx packets */
@@ -771,13 +773,14 @@ typedef void (*sfe_ipv4_msg_callback_t)(void *app_data, struct sfe_ipv4_msg *msg
 /**
  * IPv6 5-tuple structure.
  */
-struct sfe_ipv6_5tuple {
+struct sfe_ipv6_tuple {
 	__be32 flow_ip[4];	/**< Flow IP address. */
 	__be32 return_ip[4];	/**< Return IP address. */
 	__be16 flow_ident;	/**< Flow identifier, e.g.,TCP/UDP port. */
 	__be16 return_ident;	/**< Return identifier, e.g., TCP/UDP port. */
 	u8  protocol;		/**< Protocol number. */
 	u8  reserved[3];	/**< Reserved; padding for alignment. */
+	u32 flow_rule_id;	/**< Unique number defined in connection manager. */
 };
 
 /**
@@ -807,7 +810,8 @@ struct sfe_ipv6_rule_create_msg {
 	 */
 	u32 valid_flags;				/**< Bit flags associated with parameter validity. */
 	u32 rule_flags;					/**< Bit flags associated with the rule. */
-	struct sfe_ipv6_5tuple tuple;			/**< Holds values of the sfe_ipv6_5tuple tuple. */
+
+	struct sfe_ipv6_tuple tuple;			/**< Holds values of the sfe_ipv6_tuple tuple. */
 	struct sfe_ipv6_connection_rule conn_rule;	/**< Basic connection-specific data. */
 	struct sfe_protocol_tcp_rule tcp_rule;		/**< Protocol-related acceleration parameters. */
 	struct sfe_pppoe_rule pppoe_rule;		/**< PPPoE-related acceleration parameters. */
@@ -836,7 +840,7 @@ struct sfe_ipv6_rule_create_msg {
  * IPv6 rule destroy submessage structure.
  */
 struct sfe_ipv6_rule_destroy_msg {
-	struct sfe_ipv6_5tuple tuple;	/**< Holds values of the sfe_ipv6_5tuple tuple */
+	struct sfe_ipv6_tuple tuple;	/**< Holds values of the sfe_ipv6_tuple tuple */
 };
 
 /*
@@ -868,7 +872,7 @@ struct sfe_ipv6_mc_rule_create_msg {
 	u32 valid_flags;				/**< Bit flags associated with paramater validity. */
 	u32 rule_flags;					/**< Bit flags associated with the rule. */
 
-	struct sfe_ipv6_5tuple tuple;           /**< Holds values of the 5 tuple. */
+	struct sfe_ipv6_tuple tuple;           /**< Holds values of the 5 tuple. */
 	struct sfe_ipv6_connection_rule conn_rule;	/**< Basic connection-specific data. */
 	struct sfe_pppoe_rule pppoe_rule;		/**< PPPoE-related acceleration parameters. */
 	struct sfe_qos_rule qos_rule;			/**< QoS-related acceleration parameters. */
@@ -891,7 +895,7 @@ struct sfe_ipv6_mc_rule_create_msg {
  *      IPv6 multicast rule for destroy sub-messages.
  */
 struct sfe_ipv6_mc_rule_destroy_msg {
-	struct sfe_ipv6_5tuple tuple;           /**< Holds values of the 5 tuple. */
+	struct sfe_ipv6_tuple tuple;           /**< Holds values of the 5 tuple. */
 };
 
 /**
@@ -931,6 +935,7 @@ struct sfe_ipv6_conn_sync {
 	u8 flags;			/**< Bit flags associated with the rule. */
 	u32 qos_tag;			/**< QoS tag. */
 	u32 cause;			/**< Flush cause associated with the rule. */
+	u32 flow_rule_id;		/**< Unique number defined in connection manager. */
 };
 
 /**
@@ -977,7 +982,7 @@ struct sfe_ipv6_msg {
 struct sfe_ipv6_single_conn_stats {
 	struct net_device *org_dev;		/**< Source netdevice */
 	struct net_device *reply_dev;		/**< Desination netdevice */
-	struct sfe_ipv6_5tuple tuple;		/**< Conn tuple information */
+	struct sfe_ipv6_tuple tuple;		/**< Conn tuple information */
 	u64 rx_packet_count;			/**< Rx packets */
 	u64 rx_byte_count;			/**< Rx bytes */
 	u64 tx_packet_count;			/**< Tx packets */
