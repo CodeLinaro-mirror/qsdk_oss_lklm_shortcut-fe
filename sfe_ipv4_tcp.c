@@ -824,7 +824,6 @@ int sfe_ipv4_recv_tcp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 		skb->ip_summed = CHECKSUM_PARTIAL;
 	} else {
 		iph->check = sfe_ipv4_gen_ip_csum(iph);
-		skb->ip_summed = CHECKSUM_UNNECESSARY;
 	}
 
 	/*
