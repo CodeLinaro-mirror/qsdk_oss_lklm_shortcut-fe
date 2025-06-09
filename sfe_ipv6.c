@@ -2242,6 +2242,8 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 	struct sfe_ipv6_connection_match *reply_cm;
 	struct net_device *dest_dev;
 	struct net_device *src_dev;
+	struct net_device *local_dest_dev;
+	struct net_device *local_src_dev;
 	struct sfe_ipv6_5tuple *tuple = &msg->tuple;
 	struct sock *sk;
 	struct net *net;
@@ -2298,6 +2300,8 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 		return -EINVAL;
 	}
 
+	local_src_dev = src_dev;
+
 	dest_dev = dev_get_by_index(&init_net, return_interface_num);
 	if (!dest_dev) {
 		DEBUG_WARN("%px: Unable to find dest_dev corresponding to %d\n", msg,
@@ -2306,6 +2310,8 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 		status = -EINVAL;
 		goto src_dev_put;
 	}
+
+	local_dest_dev = dest_dev;
 
 	if (unlikely((dest_dev->reg_state != NETREG_REGISTERED) ||
 		     (src_dev->reg_state != NETREG_REGISTERED))) {
@@ -2695,11 +2701,19 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 		}
 	}
 
+        if (disable_l2_return) {
+                original_cm->flags &= ~SFE_IPV6_CONNECTION_MATCH_FLAG_PPPOE_ENCAP;
+                original_cm->flags &= ~SFE_IPV6_CONNECTION_MATCH_FLAG_INSERT_EGRESS_VLAN_TAG;
+		if (reply_cm->top_interface_dev) {
+			local_dest_dev =  reply_cm->top_interface_dev;
+		}
+	}
+
 	/*
 	 * For the non-arp interface, we don't write L2 HDR.
 	 * Excluding PPPoE from this, since we are now supporting PPPoE encap/decap.
 	 */
-	if (sfe_ipv6_xmit_eth_type_check(dest_dev, original_cm->flags)) {
+	if (sfe_ipv6_xmit_eth_type_check(local_dest_dev, original_cm->flags)) {
 
 		/*
 		 * Check whether the rule has configured a specific source MAC address to use.
@@ -2836,6 +2850,19 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 				msg, reply_cm->xmit_dev->name, reply_cm->match_dev->name);
 	}
 
+	/*
+         * Strip off flags if L2 processing is disabled in the rule.
+         * SFE transmits the packet to the top interface for L2 processing
+         */
+        if (disable_l2_flow) {
+                reply_cm->flags &= ~SFE_IPV6_CONNECTION_MATCH_FLAG_PPPOE_ENCAP;
+                reply_cm->flags &= ~SFE_IPV6_CONNECTION_MATCH_FLAG_INSERT_EGRESS_VLAN_TAG;
+		if (original_cm->top_interface_dev) {
+			local_src_dev = original_cm->top_interface_dev;
+		}
+        }
+
+
 	reply_cm->xmit_dev_mtu = msg->conn_rule.flow_mtu;
 
 	reply_cm->connection = c;
@@ -2901,24 +2928,6 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 		reply_cm->svc_id = msg->sawf_rule.return_svc_id;
 		reply_cm->sawf_valid = true;
 		reply_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_MARK;
-	}
-
-	/*
-	 * Strip off flags if L2 processing is disabled in the rule.
-	 * SFE transmits the packet to the top interface for L2 processing
-	 */
-	if (disable_l2_flow) {
-		reply_cm->flags &= ~SFE_IPV6_CONNECTION_MATCH_FLAG_PPPOE_ENCAP;
-		reply_cm->flags &= ~SFE_IPV6_CONNECTION_MATCH_FLAG_WRITE_L2_HDR;
-		reply_cm->flags &= ~SFE_IPV6_CONNECTION_MATCH_FLAG_WRITE_FAST_ETH_HDR;
-		reply_cm->flags &= ~SFE_IPV6_CONNECTION_MATCH_FLAG_INSERT_EGRESS_VLAN_TAG;
-	}
-
-	if (disable_l2_return) {
-		original_cm->flags &= ~SFE_IPV6_CONNECTION_MATCH_FLAG_PPPOE_ENCAP;
-		original_cm->flags &= ~SFE_IPV6_CONNECTION_MATCH_FLAG_WRITE_L2_HDR;
-		original_cm->flags &= ~SFE_IPV6_CONNECTION_MATCH_FLAG_WRITE_FAST_ETH_HDR;
-		original_cm->flags &= ~SFE_IPV6_CONNECTION_MATCH_FLAG_INSERT_EGRESS_VLAN_TAG;
 	}
 
 	/*
@@ -3270,7 +3279,7 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 	 * For the non-arp interface, we don't write L2 HDR.
 	 * Excluding PPPoE from this, since we are now supporting PPPoE encap/decap.
 	 */
-	if (sfe_ipv6_xmit_eth_type_check(src_dev, reply_cm->flags)) {
+	if (sfe_ipv6_xmit_eth_type_check(local_src_dev, reply_cm->flags)) {
 
 		/*
 		 * Check whether the rule has configured a specific source MAC address to use.
