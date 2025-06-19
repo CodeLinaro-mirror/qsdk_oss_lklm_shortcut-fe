@@ -2761,6 +2761,24 @@ sfe_response_t sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	original_cm->return_top_interface_num = msg->conn_rule.return_top_interface_num;
 #endif
 
+#if defined(SFE_ESP_SPI_PASSTH_ENABLE)
+	/*
+	 * In case if this flow is IPSec passthrough flow, set the SPI as the port
+	 * numbers to have SPI as a key for connection match.
+	 * The 32 bit SPI is stored as below:
+	 * ------------------------------------------------------------
+	 * |  Source port (16 bits)      |  Destination port (16 bits)|
+	 * ------------------------------------------------------------
+	 * 31				15			      0
+	 */
+	if ((sfe_is_spi_based_esp_passthrough_enabled()) && (msg->rule_flags & SFE_RULE_CREATE_FLAG_ESP_PASSTHROUGH)) {
+		original_cm->match_src_port = SFE_ESP_SPI_TO_SPORT(msg->spi_rule.l_spi);
+		original_cm->xlate_src_port = SFE_ESP_SPI_TO_SPORT(msg->spi_rule.l_spi);
+		original_cm->match_dest_port = SFE_ESP_SPI_TO_DPORT(msg->spi_rule.l_spi);
+		original_cm->xlate_dest_port = SFE_ESP_SPI_TO_DPORT(msg->spi_rule.l_spi);
+	}
+#endif
+
 	if (tuple->protocol == IPPROTO_GRE) {
 		/*
 		 * the PPTP is 4 tuple lookup.
@@ -3158,6 +3176,24 @@ sfe_response_t sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	reply_cm->flow_top_interface_num = msg->conn_rule.return_top_interface_num;
 	reply_cm->return_interface_num = msg->conn_rule.flow_interface_num;
 	reply_cm->return_top_interface_num = msg->conn_rule.flow_top_interface_num;
+#endif
+
+#if defined(SFE_ESP_SPI_PASSTH_ENABLE)
+	/*
+	 * In case if this flow is IPSec passthrough flow, set the SPI as the port
+	 * numbers to have SPI as a key for connection match.
+	 * The 32 bit SPI is stored as below:
+	 * ------------------------------------------------------------
+	 * |  Source port (16 bits)      |  Destination port (16 bits)|
+	 * ------------------------------------------------------------
+	 * 31				15			      0
+	 */
+	if ((sfe_is_spi_based_esp_passthrough_enabled()) && (msg->rule_flags & SFE_RULE_CREATE_FLAG_ESP_PASSTHROUGH)) {
+		reply_cm->match_src_port = SFE_ESP_SPI_TO_SPORT(msg->spi_rule.r_spi);
+		reply_cm->xlate_src_port = SFE_ESP_SPI_TO_SPORT(msg->spi_rule.r_spi);
+		reply_cm->match_dest_port = SFE_ESP_SPI_TO_DPORT(msg->spi_rule.r_spi);
+		reply_cm->xlate_dest_port = SFE_ESP_SPI_TO_DPORT(msg->spi_rule.r_spi);
+	}
 #endif
 
 	if (tuple->protocol == IPPROTO_GRE) {

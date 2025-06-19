@@ -170,6 +170,13 @@ bool sfe_is_ppe_rfs_feature_enabled(void);
 #endif
 
 /*
+ * sfe_is_spi_based_esp_passthrough_enabled()
+ */
+#if defined(SFE_ESP_SPI_PASSTH_ENABLE)
+bool sfe_is_spi_based_esp_passthrough_enabled(void);
+#endif
+
+/*
  * This callback will be called in a timer
  * at 100 times per second to sync stats back to
  * Linux connection track.
