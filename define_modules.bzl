@@ -2,10 +2,11 @@ load("//build/kernel/kleaf:kernel.bzl", "ddk_module")
 load("//build/bazel_common_rules/dist:dist.bzl", "copy_to_dist_dir")
 
 def define_modules_for_specific_variants():
-    target = "sdxkova"
+    targets = ["sdxkova", "sdxkova.cpe.wkk"]
     variants = ["debug-defconfig", "perf-defconfig"]
-    for variant in variants:
-        _define_modules(target, variant)
+    for target in targets:
+        for variant in variants:
+            _define_modules(target, variant)
 
 def _define_modules(target, variant):
     rule_base = "{}_{}".format(target, variant)
