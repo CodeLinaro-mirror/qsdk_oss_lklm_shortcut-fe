@@ -2,19 +2,10 @@
  * sfe_ipv6_multicast.c
  *	Shortcut forwarding engine file for IPv6 multicast
  *
- * Copyright (c) 2022-2024 Qualcomm Innovation Center, Inc. All rights reserved.
- *
- * Permission to use, copy, modify, and/or distribute this software for any
- * purpose with or without fee is hereby granted, provided that the above
- * copyright notice and this permission notice appear in all copies.
- *
- * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
- * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
- * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
- * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
- * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
- * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
- * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ **************************************************************************
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidaries.
+ * SPDX-License-Identifier: ISC
+ **************************************************************************
  */
 
 #include <linux/skbuff.h>
@@ -56,7 +47,7 @@ int sfe_ipv6_forward_multicast(struct sfe_ipv6 *si, struct sk_buff *skb, unsigne
 	 * For PPPoE flows, add PPPoE header before L2 header is added.
 	 */
 	if (unlikely(mc_xmit_dev->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_PPPOE_ENCAP)) {
-		sfe_pppoe_add_header(skb, mc_xmit_dev->pppoe_session_id, PPP_IP);
+		sfe_pppoe_add_header(skb, mc_xmit_dev->pppoe_session_id, PPP_IPV6);
 		this_cpu_inc(si->stats_pcpu->pppoe_encap_packets_forwarded64);
 	}
 
