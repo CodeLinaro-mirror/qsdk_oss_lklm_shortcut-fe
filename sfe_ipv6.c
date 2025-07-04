@@ -1456,7 +1456,7 @@ void sfe_ipv6_update_rule(struct sfe_ipv6_rule_create_msg *msg)
  * sfe_ipv6_mark_rule_update()
  *	Updates the mark values of match entries.
  */
-void sfe_ipv6_mark_rule_update(struct sfe_connection_mark *mark)
+bool sfe_ipv6_mark_rule_update(struct sfe_connection_mark *mark)
 {
 	struct sfe_ipv6_connection *c;
 	struct sfe_ipv6 *si = &__si6;
@@ -1470,7 +1470,7 @@ void sfe_ipv6_mark_rule_update(struct sfe_connection_mark *mark)
 	if (!c) {
 		spin_unlock_bh(&si->lock);
 		DEBUG_WARN("%px: connection not found for mark update\n", mark);
-		return;
+		return false;
 	}
 
 	switch (mark->type) {
@@ -1519,6 +1519,7 @@ void sfe_ipv6_mark_rule_update(struct sfe_connection_mark *mark)
 
 	DEBUG_TRACE("%px: flow/return mark updated with %x/%x\n",
 			c, mark->flow_mark, mark->return_mark);
+	return true;
 }
 EXPORT_SYMBOL(sfe_ipv6_mark_rule_update);
 
