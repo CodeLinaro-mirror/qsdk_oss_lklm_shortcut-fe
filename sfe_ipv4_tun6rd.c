@@ -2,19 +2,10 @@
  * sfe_ipv4_tun6rd.c
  *	Shortcut forwarding engine file for IPv4 TUN6RD
  *
- * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
- *
- * Permission to use, copy, modify, and/or distribute this software for any
- * purpose with or without fee is hereby granted, provided that the above
- * copyright notice and this permission notice appear in all copies.
- *
- * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
- * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
- * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
- * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
- * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
- * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
- * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ **************************************************************************
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidaries.
+ * SPDX-License-Identifier: ISC
+ **************************************************************************
  */
 
 #include <linux/skbuff.h>
@@ -28,6 +19,7 @@
 #include "sfe.h"
 #include "sfe_flow_cookie.h"
 #include "sfe_ipv4.h"
+#include "sfe_pppoe.h"
 #include "sfe_vlan.h"
 #include "sfe_trustsec.h"
 
@@ -43,6 +35,8 @@ int sfe_ipv4_recv_tun6rd(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_de
 	__be32 dest_ip;
 	__be16 src_port = 0;
 	__be16 dest_port = 0;
+	bool passthrough;
+	bool bridge_flow;
 	bool hw_csum;
 	struct sfe_ipv4_connection_match *cm;
 
@@ -75,11 +69,13 @@ int sfe_ipv4_recv_tun6rd(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_de
 		return 0;
 	}
 
+	passthrough = cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_PASSTHROUGH;
+
 	/*
 	 * If our packet has been marked as "sync on find" we will sync the status
 	 * and forward it to slowpath.
 	 */
-	if (unlikely(sync_on_find)) {
+	if (unlikely(sync_on_find) && !passthrough) {
 		sfe_ipv4_sync_status(si, cm->connection, SFE_RULE_SYNC_REASON_STATS);
 		rcu_read_unlock();
 		sfe_ipv4_exception_stats_inc(si, SFE_IPV4_EXCEPTION_EVENT_TUN6RD_SYNC_ON_FIND);
@@ -88,10 +84,12 @@ int sfe_ipv4_recv_tun6rd(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_de
 		return 0;
 	}
 
+	bridge_flow = !!(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_BRIDGE_FLOW);
+
 	/*
 	 * In the passthrough case, the packet needs to decrement ttl.
 	 */
-	if (cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_PASSTHROUGH) {
+	if (!bridge_flow && passthrough) {
 		if (iph->ttl < 2) {
 			sfe_ipv4_sync_status(si, cm->connection, SFE_RULE_SYNC_REASON_STATS);
 			rcu_read_unlock();
@@ -100,7 +98,57 @@ int sfe_ipv4_recv_tun6rd(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_de
 			DEBUG_TRACE("%px: ttl too low\n", skb);
 			return 0;
 		}
-		iph->ttl--;
+	}
+
+	/*
+	 * For PPPoE packets, match server MAC and session id
+	 */
+	if (unlikely(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_PPPOE_DECAP)) {
+		struct ethhdr *eth;
+		bool pppoe_match;
+
+		if (unlikely(!sfe_l2_parse_flag_check(l2_info, SFE_L2_PARSE_FLAGS_PPPOE_INGRESS))) {
+			rcu_read_unlock();
+			DEBUG_TRACE("%px: PPPoE header not present in packet for PPPoE rule\n", skb);
+			sfe_ipv4_exception_stats_inc(si, SFE_IPV4_EXCEPTION_EVENT_INCORRECT_PPPOE_PARSING);
+			return 0;
+		}
+
+		eth = eth_hdr(skb);
+
+		pppoe_match = (cm->pppoe_session_id == sfe_l2_pppoe_session_id_get(l2_info)) &&
+				ether_addr_equal((u8*)cm->pppoe_remote_mac, (u8 *)eth->h_source);
+
+		if (unlikely(!pppoe_match)) {
+			rcu_read_unlock();
+			DEBUG_TRACE("%px: PPPoE session ID %d and %d or MAC %pM and %pM did not match\n",
+					skb, cm->pppoe_session_id, sfe_l2_pppoe_session_id_get(l2_info),
+					cm->pppoe_remote_mac, eth->h_source);
+			sfe_ipv4_exception_stats_inc(si, SFE_IPV4_EXCEPTION_EVENT_INVALID_PPPOE_SESSION);
+			return 0;
+		}
+
+		skb->protocol = htons(l2_info->protocol);
+		this_cpu_inc(si->stats_pcpu->pppoe_decap_packets_forwarded64);
+	} else if (unlikely(sfe_l2_parse_flag_check(l2_info, SFE_L2_PARSE_FLAGS_PPPOE_INGRESS))) {
+
+		/*
+		 * If packet contains PPPoE header but CME doesn't contain PPPoE flag yet we are exceptioning
+		 * the packet to linux
+		 */
+		if (unlikely(!bridge_flow)) {
+			rcu_read_unlock();
+			DEBUG_TRACE("%px: CME doesn't contain PPPoE flag but packet has PPPoE header\n", skb);
+			sfe_ipv4_exception_stats_inc(si, SFE_IPV4_EXCEPTION_EVENT_PPPOE_NOT_SET_IN_CME);
+			return 0;
+		}
+
+		/*
+		 * For bridged flows when packet contains PPPoE header, restore the header back and forward
+		 * to xmit interface
+		 */
+		__skb_push(skb, PPPOE_SES_HLEN);
+		this_cpu_inc(si->stats_pcpu->pppoe_bridge_packets_forwarded64);
 	}
 
 	/*
@@ -183,6 +231,60 @@ int sfe_ipv4_recv_tun6rd(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_de
 	}
 
 	/*
+	 * For PPPoE flows, add PPPoE header before L2 header is added.
+	 * SFE + PPPOE flow is not supported with GSO, hence destroy the connection
+	 */
+	if (unlikely(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_PPPOE_ENCAP)) {
+		if ((unlikely(skb_shinfo(skb)->gso_segs))) {
+			int ret;
+			struct sfe_ipv4_connection *c = cm->connection;
+			spin_lock_bh(&si->lock);
+			ret = sfe_ipv4_remove_connection(si, c);
+			spin_unlock_bh(&si->lock);
+			if (ret) {
+				sfe_ipv4_flush_connection(si, c, SFE_RULE_SYNC_REASON_FLUSH);
+			}
+
+			rcu_read_unlock();
+			sfe_ipv4_exception_stats_inc(si, SFE_IPV4_EXCEPTION_EVENT_GSO_NOT_SUPPORTED);
+			DEBUG_TRACE("%px: GSO is not support\n", skb);
+			return 0;
+		}
+
+		sfe_pppoe_add_header(skb, cm->pppoe_session_id, PPP_IP);
+		this_cpu_inc(si->stats_pcpu->pppoe_encap_packets_forwarded64);
+	}
+
+	/*
+	 * For trustsec flows, add trustsec header before L2 header is added.
+	 */
+	if (unlikely(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_INSERT_EGRESS_TRUSTSEC_SGT)) {
+		sfe_trustsec_add_sgt(skb, &cm->egress_trustsec_hdr);
+	}
+
+	/*
+	 * Check to see if we need to add VLAN tags
+	 */
+	if (unlikely(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_INSERT_EGRESS_VLAN_TAG)) {
+
+		/*
+		 * Check if skb has enough headroom to write L2 headers
+		 */
+		if (unlikely(skb_headroom(skb) < cm->l2_hdr_size)) {
+			rcu_read_unlock();
+			DEBUG_WARN("%px: Not enough headroom: %u\n", skb, skb_headroom(skb));
+			sfe_ipv4_exception_stats_inc(si, SFE_IPV4_EXCEPTION_EVENT_NO_HEADROOM);
+			return 0;
+		}
+		sfe_vlan_add_tag(skb, cm->egress_vlan_hdr_cnt, cm->egress_vlan_hdr);
+	}
+
+	/*
+	 * Decrement our TTL
+	 */
+	iph->ttl = (iph->ttl - (u8)(!bridge_flow && !tun_outer));
+
+	/*
 	 * Update DSCP
 	 */
 	if (unlikely(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_DSCP_REMARK)) {
@@ -215,30 +317,6 @@ int sfe_ipv4_recv_tun6rd(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_de
 	atomic_add(len, &cm->rx_byte_count);
 
 	skb->dev = cm->xmit_dev;
-
-	/*
-	 * For trustsec flows, add trustsec header before L2 header is added.
-	 */
-	if (unlikely(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_INSERT_EGRESS_TRUSTSEC_SGT)) {
-		sfe_trustsec_add_sgt(skb, &cm->egress_trustsec_hdr);
-	}
-
-	/*
-	 * Check to see if we need to add VLAN tags
-	 */
-	if (unlikely(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_INSERT_EGRESS_VLAN_TAG)) {
-
-		/*
-		 * Check if skb has enough headroom to write L2 headers
-		 */
-		if (unlikely(skb_headroom(skb) < cm->l2_hdr_size)) {
-			rcu_read_unlock();
-			DEBUG_WARN("%px: Not enough headroom: %u\n", skb, skb_headroom(skb));
-			sfe_ipv4_exception_stats_inc(si, SFE_IPV4_EXCEPTION_EVENT_NO_HEADROOM);
-			return 0;
-		}
-		sfe_vlan_add_tag(skb, cm->egress_vlan_hdr_cnt, cm->egress_vlan_hdr);
-	}
 
 	/*
 	 * Check to see if we need to write a header.
