@@ -1183,9 +1183,9 @@ bool sfe_is_l2_feature_enabled(void);
  * @param	mark		The mark object.
  *
  * @return
- * None.
+ * True if mark update successful, false otherwise.
  */
-void sfe_ipv4_mark_rule_update(struct sfe_connection_mark *mark);
+bool sfe_ipv4_mark_rule_update(struct sfe_connection_mark *mark);
 
 /**
  * Updates mark values of an IPv6 connection.
@@ -1193,9 +1193,9 @@ void sfe_ipv4_mark_rule_update(struct sfe_connection_mark *mark);
  * @param	mark		The mark object.
  *
  * @return
- * None.
+ * True if mark update successful, false otherwise.
  */
-void sfe_ipv6_mark_rule_update(struct sfe_connection_mark *mark);
+bool sfe_ipv6_mark_rule_update(struct sfe_connection_mark *mark);
 
 /**
  * Allows netfn flowmgr to pull single Connection Stats from SFE
