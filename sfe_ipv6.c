@@ -1903,7 +1903,7 @@ int sfe_ipv6_create_mc_dest(struct sfe_ipv6_connection_match *cm, struct sfe_ipv
  * sfe_ipv6_create_mc_rule()
  *	Create a multicast forwarding rule.
  */
-int sfe_ipv6_create_mc_rule(struct sfe_ipv6_mc_rule_create_msg *msg)
+sfe_response_t sfe_ipv6_create_mc_rule(struct sfe_ipv6_mc_rule_create_msg *msg)
 {
 	struct sfe_ipv6 *si = &__si6;
 	struct sfe_ipv6_connection *c, *c_old;
@@ -1919,7 +1919,7 @@ int sfe_ipv6_create_mc_rule(struct sfe_ipv6_mc_rule_create_msg *msg)
 
 	if (IPPROTO_UDP != tuple->protocol) {
 		this_cpu_inc(si->stats_pcpu->connection_create_failures64);
-		return -EINVAL;
+		return SFE_RET_IPPROTO_NON_UDP;
 	}
 
 	if (msg->rule_flags & SFE_RULE_CREATE_FLAG_USE_FLOW_BOTTOM_INTERFACE) {
@@ -1931,7 +1931,7 @@ int sfe_ipv6_create_mc_rule(struct sfe_ipv6_mc_rule_create_msg *msg)
 		DEBUG_WARN("%px: Unable to find src_dev corresponding to %d\n", msg,
 						flow_interface_num);
 		this_cpu_inc(si->stats_pcpu->connection_create_failures64);
-		return -EINVAL;
+		return SFE_RET_SRC_DEV_NOT_FOUND;
 	}
 
 	if_min_mtu = msg->if_rule[0].if_mtu;
@@ -1946,7 +1946,7 @@ int sfe_ipv6_create_mc_rule(struct sfe_ipv6_mc_rule_create_msg *msg)
 					dest_interface_num);
 			this_cpu_inc(si->stats_pcpu->connection_create_failures64);
 			dev_put(src_dev);
-			return -EINVAL;
+			return SFE_RET_DEST_DEV_NOT_FOUND;
 		}
 
 		if (unlikely((dest_dev->reg_state != NETREG_REGISTERED) ||
@@ -1956,7 +1956,7 @@ int sfe_ipv6_create_mc_rule(struct sfe_ipv6_mc_rule_create_msg *msg)
 			DEBUG_WARN("%px: src_dev=%s and dest_dev=%s are unregistered\n", msg,
 					src_dev->name, dest_dev->name);
 			this_cpu_inc(si->stats_pcpu->connection_create_failures64);
-			return -EINVAL;
+			return SFE_RET_SRC_DEV_AND_DEST_DEV_UNREGISTERED;
 		}
 		dev_put(dest_dev);
 		if (if_rule->if_mtu < if_min_mtu) {
@@ -1971,7 +1971,7 @@ int sfe_ipv6_create_mc_rule(struct sfe_ipv6_mc_rule_create_msg *msg)
 		if (net_ratelimit()) {
 			DEBUG_WARN("%px: Maximum connection count(%d), reached %d\n", msg, sfe_ipv6_max_conn_count(), si->num_connections);
 		}
-		return -EPERM;
+		return SFE_RET_MAX_CONN_COUNT_REACHED;
 	}
 #endif
 
@@ -1983,7 +1983,7 @@ int sfe_ipv6_create_mc_rule(struct sfe_ipv6_mc_rule_create_msg *msg)
 		DEBUG_WARN("%px: memory allocation of connection entry failed\n", msg);
 		this_cpu_inc(si->stats_pcpu->connection_create_failures64);
 		dev_put(src_dev);
-		return -ENOMEM;
+		return SFE_RET_CONN_ENTRY_MEM_ALLOC_FAILED;
 	}
 
 	original_cm = (struct sfe_ipv6_connection_match *)kzalloc(sizeof(struct sfe_ipv6_connection_match), GFP_ATOMIC);
@@ -1992,7 +1992,7 @@ int sfe_ipv6_create_mc_rule(struct sfe_ipv6_mc_rule_create_msg *msg)
 		this_cpu_inc(si->stats_pcpu->connection_create_failures64);
 		kfree(c);
 		dev_put(src_dev);
-		return -ENOMEM;
+		return SFE_RET_CONN_MATCH_ENTRY_MEM_ALLOC_FAILED;
 	}
 
 	INIT_LIST_HEAD_RCU(&(original_cm->mc_list));
@@ -2235,7 +2235,7 @@ void sfe_ipv6_destroy_mc_rule(struct sfe_ipv6_mc_rule_destroy_msg *msg)
  * sfe_ipv6_create_rule()
  *	Create a forwarding rule.
  */
-int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
+sfe_response_t sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 {
 	struct sfe_ipv6 *si = &__si6;
 	struct sfe_ipv6_connection *c, *old_c;
@@ -2263,7 +2263,7 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 	u32 ingress_vlan_tag;
 	u32 egress_vlan_tag;
 #endif
-	int status = 0;
+	sfe_response_t status = SFE_RET_SUCCESS;
 
 	/*
 	 * Check if L2 features need to be disabled
@@ -2298,7 +2298,7 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 		DEBUG_WARN("%px: Unable to find src_dev corresponding to %d\n", msg,
 						flow_interface_num);
 		this_cpu_inc(si->stats_pcpu->connection_create_failures64);
-		return -EINVAL;
+		return SFE_RET_SRC_DEV_NOT_FOUND;
 	}
 
 	local_src_dev = src_dev;
@@ -2308,7 +2308,7 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 		DEBUG_WARN("%px: Unable to find dest_dev corresponding to %d\n", msg,
 						return_interface_num);
 		this_cpu_inc(si->stats_pcpu->connection_create_failures64);
-		status = -EINVAL;
+		status = SFE_RET_DEST_DEV_NOT_FOUND;
 		goto src_dev_put;
 	}
 
@@ -2319,7 +2319,7 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 		DEBUG_WARN("%px: src_dev=%s and dest_dev=%s are unregistered\n", msg,
 						src_dev->name, dest_dev->name);
 		this_cpu_inc(si->stats_pcpu->connection_create_failures64);
-		status = -EINVAL;
+		status = SFE_RET_SRC_DEV_AND_DEST_DEV_UNREGISTERED;
 		goto dst_dev_put;
 	}
 
@@ -2330,7 +2330,7 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 	if (unlikely(!c)) {
 		DEBUG_WARN("%px: memory allocation of connection entry failed\n", msg);
 		this_cpu_inc(si->stats_pcpu->connection_create_failures64);
-		status = -ENOMEM;
+		status = SFE_RET_CONN_ENTRY_MEM_ALLOC_FAILED;
 		goto dst_dev_put;
 	}
 
@@ -2338,7 +2338,7 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 	if (unlikely(!original_cm)) {
 		this_cpu_inc(si->stats_pcpu->connection_create_failures64);
 		DEBUG_WARN("%px: memory allocation of connection match entry failed\n", msg);
-		status = -ENOMEM;
+		status = SFE_RET_CONN_MATCH_ENTRY_MEM_ALLOC_FAILED;
 		goto free_conn_obj;
 	}
 
@@ -2346,7 +2346,7 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 	if (unlikely(!reply_cm)) {
 		this_cpu_inc(si->stats_pcpu->connection_create_failures64);
 		DEBUG_WARN("%px: memory allocation of connection match entry failed\n", msg);
-		status = -ENOMEM;
+		status = SFE_RET_CONN_MATCH_ENTRY_MEM_ALLOC_FAILED;
 		goto free_original_cm;
 	}
 
@@ -2364,7 +2364,7 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 		}
 
 		spin_unlock_bh(&si->lock);
-		status = -EPERM;
+		status = SFE_RET_MAX_CONN_COUNT_REACHED;
 		goto free_reply_cm;
 	}
 
@@ -2395,7 +2395,7 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 			    tuple->protocol,
 			    src_dev->name, msg->conn_rule.flow_mac, tuple->flow_ip, ntohs(tuple->flow_ident),
 			   dest_dev->name, msg->conn_rule.return_mac, tuple->return_ip, ntohs(tuple->return_ident));
-		status = -EADDRINUSE;
+		status = SFE_RET_CONN_ALREADY_EXISTS;
 		goto free_reply_cm;
 	}
 
@@ -2545,7 +2545,7 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 			this_cpu_inc(si->stats_pcpu->connection_create_failures64);
 			spin_unlock_bh(&si->lock);
 			DEBUG_TRACE("%px: original_cm: Bridge VLAN insert egress VLAN Tag is not set, as bottom interface is not set.\n", msg);
-			status = -EPERM;
+			status = SFE_RET_BOTTOM_INTERFACE_NOT_SET;
 			goto free_reply_cm;
 		}
 
@@ -2569,7 +2569,7 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 			this_cpu_inc(si->stats_pcpu->connection_create_failures64);
 			spin_unlock_bh(&si->lock);
 			DEBUG_WARN("%px: More than %d VLAN & VLAN Filter rules are not allowed\n", msg, SFE_MAX_VLAN_DEPTH);
-			status = -EPERM;
+			status = SFE_RET_MORE_VLAN_AND_VLAN_FILTER_RULES_NOT_ALLOWED;
 			goto free_reply_cm;
 		}
 
@@ -2967,7 +2967,7 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 					reply_cm->xmit_dev->name, &reply_cm->match_dest_ip, &reply_cm->xlate_dest_ip,
 					ntohs(reply_cm->match_dest_port), ntohs(reply_cm->xlate_dest_port));
 
-			status = -ESHUTDOWN;
+			status = SFE_RET_UNABLE_TO_TAKE_REF_FOR_SOCKET;
 			goto free_reply_cm;
 		}
 
@@ -3052,7 +3052,7 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 			this_cpu_inc(si->stats_pcpu->connection_create_failures64);
 			spin_unlock_bh(&si->lock);
 			DEBUG_TRACE("%px: reply_cm: Bridge VLAN insert egress VLAN Tag is not set, as bottom interface is not set.\n", msg);
-			status = -EPERM;
+			status = SFE_RET_BOTTOM_INTERFACE_NOT_SET;
 			goto sk_refcount_dec;
 		}
 		/*
@@ -3074,7 +3074,7 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 			this_cpu_inc(si->stats_pcpu->connection_create_failures64);
 			spin_unlock_bh(&si->lock);
 			DEBUG_WARN("%px: More than %d VLAN & VLAN Filter rules are not allowed\n", msg, SFE_MAX_VLAN_DEPTH);
-			status = -EPERM;
+			status = SFE_RET_MORE_VLAN_AND_VLAN_FILTER_RULES_NOT_ALLOWED;
 			goto sk_refcount_dec;
 		}
 
@@ -3115,7 +3115,7 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 			this_cpu_inc(si->stats_pcpu->connection_create_failures64);
 			spin_unlock_bh(&si->lock);
 			DEBUG_WARN("sfe: GRE proto handler is not registered\n");
-			status = -EPERM;
+			status = SFE_RET_GRE_PROTO_HANDLER_NOT_REGISTERED;
 			goto sk_refcount_dec;
 		}
 	}
@@ -3131,7 +3131,7 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 			this_cpu_inc(si->stats_pcpu->connection_create_failures64);
 			spin_unlock_bh(&si->lock);
 			DEBUG_WARN("sfe: L2TP proto handler is not registered\n");
-			status = -EPERM;
+			status = SFE_RET_L2TP_PROTO_HANDLER_NOT_REGISTERED;
 			goto sk_refcount_dec;
 		}
 	}
@@ -3146,7 +3146,7 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 			this_cpu_inc(si->stats_pcpu->connection_create_failures64);
 			spin_unlock_bh(&si->lock);
 			DEBUG_WARN("sfe: ESP proto handler is not registered\n");
-			status = -EPERM;
+			status = SFE_RET_ESP_PROTO_HANDLER_NOT_REGISTERED;
 			goto sk_refcount_dec;
 		}
 	}
@@ -3160,7 +3160,7 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 			this_cpu_inc(si->stats_pcpu->connection_create_failures64);
 			spin_unlock_bh(&si->lock);
 			DEBUG_WARN("sfe: Etherip proto handler is not registered\n");
-			status = -EPERM;
+			status = SFE_RET_ETHERIP_PROTO_HANDLER_NOT_REGISTERED;
 			goto sk_refcount_dec;
 		}
 	}
@@ -3186,7 +3186,7 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 						msg->conn_rule.return_top_interface_num);
 			this_cpu_inc(si->stats_pcpu->connection_create_failures64);
 			spin_unlock_bh(&si->lock);
-			status = -EINVAL;
+			status = SFE_RET_TOP_INTERFACE_DEV_NOT_FOUND;
 			goto sk_refcount_dec;
 		}
 	}
@@ -3258,7 +3258,7 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 			pr_err("Failed to initialize dst for flow match, err: %d\n", err);
 			this_cpu_inc(si->stats_pcpu->connection_create_failures64);
 			spin_unlock_bh(&si->lock);
-			status = -ENOMEM;
+			status = SFE_RET_DST_INIT_FOR_FLOW_MATCH_FAILED;
 			goto sk_refcount_dec;
 		}
 	}
@@ -3271,7 +3271,7 @@ int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 			pr_err("Failed to initialize dst for return flow match, err: %d\n", err);
 			this_cpu_inc(si->stats_pcpu->connection_create_failures64);
 			spin_unlock_bh(&si->lock);
-			status = -ENOMEM;
+			status = SFE_RET_DST_INIT_FOR_RETURN_FLOW_MATCH_FAILED;
 			goto free_original_dst;
 		}
 	}

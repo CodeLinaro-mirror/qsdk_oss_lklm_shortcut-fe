@@ -130,6 +130,39 @@ struct sfe_fls {
 	sfe_fls_conn_stats_update_t stats_update_cb;
 };
 
+typedef enum sfe_response {
+	SFE_RET_SUCCESS,
+	SFE_RET_IPPROTO_NON_UDP,
+	SFE_RET_SRC_DEV_NOT_FOUND,
+	SFE_RET_DEST_DEV_NOT_FOUND,
+	SFE_RET_SRC_DEV_AND_DEST_DEV_UNREGISTERED,
+	SFE_RET_CONN_ENTRY_MEM_ALLOC_FAILED,
+	SFE_RET_CONN_MATCH_ENTRY_MEM_ALLOC_FAILED,
+	SFE_RET_MAX_CONN_COUNT_REACHED,
+	SFE_RET_CONN_ALREADY_EXISTS,
+	SFE_RET_BOTTOM_INTERFACE_NOT_SET,
+	SFE_RET_MORE_VLAN_AND_VLAN_FILTER_RULES_NOT_ALLOWED,
+	SFE_RET_UNABLE_TO_TAKE_REF_FOR_SOCKET,
+	SFE_RET_GRE_PROTO_HANDLER_NOT_REGISTERED,
+	SFE_RET_L2TP_PROTO_HANDLER_NOT_REGISTERED,
+	SFE_RET_TOP_INTERFACE_DEV_NOT_FOUND,
+	SFE_RET_ESP_PROTO_HANDLER_NOT_REGISTERED,
+	SFE_RET_DST_INIT_FOR_FLOW_MATCH_FAILED,
+	SFE_RET_DST_INIT_FOR_RETURN_FLOW_MATCH_FAILED,
+	SFE_RET_ETHERIP_PROTO_HANDLER_NOT_REGISTERED,
+	SFE_RET_EXCEPTION_CONNECTION_INVALID,
+	SFE_RET_EXCEPTION_TCP_INVALID,
+	SFE_RET_EXCEPTION_PROTOCOL_NOT_SUPPORT,
+	SFE_RET_EXCEPTION_NOT_SUPPORT_BRIDGE,
+	SFE_RET_EXCEPTION_SRC_DEV_NOT_L3,
+	SFE_RET_EXCEPTION_CFG_ERR,
+	SFE_RET_EXCEPTION_DEST_DEV_NOT_L3,
+
+	/* Tx command failure */
+	SFE_RET_TX_FAILURE,
+	SFE_RET_EXCEPTION_ENQUEUE_FAILED,
+} sfe_response_t;
+
 extern struct sfe_fls sfe_fls_info;
 
 /*
@@ -170,10 +203,10 @@ typedef void (*sfe_ipv6_many_sync_callback_t)(struct sfe_ipv6_msg *msg);
  * IPv4 APIs used by connection manager
  */
 int sfe_ipv4_recv(struct net_device *dev, struct sk_buff *skb, struct sfe_l2_info *l2_info, bool tun_outer);
-int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg);
+sfe_response_t sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg);
 void sfe_ipv4_destroy_rule(struct sfe_ipv4_rule_destroy_msg *msg);
 void sfe_ipv4_destroy_all_rules_for_dev(struct net_device *dev);
-int sfe_ipv4_create_mc_rule(struct sfe_ipv4_mc_rule_create_msg *msg);
+sfe_response_t sfe_ipv4_create_mc_rule(struct sfe_ipv4_mc_rule_create_msg *msg);
 void sfe_ipv4_destroy_mc_rule(struct sfe_ipv4_mc_rule_destroy_msg *msg);
 void sfe_ipv4_register_sync_rule_callback(sfe_sync_rule_callback_t callback);
 void sfe_ipv4_update_rule(struct sfe_ipv4_rule_create_msg *msg);
@@ -188,10 +221,10 @@ void sfe_ipv4_stats_convert(struct sfe_ipv4_conn_sync *sync_msg, struct sfe_conn
  * IPv6 APIs used by connection manager
  */
 int sfe_ipv6_recv(struct net_device *dev, struct sk_buff *skb, struct sfe_l2_info *l2_info, bool tun_outer);
-int sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg);
+sfe_response_t sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg);
 void sfe_ipv6_destroy_rule(struct sfe_ipv6_rule_destroy_msg *msg);
 void sfe_ipv6_destroy_all_rules_for_dev(struct net_device *dev);
-int sfe_ipv6_create_mc_rule(struct sfe_ipv6_mc_rule_create_msg *msg);
+sfe_response_t sfe_ipv6_create_mc_rule(struct sfe_ipv6_mc_rule_create_msg *msg);
 void sfe_ipv6_destroy_mc_rule(struct sfe_ipv6_mc_rule_destroy_msg *msg);
 void sfe_ipv6_register_sync_rule_callback(sfe_sync_rule_callback_t callback);
 void sfe_ipv6_update_rule(struct sfe_ipv6_rule_create_msg *msg);
