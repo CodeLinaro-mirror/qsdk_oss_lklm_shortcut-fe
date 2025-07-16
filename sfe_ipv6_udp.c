@@ -151,6 +151,8 @@ int sfe_ipv6_recv_udp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 #ifdef SFE_SW_L4_CHECKSUM_VERIFICATION
 	struct net *net;
 #endif
+	struct netdev_hw_offload_ops *offload_ops = NULL;
+	bool tun_vp_tx = false;
 
 	DEBUG_TRACE("%px: sfe: sfe_ipv6_recv_udp called.\n", skb);
 
@@ -761,10 +763,26 @@ int sfe_ipv6_recv_udp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 	features = cm->features;
 
 	fast_xmit = !!(cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_FAST_XMIT);
-
-	rcu_read_unlock();
+	tun_vp_tx = !!(cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_PPE_TUN_VP_VALID);
 
 	this_cpu_inc(si->stats_pcpu->packets_forwarded64);
+
+	/*
+	 * For tunnel Packets check if tunnel is active in PPE.
+	 * If tunnel is active queue the packet to tunnel VP
+	 */
+	if (unlikely(tun_vp_tx)) {
+		offload_ops = rcu_dereference(xmit_dev->offload_ops);
+		if (likely(offload_ops && offload_ops->xmit)) {
+			if (likely(offload_ops->xmit(xmit_dev, skb))) {
+				this_cpu_inc(si->stats_pcpu->ppe_tun_vp_tx64);
+				rcu_read_unlock();
+				return 1;
+			}
+		}
+	}
+
+	rcu_read_unlock();
 
 	/*
 	 * We do per packet condition check before we could fast xmit the

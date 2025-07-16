@@ -121,6 +121,8 @@ struct sfe_ipv4_vlan_filter_connection_match {
 					/* Skip fragmentation offload */
 #define SFE_IPV4_CONNECTION_MATCH_FLAG_VXLAN_GPE (1<<28)
 					/* VXLAN-GPE flow */
+#define SFE_IPV4_CONNECTION_MATCH_FLAG_PPE_TUN_VP_VALID (1<<29)
+					/* TUN VP valid */
 
 /*
  * IPv4 multicast destination structure
@@ -470,6 +472,7 @@ struct sfe_ipv4_stats {
 	u64 pppoe_bridge_packets_3tuple_forwarded64;    /* Number of IPv4 PPPoE bridge packets forwarded based on 3-tuple info */
 	u64 connection_create_requests_overflow64;	/* Number of IPV4 connection create requests after reaching max limit */
 	u64 bridge_vlan_passthrough_forwarded64;	/* Number of IPV4 bridge vlan passthrough packets forwarded */
+	u64 ppe_tun_vp_tx64;				/* Number of IPV4 packets queued to PPE tunnel VP  */
 };
 
 /*

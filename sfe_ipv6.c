@@ -481,6 +481,7 @@ static void sfe_ipv6_update_summary_stats(struct sfe_ipv6 *si, struct sfe_ipv6_s
 		stats->fragment_id_timeout64 += s->fragment_id_timeout64;
 		stats->fragment_exception64 += s->fragment_exception64;
 		stats->bridge_vlan_passthrough_forwarded64 += s->bridge_vlan_passthrough_forwarded64;
+		stats->ppe_tun_vp_tx64 += s->ppe_tun_vp_tx64;
 	}
 }
 
@@ -2495,6 +2496,10 @@ sfe_response_t sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 		original_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_FAST_XMIT_DEV_ADMISSION;
 	}
 
+	if (msg->rule_flags & SFE_RULE_CREATE_FLAG_FLOW_DEST_TUN_VP) {
+               original_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_PPE_TUN_VP_VALID;
+	}
+
 	/*
 	 * Mark SAWF metadata if the sawf tag is valid.
 	 */
@@ -2889,6 +2894,10 @@ sfe_response_t sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 	}
 	if (msg->rule_flags & SFE_RULE_CREATE_FLAG_RETURN_TRANSMIT_FAST) {
 		reply_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_FAST_XMIT_DEV_ADMISSION;
+	}
+
+	if (msg->rule_flags & SFE_RULE_CREATE_FLAG_RETURN_DEST_TUN_VP) {
+               reply_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_PPE_TUN_VP_VALID;
 	}
 
 	if (sfe_is_l2_feature_enabled() && !(msg->rule_flags & SFE_RULE_CREATE_FLAG_BRIDGE_FLOW)) {
@@ -4197,7 +4206,8 @@ static int sfe_ipv6_debug_dev_read_stats(struct sfe_ipv6 *si, struct sfe_ipv6_de
 			      "fragments_dropped=\"%llu\" "
 			      "fragment_id_timeout=\"%llu\" "
 			      "fragments_exception=\"%llu\" "
-			      "bridge_vlan_passthrough_forwarded64=\"%llu\" />\n",
+			      "bridge_vlan_passthrough_forwarded64=\"%llu\" />\n"
+			      "ppe_tun_vp_tx64 =\"%llu\" />\n",
 				num_conn,
 				stats.packets_dropped64,
 				stats.packets_fast_xmited64,
@@ -4225,7 +4235,8 @@ static int sfe_ipv6_debug_dev_read_stats(struct sfe_ipv6 *si, struct sfe_ipv6_de
 				stats.fragment_dropped64,
 				stats.fragment_id_timeout64,
 				stats.fragment_exception64,
-				stats.bridge_vlan_passthrough_forwarded64);
+				stats.bridge_vlan_passthrough_forwarded64,
+				stats.ppe_tun_vp_tx64);
 
 	ws->msgp = ws->msg;
 
