@@ -107,7 +107,7 @@ typedef enum {
 struct sfe_response_msg {
 	struct list_head node;
 	sfe_msg_types_t type;
-	void *msg[0];
+	uint8_t msg[];
 };
 
 /*
