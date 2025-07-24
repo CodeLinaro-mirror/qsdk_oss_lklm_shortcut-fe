@@ -1135,6 +1135,7 @@ int sfe_ipv4_frag_prepare( struct sfe_ipv4 *si, struct sfe_ipv4_connection_match
 		}
 
 		skb_reserve(skb2, headroom);
+		skb_reset_network_header(skb2);
 		__skb_queue_tail(head, skb2);
 	}
 
@@ -1260,8 +1261,14 @@ void sfe_ipv4_frag(struct sfe_ipv4 *si, struct sfe_ipv4_connection_match *cm, st
 		skb_copy_hash(frag_skb, skb);
 		nf_copy(frag_skb, skb);
 
-		frag_skb->mac_header = skb->mac_header;
-		frag_skb->network_header = skb->network_header;
+		/*
+		 * The mac_header and network_header fields are set during the
+		 * execution of the sfe_ipv4_frag_prepare function to ensure
+		 * correct packet header alignment.
+		 *
+		 * frag_skb->mac_header = skb->mac_header;
+		 * frag_skb->network_header = skb->network_header;
+		 */
 
 		memcpy(skb_put(frag_skb, hdr_len), skb->data, hdr_len);
 		memcpy(skb_put(frag_skb, frag_len), next_data, frag_len);
