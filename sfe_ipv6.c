@@ -3760,6 +3760,10 @@ static int sfe_ipv6_debug_dev_read_connections_connection(struct sfe_ipv6 *si, s
 	u16 orig_egress_vlan_hdr0 = 0, orig_egress_vlan_hdr1 = 0, orig_egress_vlan_hdr_cnt = 0;
 	u16 reply_ingress_vlan_hdr0 = 0, reply_ingress_vlan_hdr1 = 0, reply_ingress_vlan_hdr_cnt = 0;
 	u16 reply_egress_vlan_hdr0 = 0, reply_egress_vlan_hdr1 = 0, reply_egress_vlan_hdr_cnt = 0;
+	u8 original_src_mac[ETH_ALEN];
+	u8 original_dest_mac[ETH_ALEN];
+	u8 reply_src_mac[ETH_ALEN];
+	u8 reply_dest_mac[ETH_ALEN];
 #ifdef SFE_BRIDGE_VLAN_FILTERING_ENABLE
 	u32 orig_cm_vf_ingress_flags = 0, reply_cm_vf_ingress_flags = 0;
 #endif
@@ -3798,6 +3802,10 @@ static int sfe_ipv6_debug_dev_read_connections_connection(struct sfe_ipv6 *si, s
 
 	sfe_ipv6_connection_match_update_summary_stats(original_cm, &packet, &byte);
 
+	memcpy(original_src_mac, original_cm->xmit_src_mac, ETH_ALEN);
+	memcpy(original_dest_mac, original_cm->xmit_dest_mac, ETH_ALEN);
+	memcpy(reply_src_mac, reply_cm->xmit_src_mac, ETH_ALEN);
+	memcpy(reply_dest_mac, reply_cm->xmit_dest_mac, ETH_ALEN);
 	src_rx_packets = original_cm->rx_packet_count64;
 	src_rx_bytes = original_cm->rx_byte_count64;
 	src_mark = original_cm->mark;
@@ -3981,6 +3989,10 @@ static int sfe_ipv6_debug_dev_read_connections_connection(struct sfe_ipv6 *si, s
 					 fast_xmit?"Yes":"No",
 					 vlan_hdr_cnt);
 		 }
+	} else {
+		ws->msg_len += snprintf(ws->msg + ws->msg_len, length - ws->msg_len,
+			 "original_src_mac=\"%pM\" original_dest_mac=\"%pM\" reply_src_mac=\"%pM\" reply_dest_mac=\"%pM\" ",
+			 original_src_mac, original_dest_mac, reply_src_mac, reply_dest_mac);
 	}
 
 	if (original_cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_BRIDGE_VLAN_PASSTHROUGH) {
