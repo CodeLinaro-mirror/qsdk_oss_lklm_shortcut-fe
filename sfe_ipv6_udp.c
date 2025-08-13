@@ -350,10 +350,7 @@ int sfe_ipv6_recv_udp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 	 * we can't forward it easily.
 	 */
 	if (unlikely((len > cm->xmit_dev_mtu) && (!cm->up) && !skb_is_gso(skb))) {
-		if (net_ratelimit()) {
-			DEBUG_TRACE("skb_len = %u, MTU = %u, skb_is_gso = %d\n", len, cm->xmit_dev_mtu, skb_is_gso(skb));
-		}
-
+		DEBUG_TRACE("skb_len = %u, MTU = %u, skb_is_gso = %d\n", len, cm->xmit_dev_mtu, skb_is_gso(skb));
 		sfe_ipv6_sync_status(si, cm->connection, SFE_RULE_SYNC_REASON_STATS);
 		rcu_read_unlock();
 
