@@ -4380,7 +4380,7 @@ static int sfe_ipv6_debug_dev_release(struct inode *inode, struct file *file)
 /*
  * File operations used in the debug char device
  */
-static struct file_operations sfe_ipv6_debug_dev_fops = {
+static const struct file_operations sfe_ipv6_debug_dev_fops = {
 	.owner = THIS_MODULE,
 	.read = sfe_ipv6_debug_dev_read,
 	.open = sfe_ipv6_debug_dev_open,
