@@ -674,8 +674,6 @@ static void sfe_ipv6_insert_connection(struct sfe_ipv6 *si, struct sfe_ipv6_conn
  */
 bool sfe_ipv6_remove_connection(struct sfe_ipv6 *si, struct sfe_ipv6_connection *c)
 {
-	sfe_fls_conn_delete_t delete_cb;
-
 	lockdep_assert_held(&si->lock);
 	if (c->removed) {
 		DEBUG_ERROR("%px: Connection has been removed already\n", c);
@@ -696,12 +694,6 @@ bool sfe_ipv6_remove_connection(struct sfe_ipv6 *si, struct sfe_ipv6_connection 
 		if (c->reply_match->qdisc_xmit_dev) {
 			dev_put(c->reply_match->xmit_dev);
 		}
-		rcu_read_lock();
-		delete_cb = rcu_dereference(sfe_fls_info.delete_cb);
-		if (c->reply_match->fls_conn && delete_cb) {
-			delete_cb(c->reply_match->fls_conn);
-		}
-		rcu_read_unlock();
 
 		sfe_ipv6_remove_connection_match(si, c->reply_match);
 	}
@@ -716,13 +708,6 @@ bool sfe_ipv6_remove_connection(struct sfe_ipv6 *si, struct sfe_ipv6_connection 
 	if (c->original_match->qdisc_xmit_dev) {
 		dev_put(c->original_match->xmit_dev);
 	}
-
-	rcu_read_lock();
-	delete_cb = rcu_dereference(sfe_fls_info.delete_cb);
-	if (c->original_match->fls_conn && delete_cb) {
-		delete_cb(c->original_match->fls_conn);
-	}
-	rcu_read_unlock();
 
 	sfe_ipv6_remove_connection_match(si, c->original_match);
 
@@ -856,6 +841,7 @@ static void sfe_ipv6_free_sfe_ipv6_connection_rcu(struct rcu_head *head)
 {
 	struct sfe_ipv6_connection *c;
 	struct sock *sk;
+	sfe_fls_conn_delete_t delete_cb;
 
 	/*
 	 * We dont need spin lock as the connection is already removed from link list
@@ -864,6 +850,22 @@ static void sfe_ipv6_free_sfe_ipv6_connection_rcu(struct rcu_head *head)
 	BUG_ON(!c->removed);
 
 	DEBUG_TRACE("%px: connecton has been deleted\n", c);
+
+	/*
+	 * Delete flow statistics information.
+	 */
+	rcu_read_lock();
+	delete_cb = rcu_dereference(sfe_fls_info.delete_cb);
+	if (c->original_match->fls_conn && delete_cb) {
+		delete_cb(c->original_match->fls_conn);
+		c->original_match->fls_conn = NULL;
+	}
+
+	if (c->reply_match && c->reply_match->fls_conn && delete_cb) {
+		delete_cb(c->reply_match->fls_conn);
+		c->reply_match->fls_conn = NULL;
+	}
+	rcu_read_unlock();
 
 	/*
 	 * Decrease the refcount taken in function sfe_ipv6_create_rule()
