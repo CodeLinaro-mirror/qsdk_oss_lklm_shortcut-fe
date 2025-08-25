@@ -4162,8 +4162,14 @@ static int sfe_ipv4_debug_dev_read_connections_connection(struct sfe_ipv4 *si, s
 
 	memcpy(original_src_mac, original_cm->xmit_src_mac, ETH_ALEN);
 	memcpy(original_dest_mac, original_cm->xmit_dest_mac, ETH_ALEN);
-	memcpy(reply_src_mac, reply_cm->xmit_src_mac, ETH_ALEN);
-	memcpy(reply_dest_mac, reply_cm->xmit_dest_mac, ETH_ALEN);
+
+	if (reply_cm) {
+		memcpy(reply_src_mac, reply_cm->xmit_src_mac, ETH_ALEN);
+		memcpy(reply_dest_mac, reply_cm->xmit_dest_mac, ETH_ALEN);
+	} else {
+		memset(reply_src_mac, 0, ETH_ALEN);
+		memset(reply_dest_mac, 0, ETH_ALEN);
+	}
 	src_rx_packets = original_cm->rx_packet_count64;
 	src_rx_bytes = original_cm->rx_byte_count64;
 	src_mark = original_cm->mark;
