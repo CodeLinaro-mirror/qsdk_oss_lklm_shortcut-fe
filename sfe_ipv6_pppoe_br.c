@@ -17,6 +17,7 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+#include <linux/debug_mem_usage.h>
 #include <linux/skbuff.h>
 #include <net/udp.h>
 #include <linux/etherdevice.h>
@@ -216,6 +217,7 @@ int sfe_ipv6_recv_pppoe_bridge(struct sfe_ipv6 *si, struct sk_buff *skb, struct 
 	 * We do per packet condition check before we could fast xmit the
 	 * packet.
 	 */
+	mem_debug_update_skb(skb);
 	if (likely(fast_xmit && dev_fast_xmit(skb, xmit_dev, features))) {
 		this_cpu_inc(si->stats_pcpu->packets_fast_xmited64);
 		return 1;
@@ -229,6 +231,7 @@ int sfe_ipv6_recv_pppoe_bridge(struct sfe_ipv6 *si, struct sk_buff *skb, struct 
 	/*
 	 * Send the packet on its way.
 	 */
+	mem_debug_update_skb(skb);
 	dev_queue_xmit(skb);
 
 	return 1;

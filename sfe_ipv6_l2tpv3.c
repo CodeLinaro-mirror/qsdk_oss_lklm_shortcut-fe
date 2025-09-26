@@ -17,6 +17,7 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+#include <linux/debug_mem_usage.h>
 #include <linux/skbuff.h>
 #include <net/protocol.h>
 #include <linux/etherdevice.h>
@@ -231,6 +232,7 @@ int sfe_ipv6_recv_l2tpv3(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_de
 		skb_reset_transport_header(skb);
 		skb->fast_forwarded = 1;
 
+		mem_debug_update_skb(skb);
 		ret = ipprot->handler(skb);
 		if (ret) {
 			this_cpu_inc(si->stats_pcpu->packets_not_forwarded64);
@@ -365,6 +367,7 @@ int sfe_ipv6_recv_l2tpv3(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_de
 	/*
 	 * Send the packet on its way.
 	 */
+	mem_debug_update_skb(skb);
 	dev_queue_xmit(skb);
 
 	return 1;
