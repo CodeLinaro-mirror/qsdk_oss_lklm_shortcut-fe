@@ -17,6 +17,7 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+#include <linux/debug_mem_usage.h>
 #include <linux/module.h>
 #include <linux/sysfs.h>
 #include <linux/skbuff.h>
@@ -105,6 +106,7 @@ static inline void sfe_ipv6_frag_id_put(struct sfe_ipv6_frag *sif, struct sfe_ip
 	 */
 	list_for_each_entry_safe(fiel, fiel_tmp, &fie->q_head, q_node) {
 		list_del(&fiel->q_node);
+		mem_debug_update_skb(fiel->skb);
 		kfree_skb(fiel->skb);
 		this_cpu_inc(sif->si->stats_pcpu->fragment_dropped64);
 		kfree(fiel);
@@ -815,6 +817,7 @@ static int sfe_ipv6_frag_udp_forward(struct sfe_ipv6 *si, struct sk_buff *skb, s
 	 * We do per packet condition check before we could fast xmit the
 	 * packet.
 	 */
+	mem_debug_update_skb(skb);
 	if (likely(fast_xmit && dev_fast_xmit(skb, xmit_dev, features))) {
 		this_cpu_inc(si->stats_pcpu->packets_fast_xmited64);
 		return 1;
@@ -836,12 +839,14 @@ static int sfe_ipv6_frag_udp_forward(struct sfe_ipv6 *si, struct sk_buff *skb, s
 	 * check if fast qdisc xmit is enabled and send the packet on its way.
 	 */
 	if (cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_FAST_QDISC_XMIT) {
+		mem_debug_update_skb(skb);
 		if (likely(dev_fast_xmit_qdisc(skb, xmit_dev, cm->qdisc_xmit_dev))) {
 			this_cpu_inc(si->stats_pcpu->packets_fast_qdisc_xmited64);
 			return 1;
 		}
 	}
 
+	mem_debug_update_skb(skb);
 	dev_queue_xmit(skb);
 	return 1;
 }
@@ -941,6 +946,7 @@ int sfe_ipv6_recv_udp_frag(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_
 				DEBUG_WARN("%px: Queue lenght exceeded max limit\n", skb);
 				fie->state = SFE_IPV6_FRAG_FORWARD_DROP;
 				list_for_each_entry_safe(fiel ,fiel_tmp, &fie->q_head, q_node) {
+					mem_debug_update_skb(fiel->skb);
 					kfree_skb(fiel->skb);
 					list_del(&fiel->q_node);
 					kfree(fiel);
@@ -949,6 +955,7 @@ int sfe_ipv6_recv_udp_frag(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_
 
 				spin_unlock_bh(&fie->lock);
 				sfe_ipv6_frag_id_put(sif, fie);
+				mem_debug_update_skb(skb);
 				kfree_skb(skb);
 				this_cpu_inc(si->stats_pcpu->fragment_dropped64);
 				return 1;
@@ -963,6 +970,7 @@ int sfe_ipv6_recv_udp_frag(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_
 				fie->state = SFE_IPV6_FRAG_FORWARD_DROP;
 				spin_unlock_bh(&fie->lock);
 				sfe_ipv6_frag_id_put(sif, fie);
+				mem_debug_update_skb(skb);
 				kfree_skb(skb);
 				this_cpu_inc(si->stats_pcpu->fragment_dropped64);
 				return 1;
@@ -994,6 +1002,7 @@ int sfe_ipv6_recv_udp_frag(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_
 			 */
 			spin_unlock_bh(&fie->lock);
 			sfe_ipv6_frag_id_put(sif, fie);
+			mem_debug_update_skb(skb);
 			kfree_skb(skb);
 			this_cpu_inc(si->stats_pcpu->fragment_dropped64);
 			return 1;
@@ -1106,6 +1115,7 @@ int sfe_ipv6_recv_udp_frag(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_
 				}
 
 				if (!ret) {
+					mem_debug_update_skb(fiel->skb);
 					kfree_skb(fiel->skb);
 					this_cpu_inc(si->stats_pcpu->fragment_dropped64);
 					can_forward_frag = false;
@@ -1126,6 +1136,7 @@ int sfe_ipv6_recv_udp_frag(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_
 				fie->state = SFE_IPV6_FRAG_FORWARD_DROP;
 				spin_unlock_bh(&fie->lock);
 				rcu_read_unlock();
+				mem_debug_update_skb(skb);
 				kfree_skb(skb);
 				sfe_ipv6_frag_id_put(sif, fie);
 				this_cpu_inc(si->stats_pcpu->fragment_dropped64);
@@ -1141,6 +1152,7 @@ int sfe_ipv6_recv_udp_frag(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_
 				 */
 				spin_unlock_bh(&fie->lock);
 				rcu_read_unlock();
+				mem_debug_update_skb(skb);
 				kfree_skb(skb);
 				sfe_ipv6_frag_id_put(sif, fie);
 				this_cpu_inc(si->stats_pcpu->fragment_dropped64);
@@ -1170,6 +1182,7 @@ int sfe_ipv6_recv_udp_frag(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_
 			fie->state = SFE_IPV6_FRAG_FORWARD_DROP;
 			spin_unlock_bh(&fie->lock);
 			rcu_read_unlock();
+			mem_debug_update_skb(skb);
 			kfree_skb(skb);
 			sfe_ipv6_frag_id_put(sif, fie);
 			this_cpu_inc(si->stats_pcpu->fragment_dropped64);
