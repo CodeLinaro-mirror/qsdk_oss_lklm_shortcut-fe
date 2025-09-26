@@ -18,6 +18,7 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+#include <linux/debug_mem_usage.h>
 #include <linux/skbuff.h>
 #include <net/udp.h>
 #include <linux/etherdevice.h>
@@ -789,6 +790,7 @@ int sfe_ipv4_recv_udp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 	 * We do per packet condition check before we could fast xmit the
 	 * packet.
 	 */
+	mem_debug_update_skb(skb);
 	if (likely(fast_xmit && dev_fast_xmit(skb, xmit_dev, features))) {
 		this_cpu_inc(si->stats_pcpu->packets_fast_xmited64);
 		return 1;
@@ -809,12 +811,14 @@ int sfe_ipv4_recv_udp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 	 * check if fast qdisc xmit is enabled and send the packet on its way.
 	 */
 	if (cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_FAST_QDISC_XMIT) {
+		mem_debug_update_skb(skb);
 		if (likely(dev_fast_xmit_qdisc(skb, xmit_dev, cm->qdisc_xmit_dev))) {
 			this_cpu_inc(si->stats_pcpu->packets_fast_qdisc_xmited64);
 			return 1;
 		}
 	}
 
+	mem_debug_update_skb(skb);
 	dev_queue_xmit(skb);
 
 	return 1;

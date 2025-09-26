@@ -1126,7 +1126,14 @@ int sfe_ipv4_frag_prepare( struct sfe_ipv4 *si, struct sfe_ipv4_connection_match
 
 		skb2 = netdev_alloc_skb(skb->dev, mtu + headroom + tailroom);
 		if (!skb2) {
+			struct sk_buff *skb_iter, *tmp;
+
 			pr_warn("%px: Unable to allocate memory for new fragment.\n", skb->dev);
+
+			skb_queue_walk_safe(head, skb_iter, tmp) {
+				mem_debug_update_skb(skb_iter);
+			}
+
 			/*
 			 * Free the fragments that were allocated before
 			 */
@@ -1157,6 +1164,7 @@ static int sfe_ipv4_frag_xmit(struct sfe_ipv4 *si, struct sfe_ipv4_connection_ma
 	 * We do per packet condition check before we could fast xmit the
 	 * packet.
 	 */
+	mem_debug_update_skb(skb);
 	if (likely(fast_xmit && dev_fast_xmit(skb, skb->dev, features))) {
 		this_cpu_inc(si->stats_pcpu->packets_fast_xmited64);
 		return 1;
@@ -1177,12 +1185,14 @@ static int sfe_ipv4_frag_xmit(struct sfe_ipv4 *si, struct sfe_ipv4_connection_ma
 	 * check if fast qdisc xmit is enabled and send the packet on its way.
 	 */
 	if (cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_FAST_QDISC_XMIT) {
+		mem_debug_update_skb(skb);
 		if (likely(dev_fast_xmit_qdisc(skb, skb->dev, cm->qdisc_xmit_dev))) {
 			this_cpu_inc(si->stats_pcpu->packets_fast_qdisc_xmited64);
 			return 1;
 		}
 	}
 
+	mem_debug_update_skb(skb);
 	dev_queue_xmit(skb);
 
 	return 1;
