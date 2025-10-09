@@ -3449,7 +3449,7 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 		original_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_VXLAN_GPE;
 		err = dst_cache_init(&original_cm->dst_cache, GFP_NOWAIT | __GFP_NOWARN);
 		if (err) {
-			pr_err("Failed to initialize dst for flow match, err: %d\n", err);
+			DEBUG_TRACE("Failed to initialize dst for flow match, err: %d\n", err);
 			this_cpu_inc(si->stats_pcpu->connection_create_failures64);
 			spin_unlock_bh(&si->lock);
 			status = -ENOMEM;
@@ -3462,7 +3462,7 @@ int sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 		reply_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_VXLAN_GPE;
 		err = dst_cache_init(&reply_cm->dst_cache, GFP_NOWAIT | __GFP_NOWARN);
 		if (err) {
-			pr_err("Failed to initialize dst for return flow match, err: %d\n", err);
+			DEBUG_TRACE("Failed to initialize dst for return flow match, err: %d\n", err);
 			this_cpu_inc(si->stats_pcpu->connection_create_failures64);
 			spin_unlock_bh(&si->lock);
 			status = -ENOMEM;
