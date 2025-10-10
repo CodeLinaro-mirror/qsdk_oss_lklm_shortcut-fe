@@ -17,6 +17,7 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+#include <linux/debug_mem_usage.h>
 #include <linux/skbuff.h>
 #include <linux/etherdevice.h>
 #include <linux/version.h>
@@ -244,6 +245,7 @@ int sfe_ipv6_recv_tunipip6(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_
 		 * Update top interface for tunnel searching.
 		 */
 		skb->dev = cm->top_interface_dev;
+		mem_debug_update_skb(skb);
 		ipprot->handler(skb);
 		return 1;
 	}
@@ -358,6 +360,7 @@ int sfe_ipv6_recv_tunipip6(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_
 	 * Mark that this packet has been fast forwarded and send it on its way.
 	 */
 	skb->fast_forwarded = 1;
+	mem_debug_update_skb(skb);
 	dev_queue_xmit(skb);
 
 	return 1;

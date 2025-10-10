@@ -17,6 +17,7 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+#include <linux/debug_mem_usage.h>
 #include <linux/skbuff.h>
 #include <net/protocol.h>
 #include <net/ip.h>
@@ -243,6 +244,7 @@ int sfe_ipv4_recv_esp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 		xmit_dev = cm->xmit_dev;
 		skb->dev = xmit_dev;
 
+		mem_debug_update_skb(skb);
 		ret = ipprot->handler(skb);
 		if (ret) {
 			rcu_read_unlock();
@@ -413,10 +415,12 @@ int sfe_ipv4_recv_esp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 	this_cpu_inc(si->stats_pcpu->packets_forwarded64);
 	prefetch(skb_shinfo(skb));
 
+
 	/*
 	 * We do per packet condition check before we could fast xmit the
 	 * packet.
 	 */
+	mem_debug_update_skb(skb);
 	if (likely(fast_xmit && dev_fast_xmit(skb, xmit_dev, features))) {
 		this_cpu_inc(si->stats_pcpu->packets_fast_xmited64);
 		return 1;
@@ -427,6 +431,7 @@ int sfe_ipv4_recv_esp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 	 */
 	skb->fast_forwarded = 1;
 
+	mem_debug_update_skb(skb);
 	dev_queue_xmit(skb);
 	return 1;
 }
