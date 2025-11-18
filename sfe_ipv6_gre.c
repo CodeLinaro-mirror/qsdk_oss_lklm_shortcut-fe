@@ -238,6 +238,13 @@ int sfe_ipv6_recv_gre(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 	 * protocol handler will be valid only in decap-path.
 	 */
 	if (cm->proto) {
+		/*
+		 * Set SKB packet type to PACKET_HOST
+		 */
+		if (unlikely(cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_PACKET_HOST)) {
+			skb->pkt_type = PACKET_HOST;
+		}
+
 		struct inet6_protocol *ipprot = cm->proto;
 		skb_pull(skb, ihl);
 		skb_reset_transport_header(skb);
@@ -274,13 +281,6 @@ int sfe_ipv6_recv_gre(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 	}
 
 	/*
-	 * Set SKB packet type to PACKET_HOST
-	 */
-	if (unlikely(cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_PACKET_HOST)) {
-		skb->pkt_type = PACKET_HOST;
-	}
-
-	/*
 	 * If our packet is larger than the MTU of the transmit interface then
 	 * we can't forward it easily.
 	 */
@@ -291,6 +291,13 @@ int sfe_ipv6_recv_gre(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 		sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_GRE_NEEDS_FRAGMENTATION);
 		DEBUG_TRACE("Larger than MTU\n");
 		return 0;
+	}
+
+	/*
+	 * Set SKB packet type to PACKET_HOST
+	 */
+	if (unlikely(cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_PACKET_HOST)) {
+		skb->pkt_type = PACKET_HOST;
 	}
 
 	/*
