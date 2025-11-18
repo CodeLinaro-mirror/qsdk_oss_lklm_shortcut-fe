@@ -280,6 +280,13 @@ int sfe_ipv4_recv_gre(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 	 * protocol handler will be valid only in decap-path.
 	 */
 	if (cm->proto) {
+		/*
+		 * Set SKB packet type to PACKET_HOST
+		 */
+		if (unlikely(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_PACKET_HOST)) {
+			skb->pkt_type = PACKET_HOST;
+		}
+
 		struct net_protocol *ipprot = cm->proto;
 		skb_reset_network_header(skb);
 		skb_pull(skb, ihl);
