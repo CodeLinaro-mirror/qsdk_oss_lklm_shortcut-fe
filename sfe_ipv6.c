@@ -3002,8 +3002,14 @@ sfe_response_t sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 		}
 	}
 
+	/*
+	 * When there are more than 1 qdisc configured in FROM/TO interface heirarchy, SFE uses the
+	 * corresponding top interface to send the packet. Check if SFE should add L2 header which is
+	 * required when the top interface is VLAN as Linux adds only the VLAN tag and expects the L2
+	 * header to be present or the top interface is not found.
+	 */
 	if (disable_l2_flow) {
-		if (!reply_cm->top_interface_dev || is_vlan_dev(reply_cm->top_interface_dev)) {
+		if (!original_cm->top_interface_dev || is_vlan_dev(original_cm->top_interface_dev)) {
 			reply_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_WRITE_L2_HDR;
 
 			/*
@@ -3019,7 +3025,7 @@ sfe_response_t sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 	}
 
 	if (disable_l2_return) {
-		if (!original_cm->top_interface_dev || is_vlan_dev(original_cm->top_interface_dev)) {
+		if (!reply_cm->top_interface_dev || is_vlan_dev(reply_cm->top_interface_dev)) {
 			original_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_WRITE_L2_HDR;
 
 			/*
