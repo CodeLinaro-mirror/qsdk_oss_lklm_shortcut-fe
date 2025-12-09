@@ -775,7 +775,18 @@ int sfe_ipv6_recv_tcp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 	 */
 	if (likely(hw_csum)) {
 		skb->ip_summed = CHECKSUM_PARTIAL;
+	} else {
+		/*
+		 * Received GRO packet and tx csum is not enabled.
+		 * In such a case, ip_summed is set to CHECKSUM_PARTIAL
+		 * at this point; hence clear ip_summed so that csum
+		 * can be calculated by software.
+		 */
+		if (likely(skb_is_gso(skb))) {
+			skb->ip_summed = CHECKSUM_NONE;
+		}
 	}
+
 	/*
 	 * Update traffic stats.
 	 */
