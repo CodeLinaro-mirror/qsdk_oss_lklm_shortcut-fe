@@ -152,6 +152,14 @@ int sfe_ipv4_recv_tun6rd(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_de
 		this_cpu_inc(si->stats_pcpu->pppoe_bridge_packets_forwarded64);
 	}
 
+	if (unlikely(!bridge_flow && tun_outer)) {
+		if (cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_XLATE_SRC)
+			iph->saddr = cm->xlate_src_ip;
+
+		if(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_XLATE_DEST)
+			iph->daddr = cm->xlate_dest_ip;
+	}
+
 	/*
 	 * If cm->proto is set, it means the decap path.
 	 * Otherwise we forward the packet in encap path.
