@@ -3725,9 +3725,25 @@ sk_refcount_dec:
 	}
 
 free_reply_cm:
+	if (reply_cm->qdisc_xmit_dev) {
+		dev_put(reply_cm->xmit_dev);
+	}
+
+	if (reply_cm->top_interface_dev) {
+		dev_put(reply_cm->top_interface_dev);
+	}
+
 	kfree(reply_cm);
 
 free_original_cm:
+	if (original_cm->qdisc_xmit_dev) {
+		dev_put(original_cm->xmit_dev);
+	}
+
+	if (original_cm->top_interface_dev) {
+		dev_put(original_cm->top_interface_dev);
+	}
+
 	kfree(original_cm);
 
 free_conn_obj:
