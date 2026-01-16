@@ -2874,7 +2874,7 @@ sfe_response_t sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 #endif
 
 	if (((IPPROTO_IPV6 == tuple->protocol) || (IPPROTO_GRE == tuple->protocol) || (IPPROTO_ESP == tuple->protocol) ||
-				(IPPROTO_L2TP == tuple->protocol)) && !sfe_ipv4_is_local_ip(si, original_cm->match_dest_ip)) {
+				(IPPROTO_L2TP == tuple->protocol)) && !sfe_ipv4_is_local_ip(si, original_cm->xlate_dest_ip)) {
 		original_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_PASSTHROUGH;
 	}
 
@@ -3187,7 +3187,7 @@ sfe_response_t sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	}
 
 	if (((IPPROTO_IPV6 == tuple->protocol) || (IPPROTO_GRE == tuple->protocol) || (IPPROTO_ESP == tuple->protocol)
-				|| (IPPROTO_L2TP == tuple->protocol)) && !sfe_ipv4_is_local_ip(si, reply_cm->match_dest_ip)) {
+				|| (IPPROTO_L2TP == tuple->protocol)) && !sfe_ipv4_is_local_ip(si, reply_cm->xlate_dest_ip)) {
 		reply_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_PASSTHROUGH;
 	}
 
@@ -3231,7 +3231,7 @@ sfe_response_t sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	/*
 	 * We set the UDP sock pointer as valid only for decap direction.
 	 */
-	if (sk && udp_sk(sk)->encap_type && sfe_ipv4_is_local_ip(si, reply_cm->match_dest_ip)) {
+	if (sk && udp_sk(sk)->encap_type && sfe_ipv4_is_local_ip(si, reply_cm->xlate_dest_ip)) {
 		if (!refcount_inc_not_zero(&sk->sk_refcnt)) {
 			this_cpu_inc(si->stats_pcpu->connection_create_failures64);
 			spin_unlock_bh(&si->lock);
