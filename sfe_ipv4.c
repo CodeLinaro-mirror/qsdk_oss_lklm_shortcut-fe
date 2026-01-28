@@ -115,7 +115,6 @@ static char *sfe_ipv4_exception_events_string[SFE_IPV4_EXCEPTION_EVENT_LAST] = {
 	"L2TPV3_NEEDS_FRAGMENTATION",
 	"FRAG_FAILS_NOMEM",
 	"FRAG_FAILS_DF_SET",
-	"FRAG_FAILS_NON_LINEAR_SKB",
 	"FRAG_FAILS_MULTICAST_PACKET",
 	"FRAG_FAILS_BRIDGED_FLOW",
 	"FRAG_CHECKSUM_FAIL",
@@ -129,6 +128,21 @@ static char *sfe_ipv4_exception_events_string[SFE_IPV4_EXCEPTION_EVENT_LAST] = {
 static struct sfe_ipv4 __si;
 struct sfe_ipv4_msg *sfe_ipv4_sync_many_msg;
 uint32_t sfe_ipv4_sync_max_number;
+
+/*
+ * sfe_ipv4_free_frag_skb_list
+ * 	Free the complete fragment skb list in the failure cases.
+ */
+static inline void sfe_ipv4_free_frag_skb_list(struct sk_buff_head *head)
+{
+	struct sk_buff *skb_iter, *tmp;
+
+	DEBUG_TRACE("%p Freeing the complete fragment skb list", head);
+	skb_queue_walk_safe(head, skb_iter, tmp) {
+		mem_debug_update_skb(skb_iter);
+	}
+	dev_kfree_skb_list_fast(head);
+}
 
 /*
  * sfe_ipv4_gen_ip_csum()
@@ -1085,14 +1099,6 @@ int sfe_ipv4_frag_prepare( struct sfe_ipv4 *si, struct sfe_ipv4_connection_match
 	}
 
 	/*
-	 * If skb is non linear, exception the packets
-	 */
-	if (skb_is_nonlinear(skb)) {
-		DEBUG_TRACE("%px: sfe: Non linear packet, larger than MTU\n", cm);
-		return SFE_IPV4_EXCEPTION_EVENT_NON_LINEAR_PACKET_NEEDS_FRAGMENTATION;
-	}
-
-	/*
 	 * If traffic is multicast, exception the packets
 	 */
 	if ((cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_MULTICAST)) {
@@ -1125,9 +1131,11 @@ int sfe_ipv4_frag_prepare( struct sfe_ipv4 *si, struct sfe_ipv4_connection_match
 	ip_payload_len = ntohs(iph->tot_len) - sizeof(*iph);
 
 	/*
+	 * Skip allocating first fragment. reuse original skb.
 	 * TODO: Add netdev_alloc_list for efficient list allocation.
 	 */
-	ip_payload_len -= frag_len;
+	uint16_t first_len = min(frag_len, ip_payload_len);
+	ip_payload_len -= first_len;
 
 	while (ip_payload_len > 0) {
 		struct sk_buff *skb2;
@@ -1137,18 +1145,7 @@ int sfe_ipv4_frag_prepare( struct sfe_ipv4 *si, struct sfe_ipv4_connection_match
 
 		skb2 = netdev_alloc_skb(skb->dev, mtu + headroom + tailroom);
 		if (!skb2) {
-			struct sk_buff *skb_iter, *tmp;
-
-			pr_warn("%px: Unable to allocate memory for new fragment.\n", skb->dev);
-
-			skb_queue_walk_safe(head, skb_iter, tmp) {
-				mem_debug_update_skb(skb_iter);
-			}
-
-			/*
-			 * Free the fragments that were allocated before
-			 */
-			dev_kfree_skb_list_fast(head);
+			sfe_ipv4_free_frag_skb_list(head);
 			return SFE_IPV4_EXCEPTION_EVENT_FRAG_FAILS_NOMEM;
 		}
 
@@ -1210,17 +1207,34 @@ static int sfe_ipv4_frag_xmit(struct sfe_ipv4 *si, struct sfe_ipv4_connection_ma
 }
 
 /*
- * sfe_ipv4_frag()
- *      API to fragment the IPv4 packets.
+ * sfe_ipv4_frag_copy_meta()
+ *	Helper to copy commonly used metadata from source skb to fragment skb.
  */
-void sfe_ipv4_frag(struct sfe_ipv4 *si, struct sfe_ipv4_connection_match *cm, struct sk_buff *skb, struct sk_buff_head *head, struct iphdr *iph, 				bool fast_xmit)
+static inline void sfe_ipv4_frag_copy_meta(struct sk_buff *to, const struct sk_buff *from)
+{
+	to->pkt_type = from->pkt_type;
+	to->priority = from->priority;
+	to->protocol = from->protocol;
+	to->skb_iif = from->skb_iif;
+	to->dev = from->dev;
+	to->mark = from->mark;
+	to->ip_summed = from->ip_summed;
+	skb_copy_hash(to, from);
+	nf_copy(to, from);
+}
+
+/*
+ * sfe_ipv4_frag()
+ *	API to fragment the IPv4 packets.
+ */
+void sfe_ipv4_frag(struct sfe_ipv4 *si, struct sfe_ipv4_connection_match *cm, struct sk_buff *skb, struct sk_buff_head *head, struct iphdr *iph,
+			bool fast_xmit)
 {
 	uint16_t frag_len, payload_len, hdr_len;
 	uint16_t mtu, offset = 0;
-	struct sk_buff *frag_skb;
-	bool calculate_csum = false;
 	uint16_t ip_offset;
-	uint8_t *next_data;
+	const bool pppoe_encap = unlikely(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_PPPOE_ENCAP);
+	const bool csum_required = (skb->ip_summed != CHECKSUM_PARTIAL);
 
 	/*
 	 * When ignore_df will override IP_DF, set IP_DF to zero
@@ -1231,7 +1245,6 @@ void sfe_ipv4_frag(struct sfe_ipv4 *si, struct sfe_ipv4_connection_match *cm, st
 	 * skb->data is pointing to L2 Header
 	 */
 	hdr_len = (uint8_t *)iph + sizeof(*iph) - skb->data;
-	next_data = skb->data + hdr_len;
 	payload_len = skb->len - hdr_len;
 	ip_offset = hdr_len - sizeof(*iph);
 	offset = (ntohs(iph->frag_off) & IP_OFFSET) << 3;
@@ -1240,92 +1253,126 @@ void sfe_ipv4_frag(struct sfe_ipv4 *si, struct sfe_ipv4_connection_match *cm, st
 	frag_len = mtu - sizeof(*iph);
 	frag_len &= ~7;
 
-	skb_trim(skb, frag_len + hdr_len);
+	/*
+	 * Determine first fragment length and remaining payload length
+	 */
+	uint16_t first_len = min(frag_len, payload_len);
+	uint32_t remaining_len = payload_len - first_len;
+	uint16_t pppoe_offset = ip_offset - PPPOE_SES_HLEN;
 
-	iph->frag_off |= htons(IP_MF);
-	iph->tot_len = htons(frag_len + sizeof(*iph));
-	payload_len -= frag_len;
+	/*
+	 * Build remaining fragments from original skb before trimming/transmitting first.
+	 */
+	u32 csum_orig = (~iph->check) & 0xFFFFU;
+	u32 old_frag_off_neg = (~iph->frag_off & 0xFFFFU);
+	u32 old_tot_len_neg = (~iph->tot_len & 0xFFFFU);
+	csum_orig += old_frag_off_neg + old_tot_len_neg;
+	if (remaining_len) {
+		uint32_t payload_copied = 0;
+		struct sk_buff *iter;
+		int ret;
+		skb_queue_walk(head, iter) {
+			uint16_t copy_len = min(frag_len, (uint16_t)(remaining_len - payload_copied));
 
-	if (unlikely(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_PPPOE_ENCAP)) {
-		uint16_t pppoe_offset = ip_offset - PPPOE_SES_HLEN;
-		struct pppoe_hdr *ph;
+			sfe_ipv4_frag_copy_meta(iter, skb);
+			unsigned char *dst = skb_put(iter, hdr_len + copy_len);
+			ret = skb_copy_bits(skb, 0, dst, hdr_len);
+			if (unlikely(ret < 0)) {
+				DEBUG_WARN("%px: Failed to copy header to fragment: %d\n", skb, ret);
+				sfe_ipv4_free_frag_skb_list(head);
+				this_cpu_inc(si->stats_pcpu->packets_dropped64);
+				kfree_skb(skb);
+				return;
+			}
 
-		ph = (struct pppoe_hdr *)(skb->data + pppoe_offset);
-		ph->length = htons(frag_len + sizeof(*iph) + 2);
-	}
+			ret = skb_copy_bits(skb, hdr_len + first_len + payload_copied, dst + hdr_len, copy_len);
+			if (unlikely(ret < 0)) {
+				DEBUG_WARN("%px: Failed to copy payload to fragment: %d\n", skb, ret);
+				sfe_ipv4_free_frag_skb_list(head);
+				this_cpu_inc(si->stats_pcpu->packets_dropped64);
+				kfree_skb(skb);
+				return;
+			}
 
-	if (skb->ip_summed != CHECKSUM_PARTIAL) {
-		calculate_csum = true;
-		iph->check = sfe_ipv4_gen_ip_csum(iph);
-	}
+			/*
+			 * Update IP header for this fragment
+			 */
+			struct iphdr *iph2 = (struct iphdr *)(iter->data + ip_offset);
+			uint16_t mf = ((payload_copied + copy_len) < remaining_len) ? htons(IP_MF) : 0;
+			iph2->frag_off = htons(((offset + first_len + payload_copied) >> 3));
+			iph2->frag_off |= mf;
+			iph2->tot_len = htons(copy_len + sizeof(*iph2));
+			if (pppoe_encap) {
+				struct pppoe_hdr *ph = (struct pppoe_hdr *)(iter->data + pppoe_offset);
+				ph->length = htons(copy_len + sizeof(*iph2) + 2);
+			}
 
-	frag_skb = skb_peek(head);
-
-	while (frag_skb) {
-		struct iphdr *iph2;
-
-		next_data += frag_len;
-		offset += frag_len;
-		frag_len = min(frag_len, payload_len);
-		payload_len -= frag_len;
-
-		/*
-		 * Copy metadata to frag_skb from skb;
-		 */
-		frag_skb->pkt_type = skb->pkt_type;
-		frag_skb->priority = skb->priority;
-		frag_skb->protocol = skb->protocol;
-		frag_skb->skb_iif = skb->skb_iif;
-		frag_skb->dev = skb->dev;
-		frag_skb->mark = skb->mark;
-		frag_skb->ip_summed = skb->ip_summed;
-		skb_copy_hash(frag_skb, skb);
-		nf_copy(frag_skb, skb);
-
-		/*
-		 * The mac_header and network_header fields are set during the
-		 * execution of the sfe_ipv4_frag_prepare function to ensure
-		 * correct packet header alignment.
-		 *
-		 * frag_skb->mac_header = skb->mac_header;
-		 * frag_skb->network_header = skb->network_header;
-		 */
-
-		memcpy(skb_put(frag_skb, hdr_len), skb->data, hdr_len);
-		memcpy(skb_put(frag_skb, frag_len), next_data, frag_len);
-
-		iph2 = (struct iphdr *)(frag_skb->data + ip_offset);
-		iph2->frag_off = htons((offset >> 3));
-		iph2->frag_off |= (payload_len > 0) ? htons(IP_MF) : 0;
-
-		iph2->tot_len = htons(frag_len + sizeof(*iph2));
-
-		if (unlikely(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_PPPOE_ENCAP)) {
-			uint16_t pppoe_offset = ip_offset - PPPOE_SES_HLEN;
-			struct pppoe_hdr *ph;
-
-			ph = (struct pppoe_hdr *)(frag_skb->data + pppoe_offset);
-			ph->length = htons(frag_len + sizeof(*iph2) + 2);
+			if (csum_required) {
+				/*
+				 * Using incremental checksum update for better performance
+				 * Calculating incremental checksum is according to RFC1624
+				 * Formula used: HC' = ~(HC + ~m + m')
+				 * HC: old header checksum. HC': new header checksum
+				 * m: old IP header field  m': new IP header field
+				 */
+				u32 csum = csum_orig;
+				csum += iph2->tot_len + iph2->frag_off;
+				csum = (csum & 0xFFFFU) + (csum >> 16);
+				csum = (csum & 0xFFFFU) + (csum >> 16);
+				csum = (~csum) & 0xFFFFU;
+				csum = (u16)csum;
+				iph2->check = (u16)csum;
+			}
+				payload_copied += copy_len;
 		}
+	}
 
-		/*
-		 * Head SKB is set with checksum_partial when hw offload is enabled.
-		 */
-		if (calculate_csum) {
-			iph2->check = sfe_ipv4_gen_ip_csum(iph2);
+	/*
+	 * Build and transmit the first fragment using the original skb.
+	 */
+	struct iphdr *iph_first = (struct iphdr *)(skb->data + ip_offset);
+	iph_first->frag_off = htons((offset >> 3)) | htons(IP_MF);
+	iph_first->tot_len = htons(first_len + sizeof(*iph_first));
+	if (csum_required){
+		u32 csum = csum_orig;
+		csum += iph_first->tot_len + iph_first->frag_off;
+		csum = (csum & 0xFFFFU) + (csum >> 16);
+		csum = (csum & 0xFFFFU) + (csum >> 16);
+		csum = (~csum) & 0xFFFFU;
+		csum = (u16)csum;
+		iph_first->check = (u16)csum;
+	}
+
+	if (pppoe_encap) {
+		struct pppoe_hdr *ph = (struct pppoe_hdr *)(skb->data + pppoe_offset);
+		ph->length = htons(first_len + sizeof(*iph_first) + 2);
+	}
+
+	/*
+	 * Trim the skb to the first fragment size (L2+IP header + payload slice)
+	 * For non-linear skbs, use pskb_trim to safely trim paged data.
+	 */
+	if (unlikely(skb_is_nonlinear(skb))) {
+		if (pskb_trim(skb, hdr_len + first_len)) {
+			DEBUG_WARN("%p pskb trim failed. ensure skb and length are proper", skb);
+			sfe_ipv4_free_frag_skb_list(head);
+			this_cpu_inc(si->stats_pcpu->packets_dropped64);
+			kfree_skb(skb);
+			return;
 		}
-
-		frag_skb = skb_peek_next(frag_skb, head);
+	} else {
+		skb_trim(skb, hdr_len + first_len);
 	}
 
-	__skb_queue_head(head, skb);
+	/*
+	 * Transmit first fragment
+	 */
+	sfe_ipv4_frag_xmit(si, cm, skb, fast_xmit);
 
-	while (skb_queue_len(head)) {
-		skb = __skb_dequeue(head);
-		sfe_ipv4_frag_xmit(si, cm, skb, fast_xmit);
+	struct sk_buff *skb_iter;
+	while ((skb_iter = __skb_dequeue(head)) != NULL) {
+		sfe_ipv4_frag_xmit(si, cm, skb_iter, fast_xmit);
 	}
-
-	return;
 }
 
 /*
@@ -3731,9 +3778,25 @@ sk_refcount_dec:
 	}
 
 free_reply_cm:
+	if (reply_cm->qdisc_xmit_dev) {
+		dev_put(reply_cm->xmit_dev);
+	}
+
+	if (reply_cm->top_interface_dev) {
+		dev_put(reply_cm->top_interface_dev);
+	}
+
 	kfree(reply_cm);
 
 free_original_cm:
+	if (original_cm->qdisc_xmit_dev) {
+		dev_put(original_cm->xmit_dev);
+	}
+
+	if (original_cm->top_interface_dev) {
+		dev_put(original_cm->top_interface_dev);
+	}
+
 	kfree(original_cm);
 
 free_conn_obj:
