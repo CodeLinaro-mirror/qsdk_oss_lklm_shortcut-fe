@@ -360,6 +360,7 @@ int sfe_ipv4_recv_udp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 		/*
 		 * TODO: Use threshold packet size if specified.
 		 */
+		DEBUG_TRACE("skb_len = %u, MTU = %u, skb_is_gso = %d skb_nonlinear:%u\n", len, cm->xmit_dev_mtu, skb_is_gso(skb), skb_is_nonlinear(skb));
 		skb_queue_head_init(&head);
 		ret = sfe_ipv4_frag_prepare(si, cm, skb, &head, iph);
 		if (ret != SFE_IPV4_EXCEPTION_EVENT_LAST) {
