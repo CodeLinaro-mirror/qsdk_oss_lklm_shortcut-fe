@@ -49,8 +49,8 @@ uint8_t sfe_fls_flush_on_hwm_enable;
 #define SFE_IPSEC_TUNNEL_TYPE 31
 
 typedef enum sfe_exception {
-	SFE_EXCEPTION_IPV4_MSG_UNKNOW,
-	SFE_EXCEPTION_IPV6_MSG_UNKNOW,
+	SFE_EXCEPTION_IPV4_MSG_UNKNOWN,
+	SFE_EXCEPTION_IPV6_MSG_UNKNOWN,
 	SFE_EXCEPTION_CONNECTION_INVALID,
 	SFE_EXCEPTION_NOT_SUPPORT_BRIDGE,
 	SFE_EXCEPTION_TCP_INVALID,
@@ -1319,6 +1319,24 @@ sfe_tx_status_t sfe_sync_ipv4_stats_many_msg(struct sfe_ctx_instance_internal *s
 }
 
 /*
+ * sfe_update_ipv4_rule_msg()
+ *	Update configured IPv4 rule
+ *
+ * @param sfe_ctx SFE context
+ * @param msg The IPv4 message
+ *
+ * @return sfe_tx_status_t The status of the Tx operation
+ */
+enum sfe_cmn_response sfe_update_ipv4_rule_msg(struct sfe_ctx_instance_internal *sfe_ctx, struct sfe_ipv4_msg *msg)
+{
+	if (!sfe_ipv4_rule_update(&msg->msg.rule_update)) {
+		DEBUG_WARN("%px: Could not update rule.\n", msg);
+		return SFE_CMN_RESPONSE_EMSG;
+	}
+	return SFE_CMN_RESPONSE_ACK;
+}
+
+/*
  * sfe_ipv4_tx()
  *	Transmit an IPv4 message to the sfe
  *
@@ -1336,6 +1354,19 @@ sfe_tx_status_t sfe_ipv4_tx(struct sfe_ctx_instance *sfe_ctx, struct sfe_ipv4_ms
 		return sfe_sync_ipv4_stats_many_msg(SFE_CTX_TO_PRIVATE(sfe_ctx), msg);
 	}
 
+	/*
+	 * In case of uni-direction acceleration, if ecm sends update rule msg
+	 * it means update the fields of non-accelerated flow
+	 */
+	if (msg->cm.type == SFE_TX_UPDATE_RULE_MSG) {
+		ret = sfe_ipv4_tx_with_resp(sfe_ctx, msg);
+		if (ret == SFE_CMN_RESPONSE_EMSG) {
+			sfe_incr_exceptions(SFE_EXCEPTION_IPV4_MSG_UNKNOWN);
+			return SFE_TX_FAILURE_BAD_PARAM;
+		}
+		return SFE_TX_SUCCESS;
+	}
+
 	response = sfe_alloc_response_msg(SFE_MSG_TYPE_IPV4, msg);
 	if (!response) {
 		sfe_incr_exceptions(SFE_EXCEPTION_ENQUEUE_FAILED);
@@ -1345,7 +1376,7 @@ sfe_tx_status_t sfe_ipv4_tx(struct sfe_ctx_instance *sfe_ctx, struct sfe_ipv4_ms
 
 	ret = sfe_ipv4_tx_with_resp(sfe_ctx, msg);
 	if (ret == SFE_CMN_RESPONSE_EMSG) {
-		sfe_incr_exceptions(SFE_EXCEPTION_IPV4_MSG_UNKNOW);
+		sfe_incr_exceptions(SFE_EXCEPTION_IPV4_MSG_UNKNOWN);
 		kfree(response);
 		return SFE_TX_FAILURE_NOT_ENABLED;
 	}
@@ -1376,8 +1407,10 @@ enum sfe_cmn_response sfe_ipv4_tx_with_resp(struct sfe_ctx_instance *sfe_ctx, st
 		return sfe_create_ipv4_mc_rule_msg(SFE_CTX_TO_PRIVATE(sfe_ctx), msg);
 	case SFE_TX_DESTROY_MULTICAST_RULE_MSG:
 		return sfe_destroy_ipv4_mc_rule_msg(SFE_CTX_TO_PRIVATE(sfe_ctx), msg);
+	case SFE_TX_UPDATE_RULE_MSG:
+		return sfe_update_ipv4_rule_msg(SFE_CTX_TO_PRIVATE(sfe_ctx), msg);
 	default:
-		sfe_incr_exceptions(SFE_EXCEPTION_IPV4_MSG_UNKNOW);
+		sfe_incr_exceptions(SFE_EXCEPTION_IPV4_MSG_UNKNOWN);
 		return SFE_CMN_RESPONSE_EMSG;
 	}
 }
@@ -2068,6 +2101,24 @@ sfe_tx_status_t sfe_sync_ipv6_stats_many_msg(struct sfe_ctx_instance_internal *s
 }
 
 /*
+ * sfe_update_ipv6_rule_msg()
+ *	Update configured IPv6 rule
+ *
+ * @param sfe_ctx SFE context
+ * @param msg The IPv6 message
+ *
+ * @return sfe_tx_status_t The status of the Tx operation
+ */
+enum sfe_cmn_response sfe_update_ipv6_rule_msg(struct sfe_ctx_instance_internal *sfe_ctx, struct sfe_ipv6_msg *msg)
+{
+	if (!sfe_ipv6_rule_update(&msg->msg.rule_update)) {
+		DEBUG_WARN("%px: Could not update rule.\n", msg);
+		return SFE_CMN_RESPONSE_EMSG;
+	}
+	return SFE_CMN_RESPONSE_ACK;
+}
+
+/*
  * sfe_ipv6_tx()
  *	Transmit an IPv6 message to the sfe
  *
@@ -2085,6 +2136,19 @@ sfe_tx_status_t sfe_ipv6_tx(struct sfe_ctx_instance *sfe_ctx, struct sfe_ipv6_ms
 		return sfe_sync_ipv6_stats_many_msg(SFE_CTX_TO_PRIVATE(sfe_ctx), msg);
 	}
 
+	/*
+	 * In case of uni-direction acceleration, if ecm sends update rule msg
+	 * it means update the fields of non-accelerated flow
+	 */
+	if (msg->cm.type == SFE_TX_UPDATE_RULE_MSG) {
+		ret = sfe_ipv6_tx_with_resp(sfe_ctx, msg);
+		if (ret == SFE_CMN_RESPONSE_EMSG) {
+			sfe_incr_exceptions(SFE_EXCEPTION_IPV6_MSG_UNKNOWN);
+			return SFE_TX_FAILURE_BAD_PARAM;
+		}
+		return SFE_TX_SUCCESS;
+	}
+
 	response = sfe_alloc_response_msg(SFE_MSG_TYPE_IPV6, msg);
 	if (!response) {
 		sfe_incr_exceptions(SFE_EXCEPTION_ENQUEUE_FAILED);
@@ -2094,7 +2158,7 @@ sfe_tx_status_t sfe_ipv6_tx(struct sfe_ctx_instance *sfe_ctx, struct sfe_ipv6_ms
 
 	ret = sfe_ipv6_tx_with_resp(sfe_ctx, msg);
 	if (ret == SFE_CMN_RESPONSE_EMSG) {
-		sfe_incr_exceptions(SFE_EXCEPTION_IPV6_MSG_UNKNOW);
+		sfe_incr_exceptions(SFE_EXCEPTION_IPV6_MSG_UNKNOWN);
 		kfree(response);
 		return SFE_TX_FAILURE_NOT_ENABLED;
 	}
@@ -2125,8 +2189,10 @@ enum sfe_cmn_response sfe_ipv6_tx_with_resp(struct sfe_ctx_instance *sfe_ctx, st
 		return sfe_create_ipv6_mc_rule_msg(SFE_CTX_TO_PRIVATE(sfe_ctx), msg);
 	case SFE_TX_DESTROY_MULTICAST_RULE_MSG:
 		return sfe_destroy_ipv6_mc_rule_msg(SFE_CTX_TO_PRIVATE(sfe_ctx), msg);
+	case SFE_TX_UPDATE_RULE_MSG:
+		return sfe_update_ipv6_rule_msg(SFE_CTX_TO_PRIVATE(sfe_ctx), msg);
 	default:
-		sfe_incr_exceptions(SFE_EXCEPTION_IPV6_MSG_UNKNOW);
+		sfe_incr_exceptions(SFE_EXCEPTION_IPV6_MSG_UNKNOWN);
 		return SFE_CMN_RESPONSE_EMSG;
 	}
 }

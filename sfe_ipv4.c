@@ -122,7 +122,8 @@ static char *sfe_ipv4_exception_events_string[SFE_IPV4_EXCEPTION_EVENT_LAST] = {
 	"FLS_HWM_FLUSH",
 	"TCP_CHECKSUM_ERROR",
 	"UDP_CHECKSUM_ERROR",
-	"VXLAN_GPE_NO_ROUTE"
+	"VXLAN_GPE_NO_ROUTE",
+	"FLOW_DIR_NOT_ACCEL"
 };
 
 static struct sfe_ipv4 __si;
@@ -1702,61 +1703,91 @@ static void sfe_ipv4_match_entry_set_trustsec(
 	cm->egress_trustsec_hdr.sgt = egress_sgt;
 }
 
-void sfe_ipv4_update_rule(struct sfe_ipv4_rule_create_msg *msg)
+/*
+ * sfe_ipv4_unidir_rule_update()
+ *      Updates the values of match entries.
+ */
+void sfe_ipv4_unidir_rule_update(struct sfe_ipv4_connection *conn, struct sfe_rule_update_msg *update_msg)
 {
-	struct sfe_ipv4_connection *c;
-	struct sfe_ipv4 *si = &__si;
+	struct sfe_ipv4_connection_match *match_dir;
+	u32 qos_tag;
+	u8 int_pri, dscp;
+	char direction[] = "reply";
 
-	spin_lock_bh(&si->lock);
-
-	c = sfe_ipv4_find_connection(si,
-					      msg->tuple.protocol,
-					      msg->tuple.flow_ip,
-					      msg->tuple.flow_ident,
-					      msg->tuple.return_ip,
-					      msg->tuple.return_ident);
-	if (c != NULL) {
-		sfe_ipv4_update_protocol_state(c, msg);
+	if (update_msg->info.unidir.update_dir == SFE_FLOW_RULE_DIRECTION_FLOW) {
+		match_dir = conn->original_match;
+		qos_tag = update_msg->info.unidir.qos.flow_qos_tag;
+		int_pri = update_msg->info.unidir.qos.flow_int_pri;
+		dscp = update_msg->info.unidir.dscp.flow_dscp;
+	} else {
+		match_dir = conn->reply_match;
+		qos_tag = update_msg->info.unidir.qos.return_qos_tag;
+		int_pri = update_msg->info.unidir.qos.return_int_pri;
+		dscp = update_msg->info.unidir.dscp.return_dscp;
 	}
 
-	spin_unlock_bh(&si->lock);
+	match_dir->flow_accel = true;
+
+	if (update_msg->flags & SFE_UPDATE_RULE_QOS_VALID) {
+		match_dir->priority = qos_tag;
+		match_dir->dscp = dscp << SFE_IPV4_DSCP_SHIFT;
+#if defined(SFE_PPE_QOS_SUPPORTED)
+		match_dir->int_pri = int_pri;
+#endif
+	}
+
+	if (update_msg->info.unidir.update_dir == SFE_FLOW_RULE_DIRECTION_FLOW) {
+		snprintf(direction, sizeof(direction), "%s", "orig");
+	}
+
+	DEBUG_TRACE("%px: matched direction(%s) updated qos_tag:%x int_pri:%x\n", conn, direction, qos_tag, int_pri);
 }
 
 /*
- * sfe_ipv4_mark_rule_update()
+ * sfe_ipv4_rule_update()
  *      Updates the mark values of match entries.
  */
-bool sfe_ipv4_mark_rule_update(struct sfe_connection_mark *mark)
+bool sfe_ipv4_rule_update(struct sfe_rule_update_msg *update_msg)
 {
 	struct sfe_ipv4_connection *c;
 	struct sfe_ipv4 *si = &__si;
 
 	spin_lock_bh(&si->lock);
-	c = sfe_ipv4_find_connection(si, mark->protocol,
-				     mark->src_ip[0],
-				     mark->src_port,
-				     mark->dest_ip[0],
-				     mark->dest_port);
+	c = sfe_ipv4_find_connection(si, update_msg->protocol,
+				     update_msg->src_ip[0],
+				     update_msg->src_port,
+				     update_msg->dest_ip[0],
+				     update_msg->dest_port);
 	if (!c) {
 		spin_unlock_bh(&si->lock);
-		DEBUG_WARN("%px: connection not found for mark update\n", mark);
+		DEBUG_WARN("%px: connection not found for update_msg update\n", update_msg);
 		return false;
 	}
 
-	switch (mark->type) {
-	case SFE_CONNECTION_MARK_TYPE_CONNMARK:
-		c->original_match->mark = mark->flow_mark;
-		if (c->reply_match) {
-			c->reply_match->mark = mark->return_mark;
-		}
-		spin_unlock_bh(&si->lock);
+	switch (update_msg->type) {
+	case SFE_CONNECTION_MARK_TYPE_UNIDIR_MARK:
+		sfe_ipv4_unidir_rule_update(c, update_msg);
 		break;
 
-	case SFE_CONNECTION_MARK_TYPE_SAWFMARK:
-		if (mark->flags & SFE_SAWF_MARK_FLOW_VALID) {
-			c->original_match->mark = mark->flow_mark;
-			c->original_match->svc_id = mark->flow_svc_id;
-			if (mark->flags & SFE_SAWF_MARK_DEPRIO) {
+	case SFE_CONNECTION_MARK_TYPE_CONNMARK:
+		c->original_match->mark = update_msg->info.connmark.flow_mark;
+		if (c->reply_match) {
+			c->reply_match->mark = update_msg->info.connmark.return_mark;
+		}
+		DEBUG_TRACE("%px: flow/return mark updated with %x/%x\n", c, update_msg->info.connmark.flow_mark, update_msg->info.connmark.return_mark);
+		break;
+
+	case SFE_CONNECTION_MARK_TYPE_BIDIR_SAWF_MARK:
+		if (update_msg->flags & SFE_UPDATE_RULE_SAWF_FLOW_VALID) {
+			/*
+			 * Todo: Make the read write of flow_mark atomic
+			 * No lock is added here because the mark update does not occur until
+			 * the update function is invoked. Therefore, flow_mark is only read
+			 * after the update is completed.
+			 */
+			c->original_match->mark = update_msg->info.sawf.flow_mark;
+			c->original_match->svc_id = update_msg->info.sawf.flow_svc_id;
+			if (update_msg->flags & SFE_UPDATE_RULE_SAWF_DEPRIO) {
 				c->original_match->flags &= ~SFE_IPV4_CONNECTION_MATCH_FLAG_MARK;
 				c->original_match->sawf_valid = false;
 			} else {
@@ -1766,10 +1797,10 @@ bool sfe_ipv4_mark_rule_update(struct sfe_connection_mark *mark)
 		}
 
 		if (c->reply_match) {
-			if (mark->flags & SFE_SAWF_MARK_RETURN_VALID) {
-				c->reply_match->mark = mark->return_mark;
-				c->reply_match->svc_id = mark->return_svc_id;
-				if (mark->flags & SFE_SAWF_MARK_DEPRIO) {
+			if (update_msg->flags & SFE_UPDATE_RULE_SAWF_RETURN_VALID) {
+				c->reply_match->mark = update_msg->info.sawf.return_mark;
+				c->reply_match->svc_id = update_msg->info.sawf.return_svc_id;
+				if (update_msg->flags & SFE_UPDATE_RULE_SAWF_DEPRIO) {
 					c->reply_match->flags &= ~SFE_IPV4_CONNECTION_MATCH_FLAG_MARK;
 					c->reply_match->sawf_valid = false;
 				} else {
@@ -1778,20 +1809,17 @@ bool sfe_ipv4_mark_rule_update(struct sfe_connection_mark *mark)
 				}
 			}
 		}
-		spin_unlock_bh(&si->lock);
+		DEBUG_TRACE("%px: flow/return mark updated with %x/%x\n", c, update_msg->info.sawf.flow_mark, update_msg->info.sawf.return_mark);
 		break;
 
 	default:
-		spin_unlock_bh(&si->lock);
-		DEBUG_WARN("%px: unsupported mark type: %d\n", mark, mark->type);
+		DEBUG_WARN("%px: unsupported update_msg type: %d\n", update_msg, update_msg->type);
 		break;
 	}
 
-	DEBUG_TRACE("%px: flow/return mark updated with %x/%x\n",
-			c, mark->flow_mark, mark->return_mark);
+	spin_unlock_bh(&si->lock);
 	return true;
 }
-EXPORT_SYMBOL(sfe_ipv4_mark_rule_update);
 
 /*
  * sfe_ipv4_xmit_eth_type_check()
@@ -2433,13 +2461,12 @@ update_done:
 #ifdef CONFIG_NF_FLOW_COOKIE
 	original_cm->flow_cookie = 0;
 #endif
-#ifdef CONFIG_XFRM
+
 	if (msg->valid_flags & SFE_RULE_CREATE_DIRECTION_VALID) {
 		original_cm->flow_accel = msg->direction_rule.flow_accel;
 	} else {
-		original_cm->flow_accel = 1;
+		original_cm->flow_accel = true;
 	}
-#endif
 
 	if (msg->rule_flags & SFE_RULE_CREATE_FLAG_FLOW_SRC_INTERFACE_CHECK) {
 		original_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_SRC_INTERFACE_CHECK;
@@ -2928,13 +2955,12 @@ sfe_response_t sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 #ifdef CONFIG_NF_FLOW_COOKIE
 	original_cm->flow_cookie = 0;
 #endif
-#ifdef CONFIG_XFRM
+
 	if (msg->valid_flags & SFE_RULE_CREATE_DIRECTION_VALID) {
 		original_cm->flow_accel = msg->direction_rule.flow_accel;
 	} else {
-		original_cm->flow_accel = 1;
+		original_cm->flow_accel = true;
 	}
-#endif
 
 	/*
 	 * Check if TSO is enabled on the bottom interface. This flag is used for PPPoE TCP flows.
@@ -3493,14 +3519,12 @@ sfe_response_t sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 #ifdef CONFIG_NF_FLOW_COOKIE
 	reply_cm->flow_cookie = 0;
 #endif
-#ifdef CONFIG_XFRM
+
 	if (msg->valid_flags & SFE_RULE_CREATE_DIRECTION_VALID) {
 		reply_cm->flow_accel = msg->direction_rule.return_accel;
 	} else {
-		reply_cm->flow_accel = 1;
+		reply_cm->flow_accel = true;
 	}
-
-#endif
 
 	/*
 	 * Check if TSO is enabled on the bottom interface. This flag is used for PPPoE TCP flows.
@@ -4320,6 +4344,8 @@ static int sfe_ipv4_debug_dev_read_connections_connection(struct sfe_ipv4 *si, s
 	spin_unlock_bh(&si->lock);
 
 	ws->msg_len = snprintf(ws->msg, length, "\t\t<connection "
+				"orig_dir_en=\"%s\" "
+				"reply_dir_en=\"%s\" "
 				"protocol=\"%u\" "
 				"src_dev=\"%s\" "
 				"src_ip=\"%pI4\" src_ip_xlate=\"%pI4\" "
@@ -4341,6 +4367,8 @@ static int sfe_ipv4_debug_dev_read_connections_connection(struct sfe_ipv4 *si, s
 				"src_flow_cookie=\"%d\" dst_flow_cookie=\"%d\" "
 #endif
 				"last_sync=\"%llu\" ",
+				original_cm->flow_accel ? "Yes" : "No",
+				reply_cm->flow_accel ? "Yes" : "No",
 				protocol,
 				src_dev->name,
 				&src_ip, &src_ip_xlate,

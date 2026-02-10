@@ -3,19 +3,8 @@
  *	Shortcut forwarding engine header file for IPv6.
  *
  * Copyright (c) 2015-2016, 2019-2020, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2025 Qualcomm Innovation Center, Inc. All rights reserved.
- *
- * Permission to use, copy, modify, and/or distribute this software for any
- * purpose with or without fee is hereby granted, provided that the above
- * copyright notice and this permission notice appear in all copies.
- *
- * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
- * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
- * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
- * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
- * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
- * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
- * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+ * SPDX-License-Identifier: ISC
  */
 
 #ifndef __SFE_IPV6_H
@@ -214,9 +203,6 @@ struct sfe_ipv6_connection_match {
 #ifdef CONFIG_NF_FLOW_COOKIE
 	u32 flow_cookie;		/* used flow cookie, for debug */
 #endif
-#ifdef CONFIG_XFRM
-	u32 flow_accel;			/* The flow accelerated or not */
-#endif
 	struct sfe_ipv6_connection *connection;
 	struct sfe_ipv6_connection_match *counter_match;
 					/* Matches the flow in the opposite direction as the one in connection */
@@ -315,6 +301,7 @@ struct sfe_ipv6_connection_match {
 	s32 return_top_interface_num;	/* Store namely interface number to pass directly to RFS create rule. */
 
 #endif
+	bool flow_accel;		/* The flow accelerated or not */
 };
 
 /*
@@ -438,6 +425,7 @@ enum sfe_ipv6_exception_events {
 	SFE_IPV6_EXCEPTION_EVENT_TCP_CHECKSUM_ERROR,
 	SFE_IPV6_EXCEPTION_EVENT_VXLAN_GPE_NO_ROUTE,
 	SFE_IPV6_EXCEPTION_EVENT_VXLAN_GPE_DST_ERROR,
+	SFE_IPV6_EXCEPTION_EVENT_FLOW_DIR_NOT_ACCEL,
 	SFE_IPV6_EXCEPTION_EVENT_LAST
 };
 
