@@ -129,7 +129,8 @@ static char *sfe_ipv6_exception_events_string[SFE_IPV6_EXCEPTION_EVENT_LAST] = {
 	"TCP_CHECKSUM_ERROR",
 	"VXLAN_GPE_NO_ROUTE",
 	"VXLAN_GPE_DST_ERROR",
-	"FLOW_DIR_NOT_ACCEL"
+	"FLOW_DIR_NOT_ACCEL",
+	"FLS_CREATE_FAILED"
 };
 
 static struct sfe_ipv6 __si6;
@@ -2294,8 +2295,8 @@ sfe_response_t sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 	struct sock *sk;
 	struct net *net;
 	unsigned int src_if_idx;
-	void *orig_conn;
-	void *reply_conn;
+	void *orig_conn = NULL;
+	void *reply_conn = NULL;
 	sfe_fls_conn_create_t create_cb;
 
 	s32 flow_interface_num = msg->conn_rule.flow_top_interface_num;
@@ -2847,26 +2848,47 @@ sfe_response_t sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 	reply_cm->return_top_interface_num = msg->conn_rule.flow_top_interface_num;
 #endif
 
-	rcu_read_lock();
-	create_cb = rcu_dereference(sfe_fls_info.create_cb);
-	if (create_cb) {
-		create_cb(6, original_cm->match_protocol,
-					(uint32_t *)original_cm->match_src_ip,
-					original_cm->match_src_port,
-					(uint32_t *)original_cm->xlate_dest_ip,
-					original_cm->xlate_dest_port,
-					&orig_conn,
-					&reply_conn);
+	/*
+	 * If the flow is outer tunnel flow, skip FLS creation.
+	 */
+	if (msg->valid_flags & SFE_RULE_CREATE_TUNNEL_OUTER_FLOW_VALID) {
+		DEBUG_INFO("%px: Skip FLS rule creation for Outer Flow:%pI6, xlate_src_ip:%pI6, match_dest_ip:%pI6, xlate_dest_ip:%pI6\n",
+				msg, original_cm->match_src_ip,
+				original_cm->xlate_src_ip,
+				original_cm->match_dest_ip,
+				original_cm->xlate_dest_ip);
+	} else {
+		rcu_read_lock();
+		create_cb = rcu_dereference(sfe_fls_info.create_cb);
+		if (create_cb) {
+			create_cb(6, original_cm->match_protocol,
+						(uint32_t *)original_cm->match_src_ip,
+						original_cm->match_src_port,
+						(uint32_t *)original_cm->xlate_dest_ip,
+						original_cm->xlate_dest_port,
+						&orig_conn,
+						&reply_conn);
 
-		/*
-		 * TODO: Set FLS_DISABLED flag by default and unset when fls_conn is set.
-		 */
-		if (orig_conn && reply_conn) {
-			original_cm->fls_conn = orig_conn;
-			reply_cm->fls_conn = reply_conn;
+			/*
+			 * TODO: Set FLS_DISABLED flag by default and unset when fls_conn is set.
+			 */
+			if (orig_conn && reply_conn) {
+				DEBUG_INFO("%px: FLS Flow Created: match_src_ip:%pI6, xlate_src_ip:%pI6, match_dest_ip:%pI6, xlate_dest_ip:%pI6\n",
+						msg, original_cm->match_src_ip,
+						original_cm->xlate_src_ip,
+						original_cm->match_dest_ip,
+						original_cm->xlate_dest_ip);
+				original_cm->fls_conn = orig_conn;
+				reply_cm->fls_conn = reply_conn;
+			} else {
+				DEBUG_ERROR("%px: FLS creation failed for flow - p: %d, s: %pI6:%u, d: %pI6:%u, orig_conn:%px, reply_conn:%px\n",
+						msg, msg->tuple.protocol, msg->tuple.flow_ip, ntohs(msg->tuple.flow_ident), msg->tuple.return_ip, ntohs(msg->tuple.return_ident),
+						orig_conn, reply_conn);
+				sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_FLS_CREATE_FAILED);
+			}
 		}
+		rcu_read_unlock();
 	}
-	rcu_read_unlock();
 
 	/*
 	 * Enable qdisc fast xmit path if single qdisc is present on non-bottom interface.

@@ -123,7 +123,8 @@ static char *sfe_ipv4_exception_events_string[SFE_IPV4_EXCEPTION_EVENT_LAST] = {
 	"TCP_CHECKSUM_ERROR",
 	"UDP_CHECKSUM_ERROR",
 	"VXLAN_GPE_NO_ROUTE",
-	"FLOW_DIR_NOT_ACCEL"
+	"FLOW_DIR_NOT_ACCEL",
+	"FLS_CREATE_FAILED"
 };
 
 static struct sfe_ipv4 __si;
@@ -2601,8 +2602,8 @@ sfe_response_t sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	struct net_device *local_dest_dev;
 	struct net_device *local_src_dev;
 	struct sfe_ipv4_tuple *tuple = &msg->tuple;
-	void *orig_conn;
-	void *reply_conn;
+	void *orig_conn = NULL;
+	void *reply_conn = NULL;
 	s32 flow_interface_num = msg->conn_rule.flow_top_interface_num;
 	s32 return_interface_num = msg->conn_rule.return_top_interface_num;
 	struct net *net;
@@ -3770,26 +3771,47 @@ sfe_response_t sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 		break;
 	}
 
-	rcu_read_lock();
-	create_cb = rcu_dereference(sfe_fls_info.create_cb);
-	if (create_cb) {
-		create_cb(4, original_cm->match_protocol,
-				&original_cm->match_src_ip,
-				original_cm->match_src_port,
-				&original_cm->xlate_dest_ip,
-				original_cm->xlate_dest_port,
-				&orig_conn,
-				&reply_conn);
+	/*
+	 * If the flow is outer tunnel flow, skip FLS creation.
+	 */
+	if (msg->valid_flags & SFE_RULE_CREATE_TUNNEL_OUTER_FLOW_VALID) {
+		DEBUG_INFO("%px: Skip FLS rule creation for Outer Flow: match_src_ip:%pI4, xlate_src_ip:%pI4, match_dest_ip:%pI4, xlate_dest_ip:%pI4\n",
+				msg, &original_cm->match_src_ip,
+				&original_cm->xlate_src_ip,
+				&original_cm->match_dest_ip,
+				&original_cm->xlate_dest_ip);
+	} else {
+		rcu_read_lock();
+		create_cb = rcu_dereference(sfe_fls_info.create_cb);
+		if (create_cb) {
+			create_cb(4, original_cm->match_protocol,
+					&original_cm->match_src_ip,
+					original_cm->match_src_port,
+					&original_cm->xlate_dest_ip,
+					original_cm->xlate_dest_port,
+					&orig_conn,
+					&reply_conn);
 
-		/*
-		 * TODO: Set FLS_DISABLED flag by default and unset when fls_conn is set.
-		 */
-		if (orig_conn && reply_conn) {
-			original_cm->fls_conn = orig_conn;
-			reply_cm->fls_conn = reply_conn;
+			/*
+			 * TODO: Set FLS_DISABLED flag by default and unset when fls_conn is set.
+			 */
+			if (orig_conn && reply_conn) {
+				DEBUG_INFO("%px: FLS Flow Created: match_src_ip:%pI4, xlate_src_ip:%pI4, match_dest_ip:%pI4, xlate_dest_ip:%pI4\n",
+						msg, &original_cm->match_src_ip,
+						&original_cm->xlate_src_ip,
+						&original_cm->match_dest_ip,
+						&original_cm->xlate_dest_ip);
+				original_cm->fls_conn = orig_conn;
+				reply_cm->fls_conn = reply_conn;
+			} else {
+				DEBUG_ERROR("%px: FLS creation failed for flow - p: %d, s: %pI4:%u, d: %pI4:%u, orig_conn:%px, reply_conn:%px\n",
+						msg, msg->tuple.protocol, &msg->tuple.flow_ip, ntohs(msg->tuple.flow_ident), &msg->tuple.return_ip, ntohs(msg->tuple.return_ident),
+						orig_conn, reply_conn);
+				sfe_ipv4_exception_stats_inc(si, SFE_IPV4_EXCEPTION_EVENT_FLS_CREATE_FAILED);
+			}
 		}
+		rcu_read_unlock();
 	}
-	rcu_read_unlock();
 
 	/*
 	 * Fill in the ipv4_connection object.
