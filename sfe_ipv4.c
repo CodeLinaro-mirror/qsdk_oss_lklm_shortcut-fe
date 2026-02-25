@@ -1030,10 +1030,10 @@ void sfe_ipv4_flush_connection(struct sfe_ipv4 *si,
 		/*
 		 * Delete RFS rule in either direction if rfs is present in that direction.
 		 */
-		if (flow_match && flow_match->rfs_enabled) {
+		if (flow_match && (flow_match->rfs_valid_flags & SFE_CONN_MATCH_RFS_VALID_FLAG_RFS_ENABLED)) {
 			sfe_destroy_ipv4_ppe_rfs_rule(flow_match);
 		}
-		if (return_match && return_match->rfs_enabled) {
+		if (return_match && (return_match->rfs_valid_flags & SFE_CONN_MATCH_RFS_VALID_FLAG_RFS_ENABLED)) {
 			sfe_destroy_ipv4_ppe_rfs_rule(return_match);
 		}
 	}
@@ -2391,7 +2391,6 @@ update_done:
 	original_cm->counter_match = NULL;
 
 #if defined(SFE_RFS_SUPPORTED)
-	original_cm->rfs_enabled = false;
 	original_cm->flow_mtu = msg->conn_rule.flow_mtu;
 	original_cm->flow_interface_num = msg->conn_rule.flow_interface_num;
 	original_cm->flow_top_interface_num = msg->conn_rule.flow_top_interface_num;
@@ -2752,7 +2751,6 @@ sfe_response_t sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	original_cm->xlate_dest_port = msg->conn_rule.return_ident_xlate;
 
 #if defined(SFE_RFS_SUPPORTED)
-	original_cm->rfs_enabled = false;
 	original_cm->flow_mtu = msg->conn_rule.flow_mtu;
 	original_cm->return_mtu = msg->conn_rule.return_mtu;
 	original_cm->flow_interface_num = msg->conn_rule.flow_interface_num;
@@ -3151,7 +3149,6 @@ sfe_response_t sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	reply_cm->xlate_dest_port = tuple->flow_ident;
 
 #if defined(SFE_RFS_SUPPORTED)
-	reply_cm->rfs_enabled = false;
 	reply_cm->flow_mtu = msg->conn_rule.return_mtu;
 	reply_cm->return_mtu = msg->conn_rule.flow_mtu;
 	reply_cm->flow_interface_num = msg->conn_rule.return_interface_num;
@@ -3667,6 +3664,24 @@ sfe_response_t sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 		reply_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_XLATE_DEST;
 	}
 
+#if defined(SFE_RFS_SUPPORTED)
+	/*
+	 * Set outer_flow to true if flag OUTER_FLOW is valid.
+	 */
+	if (msg->valid_flags & SFE_RULE_CREATE_TUNNEL_OUTER_FLOW_VALID) {
+		original_cm->rfs_valid_flags |= SFE_CONN_MATCH_RFS_VALID_FLAG_TUNNEL_OUTER_FLOW;
+		reply_cm->rfs_valid_flags |= SFE_CONN_MATCH_RFS_VALID_FLAG_TUNNEL_OUTER_FLOW;
+	}
+
+	/*
+	 * Set tun_flow to true if flag TUNNEL_FLOW is valid.
+	 */
+	if (msg->valid_flags & SFE_RULE_CREATE_TUNNEL_FLOW_VALID) {
+		original_cm->rfs_valid_flags |= SFE_CONN_MATCH_RFS_VALID_FLAG_TUNNEL_FLOW;
+		reply_cm->rfs_valid_flags |= SFE_CONN_MATCH_RFS_VALID_FLAG_TUNNEL_FLOW;
+	}
+#endif
+
 	/*
 	 * Initialize the protocol-specific information that we track.
 	 */
@@ -3848,7 +3863,7 @@ void sfe_ipv4_connection_rule_rfs_valid_set(struct sfe_ipv4_connection_match *ma
 		return;
 	}
 	spin_lock_bh(&si->lock);
-	match->rfs_enabled = true;
+	match->rfs_valid_flags |=  SFE_CONN_MATCH_RFS_VALID_FLAG_RFS_ENABLED;
 	spin_unlock_bh(&si->lock);
 	return;
 }

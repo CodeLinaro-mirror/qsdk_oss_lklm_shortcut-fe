@@ -911,6 +911,14 @@ static void sfe_create_ipv4_ppe_rfs_rule(struct sfe_ipv4_connection_match *match
 	pr4rc.conn_rule.flow_mtu = match_dir->flow_mtu;
 	pr4rc.conn_rule.return_mtu = match_dir->return_mtu;
 
+	if (match_dir->rfs_valid_flags & SFE_CONN_MATCH_RFS_VALID_FLAG_TUNNEL_OUTER_FLOW) {
+		pr4rc.rule_flags |= PPE_RFS_V4_RULE_FLAG_TUN_OUTER_FLOW;
+	}
+
+	if (match_dir->rfs_valid_flags & SFE_CONN_MATCH_RFS_VALID_FLAG_TUNNEL_FLOW) {
+		pr4rc.rule_flags |= PPE_RFS_V4_RULE_FLAG_TUN_FLOW;
+	}
+
 	if (match_dir->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_PRIORITY_REMARK) {
 		pr4rc.qos_rule.flow_qos_tag = match_dir->priority;
 		pr4rc.qos_rule.return_qos_tag = return_qos_tag;
@@ -1026,7 +1034,8 @@ enum sfe_cmn_response sfe_create_ipv4_mc_rule_msg(struct sfe_ctx_instance_intern
 		flow_match = conn->original_match;
 
 		if (sfe_is_ppe_rfs_feature_enabled()) {
-			if (ppe_rfs_rule_eligible_get(flow_interface_num, return_interface_num, is_mcast)) {
+			if (ppe_rfs_rule_eligible_get(flow_interface_num, return_interface_num,
+												is_mcast, flow_match->rfs_valid_flags)) {
 				sfe_create_ipv4_ppe_rfs_rule(flow_match, return_qos_tag);
 			} else {
 				DEBUG_TRACE("%p: SFE mcast flow is not RFS eligible (false), flow interface num %d, return interface num %d. \n",
@@ -1183,14 +1192,16 @@ enum sfe_cmn_response sfe_create_ipv4_rule_msg(struct sfe_ctx_instance_internal 
 			/*
 			 * Push RFS rule in either direction if rfs is eligible in that direction.
 			 */
-			if (ppe_rfs_rule_eligible_get(flow_interface_num, return_interface_num, is_mcast)) {
+			if (ppe_rfs_rule_eligible_get(flow_interface_num, return_interface_num,
+											is_mcast, flow_match->rfs_valid_flags)) {
 				sfe_create_ipv4_ppe_rfs_rule(flow_match, return_match->priority);
 			} else {
 				DEBUG_TRACE("%p: SFE forward flow is not RFS eligible (false), flow interface num %d, return interface num %d. \n",
 						msg, flow_interface_num, return_interface_num);
 			}
 
-			if (ppe_rfs_rule_eligible_get(return_interface_num, flow_interface_num, is_mcast)) {
+			if (ppe_rfs_rule_eligible_get(return_interface_num, flow_interface_num,
+											is_mcast, return_match->rfs_valid_flags)) {
 				sfe_create_ipv4_ppe_rfs_rule(return_match, flow_match->priority);
 			} else {
 				DEBUG_TRACE("%p: SFE return flow is not RFS eligible (false), flow interface num %d, return interface num %d. \n",
@@ -1246,7 +1257,7 @@ enum sfe_cmn_response sfe_destroy_ipv4_mc_rule_msg(struct sfe_ctx_instance_inter
 		/*
 		 * Delete RFS rule in flow direction.
 		 */
-		if (flow_match && flow_match->rfs_enabled) {
+		if (flow_match && (flow_match->rfs_valid_flags & SFE_CONN_MATCH_RFS_VALID_FLAG_RFS_ENABLED)) {
 			sfe_destroy_ipv4_ppe_rfs_rule(flow_match);
 		}
 	}
@@ -1284,10 +1295,10 @@ enum sfe_cmn_response sfe_destroy_ipv4_rule_msg(struct sfe_ctx_instance_internal
 		/*
 		 * Delete RFS rule in either direction if rfs is present in that direction.
 		 */
-		if (flow_match && flow_match->rfs_enabled) {
+		if (flow_match && (flow_match->rfs_valid_flags & SFE_CONN_MATCH_RFS_VALID_FLAG_RFS_ENABLED)) {
 			sfe_destroy_ipv4_ppe_rfs_rule(flow_match);
 		}
-		if (return_match && return_match->rfs_enabled) {
+		if (return_match && (return_match->rfs_valid_flags & SFE_CONN_MATCH_RFS_VALID_FLAG_RFS_ENABLED)) {
 			sfe_destroy_ipv4_ppe_rfs_rule(return_match);
 		}
 	}
@@ -1641,6 +1652,14 @@ static void sfe_create_ipv6_ppe_rfs_rule(struct sfe_ipv6_connection_match *match
 	pr6rc.conn_rule.flow_mtu = match_dir->flow_mtu;
 	pr6rc.conn_rule.return_mtu = match_dir->return_mtu;
 
+	if (match_dir->rfs_valid_flags & SFE_CONN_MATCH_RFS_VALID_FLAG_TUNNEL_OUTER_FLOW) {
+		pr6rc.rule_flags |= PPE_RFS_V6_RULE_FLAG_TUN_OUTER_FLOW;
+	}
+
+	if (match_dir->rfs_valid_flags & SFE_CONN_MATCH_RFS_VALID_FLAG_TUNNEL_FLOW) {
+		pr6rc.rule_flags |= PPE_RFS_V6_RULE_FLAG_TUN_FLOW;
+	}
+
 	if (match_dir->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_PRIORITY_REMARK) {
 		pr6rc.qos_rule.flow_qos_tag = match_dir->priority;
 		pr6rc.qos_rule.return_qos_tag = return_qos_tag;
@@ -1764,7 +1783,8 @@ enum sfe_cmn_response sfe_create_ipv6_mc_rule_msg(struct sfe_ctx_instance_intern
 		flow_match = conn->original_match;
 
 		if (sfe_is_ppe_rfs_feature_enabled()) {
-			if (ppe_rfs_rule_eligible_get(flow_interface_num, return_interface_num, is_mcast)) {
+			if (ppe_rfs_rule_eligible_get(flow_interface_num, return_interface_num,
+											is_mcast, flow_match->rfs_valid_flags)) {
 				sfe_create_ipv6_ppe_rfs_rule(flow_match, return_qos_tag);
 			} else {
 				DEBUG_TRACE("%p: SFE mcast flow is not RFS eligible (false), flow interface num %d, return interface num %d. \n",
@@ -1965,14 +1985,16 @@ enum sfe_cmn_response sfe_create_ipv6_rule_msg(struct sfe_ctx_instance_internal 
 			/*
 			 * Push RFS rule in either direction if rfs is eligible in that direction.
 			 */
-			if (ppe_rfs_rule_eligible_get(flow_interface_num, return_interface_num, is_mcast)) {
+			if (ppe_rfs_rule_eligible_get(flow_interface_num, return_interface_num,
+											is_mcast, flow_match->rfs_valid_flags)) {
 				sfe_create_ipv6_ppe_rfs_rule(flow_match, return_match->priority);
 			} else {
 				DEBUG_TRACE("%p: SFE forward flow is not RFS eligible (false), flow interface num %d, return interface num %d. \n",
 						msg, flow_interface_num, return_interface_num);
 			}
 
-			if (ppe_rfs_rule_eligible_get(return_interface_num, flow_interface_num, is_mcast)) {
+			if (ppe_rfs_rule_eligible_get(return_interface_num, flow_interface_num,
+											is_mcast, return_match->rfs_valid_flags)) {
 				sfe_create_ipv6_ppe_rfs_rule(return_match, flow_match->priority);
 			} else {
 				DEBUG_TRACE("%p: SFE return flow is not RFS eligible (false), flow interface num %d, return interface num %d. \n",
@@ -2028,7 +2050,7 @@ enum sfe_cmn_response sfe_destroy_ipv6_mc_rule_msg(struct sfe_ctx_instance_inter
 		/*
 		 * Delete RFS rule in flow direction.
 		 */
-		if (flow_match && flow_match->rfs_enabled) {
+		if (flow_match && (flow_match->rfs_valid_flags & SFE_CONN_MATCH_RFS_VALID_FLAG_RFS_ENABLED)) {
 			sfe_destroy_ipv6_ppe_rfs_rule(flow_match);
 		}
 
@@ -2066,10 +2088,10 @@ enum sfe_cmn_response sfe_destroy_ipv6_rule_msg(struct sfe_ctx_instance_internal
 		/*
 		 * Delete RFS rule in either direction if rfs is present in that direction.
 		 */
-		if (flow_match && flow_match->rfs_enabled) {
+		if (flow_match && (flow_match->rfs_valid_flags & SFE_CONN_MATCH_RFS_VALID_FLAG_RFS_ENABLED)) {
 			sfe_destroy_ipv6_ppe_rfs_rule(flow_match);
 		}
-		if (return_match && return_match->rfs_enabled) {
+		if (return_match && (return_match->rfs_valid_flags & SFE_CONN_MATCH_RFS_VALID_FLAG_RFS_ENABLED)) {
 			sfe_destroy_ipv6_ppe_rfs_rule(return_match);
 		}
 	}

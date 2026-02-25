@@ -27,6 +27,16 @@
 #define SFE_L2_PARSE_FLAGS_VLAN_LINUX_UNTAGGED 0x08	/* Indicates vlan dev in skb set by linunx */
 
 /*
+ * Bit valid flags for RFS connection match, common for IPv4/IPv6.
+ */
+#define SFE_CONN_MATCH_RFS_VALID_FLAG_RFS_ENABLED			0x01
+		/* Tells if RFS is enabled for this connection match direction. */
+#define SFE_CONN_MATCH_RFS_VALID_FLAG_TUNNEL_OUTER_FLOW		0x02
+		/* Tells if this connection match is an entry of tunnel outer flow. */
+#define SFE_CONN_MATCH_RFS_VALID_FLAG_TUNNEL_FLOW			0x04
+		/* Tells if this connection match is an entry of tunnel flow. */
+
+/*
  * IPv6 address structure
  */
 struct sfe_ipv6_addr {

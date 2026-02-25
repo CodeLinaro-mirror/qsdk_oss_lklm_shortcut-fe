@@ -289,7 +289,7 @@ struct sfe_ipv4_connection_match {
 	struct dst_cache dst_cache;     /* Destination route cache */
 
 #if defined(SFE_RFS_SUPPORTED)
-	bool rfs_enabled;		/* Stores information of RFS eligibility for the connection entry. */
+	u32 rfs_valid_flags;	/* Stores information whether different fields are valid for the flow. */
 	u32 flow_mtu;			/* Store flow mtu to pass directly to RFS create rule. */
 	u32 return_mtu;			/* Store return mtu to pass directly to RFS create rule. */
 	s32 flow_interface_num;		/* Store namely interface number to pass directly to RFS create rule. */

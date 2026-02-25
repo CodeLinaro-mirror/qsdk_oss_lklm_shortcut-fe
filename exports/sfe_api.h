@@ -120,6 +120,8 @@
 #define SFE_RULE_CREATE_FLOW_FRAG_THRESH_VALID	(1<<14)	/** Flow ipv4_frag_thresh is valid */
 #define SFE_RULE_CREATE_RETURN_FRAG_THRESH_VALID (1<<15) /** Return ipv4_frag_thresh is valid */
 #define SFE_RULE_CREATE_SKIP_FRAG_OFFLOAD_VALID	 (1<<16) /** Fragmentation offload is invalid */
+#define SFE_RULE_CREATE_TUNNEL_OUTER_FLOW_VALID	 (1<<17) /** Flow is a tunnel outer flow. */
+#define SFE_RULE_CREATE_TUNNEL_FLOW_VALID	 (1<<18) /** Flow is a tunnel flow, either inner or outer. */
 
 /*
  * Multicast rule flags
