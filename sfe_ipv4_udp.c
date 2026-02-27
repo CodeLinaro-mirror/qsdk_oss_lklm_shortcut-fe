@@ -498,10 +498,11 @@ int sfe_ipv4_recv_udp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 
 	/*
 	 * Enable HW csum if rx checksum is verified and xmit interface is CSUM offload capable.
+	 * If the incoming packet has zero UDP checksum, we do not enable HW csum to preserve it.
 	 * Note: If L4 csum at Rx was found to be incorrect, we (router) should use incremental L4 checksum here
 	 * so that HW does not re-calculate/replace the L4 csum
 	 */
-	hw_csum = !!(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_CSUM_OFFLOAD) && (skb->ip_summed == CHECKSUM_UNNECESSARY);
+	hw_csum = !!(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_CSUM_OFFLOAD) && (skb->ip_summed == CHECKSUM_UNNECESSARY) && udph->check;
 
 	/*
 	 * Do we have to perform translations of the source address/port?
