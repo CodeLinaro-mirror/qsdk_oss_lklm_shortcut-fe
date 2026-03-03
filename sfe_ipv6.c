@@ -3901,6 +3901,7 @@ static int sfe_ipv6_debug_dev_read_connections_connection(struct sfe_ipv6 *si, s
 #ifdef CONFIG_NF_FLOW_COOKIE
 	int src_flow_cookie, dst_flow_cookie;
 #endif
+	bool reply_flow_accel = 0;
 
 	spin_lock_bh(&si->lock);
 
@@ -3991,6 +3992,7 @@ static int sfe_ipv6_debug_dev_read_connections_connection(struct sfe_ipv6 *si, s
 #ifdef CONFIG_NF_FLOW_COOKIE
 		dst_flow_cookie = reply_cm->flow_cookie;
 #endif
+		reply_flow_accel = reply_cm->flow_accel;
 
 	} else {
 		dest_priority = 0;
@@ -4019,9 +4021,7 @@ static int sfe_ipv6_debug_dev_read_connections_connection(struct sfe_ipv6 *si, s
 #endif
 	spin_unlock_bh(&si->lock);
 
-	ws->msg_len += snprintf(ws->msg, length - ws->msg_len, "\t\t<connection "
-				"orig_dir_en=\"%s\" "
-				"reply_dir_en=\"%s\" "
+	ws->msg_len += snprintf(ws->msg, SFE_IPV6_DEBUG_MSG_SIZE - ws->msg_len, "\t\t<connection "
 				"protocol=\"%u\" "
 				"src_dev=\"%s\" "
 				"src_ip=\"%pI6\" src_ip_xlate=\"%pI6\" "
@@ -4031,6 +4031,7 @@ static int sfe_ipv6_debug_dev_read_connections_connection(struct sfe_ipv6 *si, s
 				"src_mark=\"%08x\" "
 				"src_fast_xmit=\"%s\" "
 				"orig_cm_flags=\"%08x\" "
+				"orig_dir_en=\"%s\" "
 				"dest_dev=\"%s\" "
 				"dest_ip=\"%pI6\" dest_ip_xlate=\"%pI6\" "
 				"dest_port=\"%u\" dest_port_xlate=\"%u\" "
@@ -4039,12 +4040,11 @@ static int sfe_ipv6_debug_dev_read_connections_connection(struct sfe_ipv6 *si, s
 				"dest_mark=\"%08x\" "
 				"reply_fast_xmit=\"%s\" "
 				"reply_cm_flags=\"%08x\" "
+				"reply_dir_en=\"%s\" "
 #ifdef CONFIG_NF_FLOW_COOKIE
 				"src_flow_cookie=\"%d\" dst_flow_cookie=\"%d\" "
 #endif
 				"last_sync=\"%llu\" ",
-				original_cm->flow_accel ? "Yes" : "No",
-				reply_cm->flow_accel ? "Yes" : "No",
 				protocol,
 				src_dev->name,
 				&src_ip, &src_ip_xlate,
@@ -4054,6 +4054,7 @@ static int sfe_ipv6_debug_dev_read_connections_connection(struct sfe_ipv6 *si, s
 				src_mark,
 				original_fast_xmit ? "Yes" : "No",
 				original_cm_flags,
+				original_cm->flow_accel ? "Yes" : "No",
 				dest_dev->name,
 				&dest_ip, &dest_ip_xlate,
 				ntohs(dest_port), ntohs(dest_port_xlate),
@@ -4062,6 +4063,7 @@ static int sfe_ipv6_debug_dev_read_connections_connection(struct sfe_ipv6 *si, s
 				dest_mark,
 				reply_fast_xmit ? "Yes" : "No",
 				reply_cm_flags,
+				reply_flow_accel ? "Yes" : "No",
 #ifdef CONFIG_NF_FLOW_COOKIE
 				src_flow_cookie, dst_flow_cookie,
 #endif
