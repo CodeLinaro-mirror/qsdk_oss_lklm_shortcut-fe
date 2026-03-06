@@ -38,6 +38,12 @@
 #define SFE_SPECIAL_INTERFACE_PPTP (SFE_SPECIAL_INTERFACE_BASE + 5)	/**< Interface number for PPTP. */
 
 /**
+ * IPSec passthrough SPI placement.
+ */
+#define SFE_ESP_SPI_TO_SPORT(spi)	((spi & 0xFFFF0000) >> 16)
+#define SFE_ESP_SPI_TO_DPORT(spi)	(spi & 0xFFFF)
+
+/**
  * SAWF_metadata information placement in mark field.
  */
 #define SFE_SAWF_VALID_TAG              0xAA    /**< Valid SAWF tag value. */
@@ -99,6 +105,7 @@
 #define SFE_RULE_CREATE_FLAG_RETURN_VXLAN_GPE (1<<20)		/**< VXLAN-GPE rule for return flow. */
 #define SFE_RULE_CREATE_FLAG_FLOW_DEST_TUN_VP	 (1<<21) 	/**< TUNNEL VP is destination interface flow direction*/
 #define SFE_RULE_CREATE_FLAG_RETURN_DEST_TUN_VP	 (1<<22) 	/**< TUNNEL VP is destination interface in return direction*/
+#define SFE_RULE_CREATE_FLAG_ESP_PASSTHROUGH (1<<23)		/**< IPSec Passthrough. */
 
 /*
  * Rule creation validity flags.
@@ -547,6 +554,14 @@ struct sfe_rule_update_msg {
 	} info;
 };
 
+/*
+ * SPI information for both direction.
+ */
+struct sfe_esp_spi_rule {
+	uint32_t l_spi;			/**< Local SPI information. */
+	uint32_t r_spi;			/**< Remote SPI informatino. */
+};
+
 /**
  * IPv4 rule create submessage structure.
  */
@@ -577,6 +592,8 @@ struct sfe_ipv4_rule_create_msg {
 							/**< TO-direction VLAN Filter related acceleration parameters. */
 	struct sfe_vlan_filter_rule return_vlan_filter_rule;
 							/**< FROM-direction VLAN Filter related acceleration parameters. */
+	struct sfe_esp_spi_rule spi_rule;
+							/**< SPI information in case of ESP passthrough case. */
 	u32 index;					/**< Slot ID for cache statistics to host OS. */
 };
 

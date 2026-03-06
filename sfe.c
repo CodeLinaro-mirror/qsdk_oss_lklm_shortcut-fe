@@ -127,6 +127,9 @@ struct sfe_ctx_instance_internal {
 
 	int32_t l2_feature_support;		/* L2 feature support */
 	int32_t ppe_rfs_feature_support;	/* PPE RFS feature support */
+#if defined(SFE_ESP_SPI_PASSTH_ENABLE)
+	int32_t spi_esp_passthrough_support;	/* SPI based ESP passthrough support */
+#endif
 };
 
 static struct sfe_ctx_instance_internal __sfe_ctx;
@@ -730,6 +733,18 @@ static void sfe_ipv4_stats_one_sync_callback(struct sfe_connection_sync *sis)
 	kfree(msg);
 }
 
+#if defined(SFE_ESP_SPI_PASSTH_ENABLE)
+/*
+ * sfe_is_spi_based_esp_passthrough_enabled(void)
+ *	Check if SPI based ESP passthrough feature is enabled.
+ */
+bool sfe_is_spi_based_esp_passthrough_enabled(void)
+{
+	struct sfe_ctx_instance_internal *sfe_ctx = &__sfe_ctx;
+	return (sfe_ctx->spi_esp_passthrough_support == 1);
+}
+#endif
+
 #if defined(SFE_RFS_SUPPORTED)
 /*
  * sfe_is_ppe_rfs_feature_enabled()
@@ -742,6 +757,67 @@ bool sfe_is_ppe_rfs_feature_enabled(void)
 	struct sfe_ctx_instance_internal *sfe_ctx = &__sfe_ctx;
 	return (sfe_ctx->ppe_rfs_feature_support == 1);
 }
+
+#if defined(SFE_ESP_SPI_PASSTH_ENABLE)
+/*
+ * sfe_get_esp_spi_passthrough_feature()
+ *	SFE ESP SPI based passthrough is enabled or not.
+ */
+ssize_t sfe_get_esp_spi_passthrough_feature(struct device *dev,
+				     struct device_attribute *attr,
+				     char *buf)
+{
+	struct sfe_ctx_instance_internal *sfe_ctx = &__sfe_ctx;
+	ssize_t len;
+
+	spin_lock_bh(&sfe_ctx->lock);
+	len = snprintf(buf, (ssize_t)(PAGE_SIZE), "SFE ESP SPI based passthrough is %s\n", sfe_ctx->spi_esp_passthrough_support ? "enabled" : "disabled");
+	spin_unlock_bh(&sfe_ctx->lock);
+	return len;
+}
+
+/*
+ * sfe_set_esp_spi_passthrough_feature()
+ *	Enable or disable ESP SPI based passthrough features flag.
+ */
+ssize_t sfe_set_esp_spi_passthrough_feature(struct device *dev, struct device_attribute *attr,
+                         const char *buf, size_t count)
+{
+	unsigned long val;
+	struct sfe_ctx_instance_internal *sfe_ctx = &__sfe_ctx;
+	int ret;
+	ret = sscanf(buf, "%lu", &val);
+
+	if (ret != 1) {
+		pr_err("Wrong input, %s\n", buf);
+		return -EINVAL;
+	}
+
+	if (val != 1 && val != 0) {
+		pr_err("Input should be either 1 or 0, (%s)\n", buf);
+		return -EINVAL;
+	}
+
+	spin_lock_bh(&sfe_ctx->lock);
+
+	if (sfe_ctx->spi_esp_passthrough_support && val) {
+		spin_unlock_bh(&sfe_ctx->lock);
+		pr_err("ESP SPI based passthrough feature is already enabled\n");
+		return -EINVAL;
+	}
+
+	if (!sfe_ctx->spi_esp_passthrough_support && !val) {
+		spin_unlock_bh(&sfe_ctx->lock);
+		pr_err("ESP SPI based passthrough feature is already disabled\n");
+		return -EINVAL;
+	}
+
+	sfe_ctx->spi_esp_passthrough_support = val;
+	spin_unlock_bh(&sfe_ctx->lock);
+
+	return count;
+}
+#endif
 
 /*
  * sfe_get_ppe_rfs_feature()
@@ -1075,7 +1151,6 @@ enum sfe_cmn_response sfe_create_ipv4_rule_msg(struct sfe_ctx_instance_internal 
 	bool is_routed = true;
 	bool cfg_err;
 	sfe_response_t sfe_response = SFE_RET_SUCCESS;
-
 
 	if (!(msg->msg.rule_create.valid_flags & SFE_RULE_CREATE_CONN_VALID)) {
 		ret = SFE_CMN_RESPONSE_EMSG;
@@ -2538,6 +2613,11 @@ static const struct device_attribute sfe_ppe_rfs_feature_attr =
 	__ATTR(ppe_rfs_feature,  0644, sfe_get_ppe_rfs_feature, sfe_set_ppe_rfs_feature);
 #endif
 
+#if defined(SFE_ESP_SPI_PASSTH_ENABLE)
+static const struct device_attribute sfe_esp_spi_passthrough_feature_attr =
+	__ATTR(esp_spi_passthrough_feature,  0644, sfe_get_esp_spi_passthrough_feature, sfe_set_esp_spi_passthrough_feature);
+#endif
+
 /*
  * sfe_is_l2_feature_enabled()
  *	Check if l2 features flag feature is enabled or not. (VLAN, PPPOE, BRIDGE and tunnels)
@@ -2923,6 +3003,15 @@ int sfe_init_if(void)
 		goto exit2;
 	}
 #endif
+
+#if defined(SFE_ESP_SPI_PASSTH_ENABLE)
+	result = sysfs_create_file(sfe_ctx->sys_sfe, &sfe_esp_spi_passthrough_feature_attr.attr);
+	if (result) {
+		DEBUG_ERROR("failed to register PPE ESP SPI based passthrough feature flag sysfs file: %d\n", result);
+		goto exit2;
+	}
+#endif
+
 	/*
 	 * Create sys/sfe/tso_clear_fixed_id
 	 */
@@ -2948,6 +3037,13 @@ int sfe_init_if(void)
 	 */
 #if defined(SFE_RFS_SUPPORTED)
 	sfe_ctx->ppe_rfs_feature_support = 1;
+#endif
+
+	/*
+	 * Disable the ESP SPI based passthrough by default
+	 */
+#if defined(SFE_ESP_SPI_PASSTH_ENABLE)
+	sfe_ctx->spi_esp_passthrough_support = 0;
 #endif
 
 	spin_lock_init(&sfe_ctx->lock);
