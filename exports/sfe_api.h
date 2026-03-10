@@ -3,19 +3,8 @@
  *	 SFE exported function headers for SFE engine.
  *
  * Copyright (c) 2015,2016, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2025 Qualcomm Innovation Center, Inc. All rights reserved.
- *
- * Permission to use, copy, modify, and/or distribute this software for any
- * purpose with or without fee is hereby granted, provided that the above
- * copyright notice and this permission notice appear in all copies.
- *
- * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
- * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
- * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
- * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
- * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
- * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
- * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+ * SPDX-License-Identifier: ISC
  */
 
 
@@ -47,6 +36,12 @@
 #define SFE_SPECIAL_INTERFACE_IPSEC (SFE_SPECIAL_INTERFACE_BASE + 3)	/**< Interface number for IPSec. */
 #define SFE_SPECIAL_INTERFACE_L2TP (SFE_SPECIAL_INTERFACE_BASE + 4)	/**< Interface number for L2TP. */
 #define SFE_SPECIAL_INTERFACE_PPTP (SFE_SPECIAL_INTERFACE_BASE + 5)	/**< Interface number for PPTP. */
+
+/**
+ * IPSec passthrough SPI placement.
+ */
+#define SFE_ESP_SPI_TO_SPORT(spi)	((spi & 0xFFFF0000) >> 16)
+#define SFE_ESP_SPI_TO_DPORT(spi)	(spi & 0xFFFF)
 
 /**
  * SAWF_metadata information placement in mark field.
@@ -110,6 +105,7 @@
 #define SFE_RULE_CREATE_FLAG_RETURN_VXLAN_GPE (1<<20)		/**< VXLAN-GPE rule for return flow. */
 #define SFE_RULE_CREATE_FLAG_FLOW_DEST_TUN_VP	 (1<<21) 	/**< TUNNEL VP is destination interface flow direction*/
 #define SFE_RULE_CREATE_FLAG_RETURN_DEST_TUN_VP	 (1<<22) 	/**< TUNNEL VP is destination interface in return direction*/
+#define SFE_RULE_CREATE_FLAG_ESP_PASSTHROUGH (1<<23)		/**< IPSec Passthrough. */
 
 /*
  * Rule creation validity flags.
@@ -131,6 +127,8 @@
 #define SFE_RULE_CREATE_FLOW_FRAG_THRESH_VALID	(1<<14)	/** Flow ipv4_frag_thresh is valid */
 #define SFE_RULE_CREATE_RETURN_FRAG_THRESH_VALID (1<<15) /** Return ipv4_frag_thresh is valid */
 #define SFE_RULE_CREATE_SKIP_FRAG_OFFLOAD_VALID	 (1<<16) /** Fragmentation offload is invalid */
+#define SFE_RULE_CREATE_TUNNEL_OUTER_FLOW_VALID	 (1<<17) /** Flow is a tunnel outer flow. */
+#define SFE_RULE_CREATE_TUNNEL_FLOW_VALID	 (1<<18) /** Flow is a tunnel flow, either inner or outer. */
 
 /*
  * Multicast rule flags
@@ -220,14 +218,18 @@
 #define SFE_VLAN_FILTER_FLAG_EGRESS_UNTAGGED	(1<<2)	/**< Strip VLAN header associated with this VID at egress. */
 
 /*
- * SAWF mark validity flags
+ * Update rule flags are valid.
  */
-#define SFE_SAWF_MARK_FLOW_VALID        (1<<0)
+#define SFE_UPDATE_RULE_SAWF_FLOW_VALID        (1<<0)
 		/**< SAWF mark in the flow direction is valid. */
-#define SFE_SAWF_MARK_RETURN_VALID      (1<<1)
+#define SFE_UPDATE_RULE_SAWF_RETURN_VALID      (1<<1)
 		/**< SAWF mark in the return direction is valid. */
-#define SFE_SAWF_MARK_DEPRIO            (1<<2)
+#define SFE_UPDATE_RULE_SAWF_DEPRIO            (1<<2)
 		/**< SAWF mark is being set to reset queue of this flow */
+#define SFE_UPDATE_RULE_QOS_VALID		(1<<3)
+		/**< QoS mark is set for this flow. */
+#define SFE_UPDATE_RULE_DSCP_VALID		(1<<4)
+		/**< DSCP values are valid in update rule. */
 
 /**
  * @}
@@ -298,34 +300,27 @@ enum sfe_message_types {
 	SFE_TUN6RD_ADD_UPDATE_PEER,	/**< Add/update peer for 6RD tunnel. */
 	SFE_TX_CREATE_MULTICAST_RULE_MSG,	/**< IPv4/IPv6 create multicast rule message. */
 	SFE_TX_DESTROY_MULTICAST_RULE_MSG,     /**< IPv4/IPv6 destroy multicast rule message. */
+	SFE_TX_UPDATE_RULE_MSG,		/**< IPv4/IPv6 update rule message. */
 	SFE_MAX_MSG_TYPES,		/**< IPv4/IPv6 message max type number. */
 };
 
 /*
  * Connection mark types.
  */
-enum sfe_connection_mark_type {
-	SFE_CONNECTION_MARK_TYPE_CONNMARK,      /**< Conntrack mark. */
-	SFE_CONNECTION_MARK_TYPE_SAWFMARK,      /**< SAWF mark. */
-	SFE_CONNECTION_MARK_TYPE_MAX            /**< Indicates the last item. */
+enum sfe_rule_update_msg_type {
+	SFE_CONNECTION_MARK_TYPE_CONNMARK,		/**< Conntrack mark. */
+	SFE_CONNECTION_MARK_TYPE_BIDIR_SAWF_MARK,	/**< Bidirection SAWF mark. */
+	SFE_CONNECTION_MARK_TYPE_UNIDIR_MARK,		/**< Unidirection update info present in mark. */
+	SFE_CONNECTION_MARK_TYPE_MAX			/**< Indicates the last item. */
 };
 
-/**
- * Connection mark structure.
+/*
+ * Direction of the match rule.
  */
-struct sfe_connection_mark {
-	int protocol;				/**< Protocol number. */
-	__be32 src_ip[4];			/**< Source IP address. */
-	__be32 dest_ip[4];			/**< Destination IP address. */
-	__be16 src_port;			/**< Source port number. */
-	__be16 dest_port;			/**< Destination port number. */
-	u32 flow_mark;				/**< Mark to be updated for the flow direction. */
-	u32 return_mark;			/**< Mark to be updated for the return direction. */
-	u8 flow_svc_id;			/**< Service class in the flow direction. */
-	u8 return_svc_id;		/**< Service class in the return direction. */
-	u32 flags;				/**< State of marks. */
-	enum sfe_connection_mark_type type;	/**< Type of the marking. */
-};
+typedef enum sfe_flow_rule_direction {
+	SFE_FLOW_RULE_DIRECTION_FLOW,	/**< Match direction is original. */
+	SFE_FLOW_RULE_DIRECTION_RETURN	/**< Match direction is reply. */
+} sfe_flow_rule_direction_t;
 
 /**
  * Common message structure.
@@ -477,8 +472,8 @@ struct sfe_trustsec_rule {
  * Sometimes it is useful to accelerate traffic in one direction and not in another.
  */
 struct sfe_acceleration_direction_rule {
-	u8 flow_accel;		/**< Accelerate in flow direction. */
-	u8 return_accel;	/**< Accelerate in return direction. */
+	bool flow_accel;		/**< Accelerate in flow direction. */
+	bool return_accel;	/**< Accelerate in return direction. */
 	u8 reserved[2];		/**< Reserved; padding for alignment. */
 };
 
@@ -508,6 +503,66 @@ struct sfe_qdisc_rule {
 };
 
 /**
+ * Update message for update type connmark.
+ */
+struct sfe_update_msg_connmark_t {
+	u32 flow_mark;		/**< Mark to be updated for the flow direction. */
+	u32 return_mark;	/**< Mark to be updated for the return direction. */
+};
+
+/**
+ * Update message for update type sawfmark.
+ */
+struct sfe_update_msg_sawfmark_t {
+	u32 flow_mark;		/**< Mark to be updated for the flow direction. */
+	u32 return_mark;	/**< Mark to be updated for the return direction. */
+	u8 flow_svc_id;		/**< Service class in the flow direction. */
+	u8 return_svc_id;	/**< Service class in the return direction. */
+};
+
+/**
+ * Update message for update type unidirection.
+ */
+struct sfe_update_msg_unidir_t {
+	struct sfe_qos_rule qos;		/**< QoS rule information. */
+	struct sfe_dscp_rule dscp;		/**< DSCP-related acceleration parameters. */
+	sfe_flow_rule_direction_t update_dir;	/**< Direction to update. */
+};
+
+/**
+ * Connection mark structure.
+ */
+struct sfe_rule_update_msg {
+	enum sfe_rule_update_msg_type type;
+		/**< Type of the marking. */
+
+	int protocol;		/**< Protocol number. */
+	__be32 src_ip[4];	/**< Source IP address. */
+	__be32 dest_ip[4];	/**< Destination IP address. */
+	__be16 src_port;	/**< Source port number. */
+	__be16 dest_port;	/**< Destination port number. */
+
+	u32 flags;		/**< State of marks. */
+
+	union {
+		struct sfe_update_msg_connmark_t connmark;
+			/**< Information related to update type connmark. */
+		struct sfe_update_msg_sawfmark_t sawf;
+			/**< Information related to update type sawfmark. */
+		struct sfe_update_msg_unidir_t unidir;
+			/**< Information related to update type unidirection. */
+	} info;
+};
+
+/*
+ * SPI information for both direction.
+ */
+struct sfe_esp_spi_rule {
+	uint32_t l_spi;			/**< Local SPI information. */
+	uint32_t r_spi;			/**< Remote SPI informatino. */
+};
+
+/**
  * IPv4 rule create submessage structure.
  */
 struct sfe_ipv4_rule_create_msg {
@@ -527,11 +582,8 @@ struct sfe_ipv4_rule_create_msg {
 	struct sfe_vlan_rule vlan_primary_rule;		/**< Primary VLAN-related acceleration parameters. */
 	struct sfe_vlan_rule vlan_secondary_rule;	/**< Secondary VLAN-related acceleration parameters. */
 	struct sfe_trustsec_rule trustsec_rule;		/**< Trustsec-related acceleration parameters. */
-
-#ifdef CONFIG_XFRM
 	struct sfe_acceleration_direction_rule direction_rule;
 							/**< Direction related acceleration parameters. */
-#endif
 	/* Response */
 	struct sfe_service_class_rule sawf_rule;
 							/**< Service class related information */
@@ -540,6 +592,8 @@ struct sfe_ipv4_rule_create_msg {
 							/**< TO-direction VLAN Filter related acceleration parameters. */
 	struct sfe_vlan_filter_rule return_vlan_filter_rule;
 							/**< FROM-direction VLAN Filter related acceleration parameters. */
+	struct sfe_esp_spi_rule spi_rule;
+							/**< SPI information in case of ESP passthrough case. */
 	u32 index;					/**< Slot ID for cache statistics to host OS. */
 };
 
@@ -587,10 +641,8 @@ struct sfe_ipv4_mc_rule_create_msg {
 	struct sfe_dscp_rule dscp_rule;			/**< DSCP-related acceleration parameters. */
 	struct sfe_vlan_rule vlan_primary_rule;		/**< Primary VLAN-related acceleration parameters. */
 	struct sfe_vlan_rule vlan_secondary_rule;	/**< Secondary VLAN-related acceleration parameters. */
-#ifdef CONFIG_XFRM
 	struct sfe_acceleration_direction_rule direction_rule;
 							/**< Direction related acceleration parameters. */
-#endif
 	struct sfe_service_class_rule sawf_rule;	/**< Service class related information. */
 	uint16_t dest_mac[3];                   /**< Destination multicast MAC address. */
 	uint16_t if_cnt;                      /**< Number of destination interfaces. */
@@ -676,6 +728,7 @@ struct sfe_ipv4_msg {
 					/**< Many connections' statistics synchronization message. */
 		struct sfe_ipv4_mc_rule_create_msg mc_rule_create;/**< MC rule create message. */
 		struct sfe_ipv4_mc_rule_destroy_msg mc_rule_destroy; /**<MC rule destroy message. */
+		struct sfe_rule_update_msg rule_update;	/**< Rule update message. */
 	} msg;							/**< IPv4 message. */
 };
 
@@ -765,11 +818,8 @@ struct sfe_ipv6_rule_create_msg {
 	struct sfe_vlan_rule vlan_primary_rule;		/**< VLAN-related acceleration parameters. */
 	struct sfe_vlan_rule vlan_secondary_rule;	/**< VLAN-related acceleration parameters. */
 	struct sfe_trustsec_rule trustsec_rule;		/**< Trustsec-related acceleration parameters. */
-
-#ifdef CONFIG_XFRM
 	struct sfe_acceleration_direction_rule direction_rule;
 							/**< Direction-related acceleration parameters. */
-#endif
 	/*
 	 * Response
 	 */
@@ -827,10 +877,8 @@ struct sfe_ipv6_mc_rule_create_msg {
 	struct sfe_dscp_rule dscp_rule;			/**< DSCP-related acceleration parameters. */
 	struct sfe_vlan_rule vlan_primary_rule;		/**< Primary VLAN-related acceleration parameters. */
 	struct sfe_vlan_rule vlan_secondary_rule;	/**< Secondary VLAN-related acceleration parameters. */
-#ifdef CONFIG_XFRM
 	struct sfe_acceleration_direction_rule direction_rule;
 							/**< Direction-related acceleration parameters. */
-#endif
 	struct sfe_service_class_rule sawf_rule;	/**< Service class related information. */
 	uint16_t dest_mac[3];                   /**< Destination multicast MAC address. */
 	uint16_t if_cnt;                      /**< Number of destination interfaces. */
@@ -919,7 +967,7 @@ struct sfe_ipv6_msg {
 					/**< Many Connections' statistics synchronizaion message. */
 		struct sfe_ipv6_mc_rule_create_msg mc_rule_create;/**< MC rule create message. */
 		struct sfe_ipv6_mc_rule_destroy_msg mc_rule_destroy; /**<MC rule destroy message. */
-
+		struct sfe_rule_update_msg rule_update;	/**< Rule update message. */
 	} msg;				/**< IPv6 message. */
 };
 
@@ -1178,26 +1226,6 @@ void sfe_tun6rd_msg_init(struct sfe_tun6rd_msg *ncm, u16 if_num, u32 type,  u32 
  * True if enabled; false if disabled.
  */
 bool sfe_is_l2_feature_enabled(void);
-
-/**
- * Updates mark values of an IPv4 connection.
- *
- * @param	mark		The mark object.
- *
- * @return
- * True if mark update successful, false otherwise.
- */
-bool sfe_ipv4_mark_rule_update(struct sfe_connection_mark *mark);
-
-/**
- * Updates mark values of an IPv6 connection.
- *
- * @param	mark		The mark object.
- *
- * @return
- * True if mark update successful, false otherwise.
- */
-bool sfe_ipv6_mark_rule_update(struct sfe_connection_mark *mark);
 
 /**
  * Allows netfn flowmgr to pull single Connection Stats from SFE

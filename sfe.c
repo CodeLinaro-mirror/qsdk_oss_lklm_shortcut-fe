@@ -49,8 +49,8 @@ uint8_t sfe_fls_flush_on_hwm_enable;
 #define SFE_IPSEC_TUNNEL_TYPE 31
 
 typedef enum sfe_exception {
-	SFE_EXCEPTION_IPV4_MSG_UNKNOW,
-	SFE_EXCEPTION_IPV6_MSG_UNKNOW,
+	SFE_EXCEPTION_IPV4_MSG_UNKNOWN,
+	SFE_EXCEPTION_IPV6_MSG_UNKNOWN,
 	SFE_EXCEPTION_CONNECTION_INVALID,
 	SFE_EXCEPTION_NOT_SUPPORT_BRIDGE,
 	SFE_EXCEPTION_TCP_INVALID,
@@ -127,6 +127,9 @@ struct sfe_ctx_instance_internal {
 
 	int32_t l2_feature_support;		/* L2 feature support */
 	int32_t ppe_rfs_feature_support;	/* PPE RFS feature support */
+#if defined(SFE_ESP_SPI_PASSTH_ENABLE)
+	int32_t spi_esp_passthrough_support;	/* SPI based ESP passthrough support */
+#endif
 };
 
 static struct sfe_ctx_instance_internal __sfe_ctx;
@@ -730,6 +733,18 @@ static void sfe_ipv4_stats_one_sync_callback(struct sfe_connection_sync *sis)
 	kfree(msg);
 }
 
+#if defined(SFE_ESP_SPI_PASSTH_ENABLE)
+/*
+ * sfe_is_spi_based_esp_passthrough_enabled(void)
+ *	Check if SPI based ESP passthrough feature is enabled.
+ */
+bool sfe_is_spi_based_esp_passthrough_enabled(void)
+{
+	struct sfe_ctx_instance_internal *sfe_ctx = &__sfe_ctx;
+	return (sfe_ctx->spi_esp_passthrough_support == 1);
+}
+#endif
+
 #if defined(SFE_RFS_SUPPORTED)
 /*
  * sfe_is_ppe_rfs_feature_enabled()
@@ -742,6 +757,67 @@ bool sfe_is_ppe_rfs_feature_enabled(void)
 	struct sfe_ctx_instance_internal *sfe_ctx = &__sfe_ctx;
 	return (sfe_ctx->ppe_rfs_feature_support == 1);
 }
+
+#if defined(SFE_ESP_SPI_PASSTH_ENABLE)
+/*
+ * sfe_get_esp_spi_passthrough_feature()
+ *	SFE ESP SPI based passthrough is enabled or not.
+ */
+ssize_t sfe_get_esp_spi_passthrough_feature(struct device *dev,
+				     struct device_attribute *attr,
+				     char *buf)
+{
+	struct sfe_ctx_instance_internal *sfe_ctx = &__sfe_ctx;
+	ssize_t len;
+
+	spin_lock_bh(&sfe_ctx->lock);
+	len = snprintf(buf, (ssize_t)(PAGE_SIZE), "SFE ESP SPI based passthrough is %s\n", sfe_ctx->spi_esp_passthrough_support ? "enabled" : "disabled");
+	spin_unlock_bh(&sfe_ctx->lock);
+	return len;
+}
+
+/*
+ * sfe_set_esp_spi_passthrough_feature()
+ *	Enable or disable ESP SPI based passthrough features flag.
+ */
+ssize_t sfe_set_esp_spi_passthrough_feature(struct device *dev, struct device_attribute *attr,
+                         const char *buf, size_t count)
+{
+	unsigned long val;
+	struct sfe_ctx_instance_internal *sfe_ctx = &__sfe_ctx;
+	int ret;
+	ret = sscanf(buf, "%lu", &val);
+
+	if (ret != 1) {
+		pr_err("Wrong input, %s\n", buf);
+		return -EINVAL;
+	}
+
+	if (val != 1 && val != 0) {
+		pr_err("Input should be either 1 or 0, (%s)\n", buf);
+		return -EINVAL;
+	}
+
+	spin_lock_bh(&sfe_ctx->lock);
+
+	if (sfe_ctx->spi_esp_passthrough_support && val) {
+		spin_unlock_bh(&sfe_ctx->lock);
+		pr_err("ESP SPI based passthrough feature is already enabled\n");
+		return -EINVAL;
+	}
+
+	if (!sfe_ctx->spi_esp_passthrough_support && !val) {
+		spin_unlock_bh(&sfe_ctx->lock);
+		pr_err("ESP SPI based passthrough feature is already disabled\n");
+		return -EINVAL;
+	}
+
+	sfe_ctx->spi_esp_passthrough_support = val;
+	spin_unlock_bh(&sfe_ctx->lock);
+
+	return count;
+}
+#endif
 
 /*
  * sfe_get_ppe_rfs_feature()
@@ -911,6 +987,14 @@ static void sfe_create_ipv4_ppe_rfs_rule(struct sfe_ipv4_connection_match *match
 	pr4rc.conn_rule.flow_mtu = match_dir->flow_mtu;
 	pr4rc.conn_rule.return_mtu = match_dir->return_mtu;
 
+	if (match_dir->rfs_valid_flags & SFE_CONN_MATCH_RFS_VALID_FLAG_TUNNEL_OUTER_FLOW) {
+		pr4rc.rule_flags |= PPE_RFS_V4_RULE_FLAG_TUN_OUTER_FLOW;
+	}
+
+	if (match_dir->rfs_valid_flags & SFE_CONN_MATCH_RFS_VALID_FLAG_TUNNEL_FLOW) {
+		pr4rc.rule_flags |= PPE_RFS_V4_RULE_FLAG_TUN_FLOW;
+	}
+
 	if (match_dir->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_PRIORITY_REMARK) {
 		pr4rc.qos_rule.flow_qos_tag = match_dir->priority;
 		pr4rc.qos_rule.return_qos_tag = return_qos_tag;
@@ -1026,7 +1110,8 @@ enum sfe_cmn_response sfe_create_ipv4_mc_rule_msg(struct sfe_ctx_instance_intern
 		flow_match = conn->original_match;
 
 		if (sfe_is_ppe_rfs_feature_enabled()) {
-			if (ppe_rfs_rule_eligible_get(flow_interface_num, return_interface_num, is_mcast)) {
+			if (ppe_rfs_rule_eligible_get(flow_interface_num, return_interface_num,
+												is_mcast, flow_match->rfs_valid_flags)) {
 				sfe_create_ipv4_ppe_rfs_rule(flow_match, return_qos_tag);
 			} else {
 				DEBUG_TRACE("%p: SFE mcast flow is not RFS eligible (false), flow interface num %d, return interface num %d. \n",
@@ -1066,7 +1151,6 @@ enum sfe_cmn_response sfe_create_ipv4_rule_msg(struct sfe_ctx_instance_internal 
 	bool is_routed = true;
 	bool cfg_err;
 	sfe_response_t sfe_response = SFE_RET_SUCCESS;
-
 
 	if (!(msg->msg.rule_create.valid_flags & SFE_RULE_CREATE_CONN_VALID)) {
 		ret = SFE_CMN_RESPONSE_EMSG;
@@ -1183,14 +1267,16 @@ enum sfe_cmn_response sfe_create_ipv4_rule_msg(struct sfe_ctx_instance_internal 
 			/*
 			 * Push RFS rule in either direction if rfs is eligible in that direction.
 			 */
-			if (ppe_rfs_rule_eligible_get(flow_interface_num, return_interface_num, is_mcast)) {
+			if (ppe_rfs_rule_eligible_get(flow_interface_num, return_interface_num,
+											is_mcast, flow_match->rfs_valid_flags)) {
 				sfe_create_ipv4_ppe_rfs_rule(flow_match, return_match->priority);
 			} else {
 				DEBUG_TRACE("%p: SFE forward flow is not RFS eligible (false), flow interface num %d, return interface num %d. \n",
 						msg, flow_interface_num, return_interface_num);
 			}
 
-			if (ppe_rfs_rule_eligible_get(return_interface_num, flow_interface_num, is_mcast)) {
+			if (ppe_rfs_rule_eligible_get(return_interface_num, flow_interface_num,
+											is_mcast, return_match->rfs_valid_flags)) {
 				sfe_create_ipv4_ppe_rfs_rule(return_match, flow_match->priority);
 			} else {
 				DEBUG_TRACE("%p: SFE return flow is not RFS eligible (false), flow interface num %d, return interface num %d. \n",
@@ -1246,7 +1332,7 @@ enum sfe_cmn_response sfe_destroy_ipv4_mc_rule_msg(struct sfe_ctx_instance_inter
 		/*
 		 * Delete RFS rule in flow direction.
 		 */
-		if (flow_match && flow_match->rfs_enabled) {
+		if (flow_match && (flow_match->rfs_valid_flags & SFE_CONN_MATCH_RFS_VALID_FLAG_RFS_ENABLED)) {
 			sfe_destroy_ipv4_ppe_rfs_rule(flow_match);
 		}
 	}
@@ -1284,10 +1370,10 @@ enum sfe_cmn_response sfe_destroy_ipv4_rule_msg(struct sfe_ctx_instance_internal
 		/*
 		 * Delete RFS rule in either direction if rfs is present in that direction.
 		 */
-		if (flow_match && flow_match->rfs_enabled) {
+		if (flow_match && (flow_match->rfs_valid_flags & SFE_CONN_MATCH_RFS_VALID_FLAG_RFS_ENABLED)) {
 			sfe_destroy_ipv4_ppe_rfs_rule(flow_match);
 		}
-		if (return_match && return_match->rfs_enabled) {
+		if (return_match && (return_match->rfs_valid_flags & SFE_CONN_MATCH_RFS_VALID_FLAG_RFS_ENABLED)) {
 			sfe_destroy_ipv4_ppe_rfs_rule(return_match);
 		}
 	}
@@ -1319,6 +1405,24 @@ sfe_tx_status_t sfe_sync_ipv4_stats_many_msg(struct sfe_ctx_instance_internal *s
 }
 
 /*
+ * sfe_update_ipv4_rule_msg()
+ *	Update configured IPv4 rule
+ *
+ * @param sfe_ctx SFE context
+ * @param msg The IPv4 message
+ *
+ * @return sfe_tx_status_t The status of the Tx operation
+ */
+enum sfe_cmn_response sfe_update_ipv4_rule_msg(struct sfe_ctx_instance_internal *sfe_ctx, struct sfe_ipv4_msg *msg)
+{
+	if (!sfe_ipv4_rule_update(&msg->msg.rule_update)) {
+		DEBUG_WARN("%px: Could not update rule.\n", msg);
+		return SFE_CMN_RESPONSE_EMSG;
+	}
+	return SFE_CMN_RESPONSE_ACK;
+}
+
+/*
  * sfe_ipv4_tx()
  *	Transmit an IPv4 message to the sfe
  *
@@ -1336,6 +1440,19 @@ sfe_tx_status_t sfe_ipv4_tx(struct sfe_ctx_instance *sfe_ctx, struct sfe_ipv4_ms
 		return sfe_sync_ipv4_stats_many_msg(SFE_CTX_TO_PRIVATE(sfe_ctx), msg);
 	}
 
+	/*
+	 * In case of uni-direction acceleration, if ecm sends update rule msg
+	 * it means update the fields of non-accelerated flow
+	 */
+	if (msg->cm.type == SFE_TX_UPDATE_RULE_MSG) {
+		ret = sfe_ipv4_tx_with_resp(sfe_ctx, msg);
+		if (ret == SFE_CMN_RESPONSE_EMSG) {
+			sfe_incr_exceptions(SFE_EXCEPTION_IPV4_MSG_UNKNOWN);
+			return SFE_TX_FAILURE_BAD_PARAM;
+		}
+		return SFE_TX_SUCCESS;
+	}
+
 	response = sfe_alloc_response_msg(SFE_MSG_TYPE_IPV4, msg);
 	if (!response) {
 		sfe_incr_exceptions(SFE_EXCEPTION_ENQUEUE_FAILED);
@@ -1345,7 +1462,7 @@ sfe_tx_status_t sfe_ipv4_tx(struct sfe_ctx_instance *sfe_ctx, struct sfe_ipv4_ms
 
 	ret = sfe_ipv4_tx_with_resp(sfe_ctx, msg);
 	if (ret == SFE_CMN_RESPONSE_EMSG) {
-		sfe_incr_exceptions(SFE_EXCEPTION_IPV4_MSG_UNKNOW);
+		sfe_incr_exceptions(SFE_EXCEPTION_IPV4_MSG_UNKNOWN);
 		kfree(response);
 		return SFE_TX_FAILURE_NOT_ENABLED;
 	}
@@ -1376,8 +1493,10 @@ enum sfe_cmn_response sfe_ipv4_tx_with_resp(struct sfe_ctx_instance *sfe_ctx, st
 		return sfe_create_ipv4_mc_rule_msg(SFE_CTX_TO_PRIVATE(sfe_ctx), msg);
 	case SFE_TX_DESTROY_MULTICAST_RULE_MSG:
 		return sfe_destroy_ipv4_mc_rule_msg(SFE_CTX_TO_PRIVATE(sfe_ctx), msg);
+	case SFE_TX_UPDATE_RULE_MSG:
+		return sfe_update_ipv4_rule_msg(SFE_CTX_TO_PRIVATE(sfe_ctx), msg);
 	default:
-		sfe_incr_exceptions(SFE_EXCEPTION_IPV4_MSG_UNKNOW);
+		sfe_incr_exceptions(SFE_EXCEPTION_IPV4_MSG_UNKNOWN);
 		return SFE_CMN_RESPONSE_EMSG;
 	}
 }
@@ -1608,6 +1727,14 @@ static void sfe_create_ipv6_ppe_rfs_rule(struct sfe_ipv6_connection_match *match
 	pr6rc.conn_rule.flow_mtu = match_dir->flow_mtu;
 	pr6rc.conn_rule.return_mtu = match_dir->return_mtu;
 
+	if (match_dir->rfs_valid_flags & SFE_CONN_MATCH_RFS_VALID_FLAG_TUNNEL_OUTER_FLOW) {
+		pr6rc.rule_flags |= PPE_RFS_V6_RULE_FLAG_TUN_OUTER_FLOW;
+	}
+
+	if (match_dir->rfs_valid_flags & SFE_CONN_MATCH_RFS_VALID_FLAG_TUNNEL_FLOW) {
+		pr6rc.rule_flags |= PPE_RFS_V6_RULE_FLAG_TUN_FLOW;
+	}
+
 	if (match_dir->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_PRIORITY_REMARK) {
 		pr6rc.qos_rule.flow_qos_tag = match_dir->priority;
 		pr6rc.qos_rule.return_qos_tag = return_qos_tag;
@@ -1731,7 +1858,8 @@ enum sfe_cmn_response sfe_create_ipv6_mc_rule_msg(struct sfe_ctx_instance_intern
 		flow_match = conn->original_match;
 
 		if (sfe_is_ppe_rfs_feature_enabled()) {
-			if (ppe_rfs_rule_eligible_get(flow_interface_num, return_interface_num, is_mcast)) {
+			if (ppe_rfs_rule_eligible_get(flow_interface_num, return_interface_num,
+											is_mcast, flow_match->rfs_valid_flags)) {
 				sfe_create_ipv6_ppe_rfs_rule(flow_match, return_qos_tag);
 			} else {
 				DEBUG_TRACE("%p: SFE mcast flow is not RFS eligible (false), flow interface num %d, return interface num %d. \n",
@@ -1932,14 +2060,16 @@ enum sfe_cmn_response sfe_create_ipv6_rule_msg(struct sfe_ctx_instance_internal 
 			/*
 			 * Push RFS rule in either direction if rfs is eligible in that direction.
 			 */
-			if (ppe_rfs_rule_eligible_get(flow_interface_num, return_interface_num, is_mcast)) {
+			if (ppe_rfs_rule_eligible_get(flow_interface_num, return_interface_num,
+											is_mcast, flow_match->rfs_valid_flags)) {
 				sfe_create_ipv6_ppe_rfs_rule(flow_match, return_match->priority);
 			} else {
 				DEBUG_TRACE("%p: SFE forward flow is not RFS eligible (false), flow interface num %d, return interface num %d. \n",
 						msg, flow_interface_num, return_interface_num);
 			}
 
-			if (ppe_rfs_rule_eligible_get(return_interface_num, flow_interface_num, is_mcast)) {
+			if (ppe_rfs_rule_eligible_get(return_interface_num, flow_interface_num,
+											is_mcast, return_match->rfs_valid_flags)) {
 				sfe_create_ipv6_ppe_rfs_rule(return_match, flow_match->priority);
 			} else {
 				DEBUG_TRACE("%p: SFE return flow is not RFS eligible (false), flow interface num %d, return interface num %d. \n",
@@ -1995,7 +2125,7 @@ enum sfe_cmn_response sfe_destroy_ipv6_mc_rule_msg(struct sfe_ctx_instance_inter
 		/*
 		 * Delete RFS rule in flow direction.
 		 */
-		if (flow_match && flow_match->rfs_enabled) {
+		if (flow_match && (flow_match->rfs_valid_flags & SFE_CONN_MATCH_RFS_VALID_FLAG_RFS_ENABLED)) {
 			sfe_destroy_ipv6_ppe_rfs_rule(flow_match);
 		}
 
@@ -2033,10 +2163,10 @@ enum sfe_cmn_response sfe_destroy_ipv6_rule_msg(struct sfe_ctx_instance_internal
 		/*
 		 * Delete RFS rule in either direction if rfs is present in that direction.
 		 */
-		if (flow_match && flow_match->rfs_enabled) {
+		if (flow_match && (flow_match->rfs_valid_flags & SFE_CONN_MATCH_RFS_VALID_FLAG_RFS_ENABLED)) {
 			sfe_destroy_ipv6_ppe_rfs_rule(flow_match);
 		}
-		if (return_match && return_match->rfs_enabled) {
+		if (return_match && (return_match->rfs_valid_flags & SFE_CONN_MATCH_RFS_VALID_FLAG_RFS_ENABLED)) {
 			sfe_destroy_ipv6_ppe_rfs_rule(return_match);
 		}
 	}
@@ -2068,6 +2198,24 @@ sfe_tx_status_t sfe_sync_ipv6_stats_many_msg(struct sfe_ctx_instance_internal *s
 }
 
 /*
+ * sfe_update_ipv6_rule_msg()
+ *	Update configured IPv6 rule
+ *
+ * @param sfe_ctx SFE context
+ * @param msg The IPv6 message
+ *
+ * @return sfe_tx_status_t The status of the Tx operation
+ */
+enum sfe_cmn_response sfe_update_ipv6_rule_msg(struct sfe_ctx_instance_internal *sfe_ctx, struct sfe_ipv6_msg *msg)
+{
+	if (!sfe_ipv6_rule_update(&msg->msg.rule_update)) {
+		DEBUG_WARN("%px: Could not update rule.\n", msg);
+		return SFE_CMN_RESPONSE_EMSG;
+	}
+	return SFE_CMN_RESPONSE_ACK;
+}
+
+/*
  * sfe_ipv6_tx()
  *	Transmit an IPv6 message to the sfe
  *
@@ -2085,6 +2233,19 @@ sfe_tx_status_t sfe_ipv6_tx(struct sfe_ctx_instance *sfe_ctx, struct sfe_ipv6_ms
 		return sfe_sync_ipv6_stats_many_msg(SFE_CTX_TO_PRIVATE(sfe_ctx), msg);
 	}
 
+	/*
+	 * In case of uni-direction acceleration, if ecm sends update rule msg
+	 * it means update the fields of non-accelerated flow
+	 */
+	if (msg->cm.type == SFE_TX_UPDATE_RULE_MSG) {
+		ret = sfe_ipv6_tx_with_resp(sfe_ctx, msg);
+		if (ret == SFE_CMN_RESPONSE_EMSG) {
+			sfe_incr_exceptions(SFE_EXCEPTION_IPV6_MSG_UNKNOWN);
+			return SFE_TX_FAILURE_BAD_PARAM;
+		}
+		return SFE_TX_SUCCESS;
+	}
+
 	response = sfe_alloc_response_msg(SFE_MSG_TYPE_IPV6, msg);
 	if (!response) {
 		sfe_incr_exceptions(SFE_EXCEPTION_ENQUEUE_FAILED);
@@ -2094,7 +2255,7 @@ sfe_tx_status_t sfe_ipv6_tx(struct sfe_ctx_instance *sfe_ctx, struct sfe_ipv6_ms
 
 	ret = sfe_ipv6_tx_with_resp(sfe_ctx, msg);
 	if (ret == SFE_CMN_RESPONSE_EMSG) {
-		sfe_incr_exceptions(SFE_EXCEPTION_IPV6_MSG_UNKNOW);
+		sfe_incr_exceptions(SFE_EXCEPTION_IPV6_MSG_UNKNOWN);
 		kfree(response);
 		return SFE_TX_FAILURE_NOT_ENABLED;
 	}
@@ -2125,8 +2286,10 @@ enum sfe_cmn_response sfe_ipv6_tx_with_resp(struct sfe_ctx_instance *sfe_ctx, st
 		return sfe_create_ipv6_mc_rule_msg(SFE_CTX_TO_PRIVATE(sfe_ctx), msg);
 	case SFE_TX_DESTROY_MULTICAST_RULE_MSG:
 		return sfe_destroy_ipv6_mc_rule_msg(SFE_CTX_TO_PRIVATE(sfe_ctx), msg);
+	case SFE_TX_UPDATE_RULE_MSG:
+		return sfe_update_ipv6_rule_msg(SFE_CTX_TO_PRIVATE(sfe_ctx), msg);
 	default:
-		sfe_incr_exceptions(SFE_EXCEPTION_IPV6_MSG_UNKNOW);
+		sfe_incr_exceptions(SFE_EXCEPTION_IPV6_MSG_UNKNOWN);
 		return SFE_CMN_RESPONSE_EMSG;
 	}
 }
@@ -2448,6 +2611,11 @@ EXPORT_SYMBOL(sfe_service_class_stats_get);
 #if defined(SFE_RFS_SUPPORTED)
 static const struct device_attribute sfe_ppe_rfs_feature_attr =
 	__ATTR(ppe_rfs_feature,  0644, sfe_get_ppe_rfs_feature, sfe_set_ppe_rfs_feature);
+#endif
+
+#if defined(SFE_ESP_SPI_PASSTH_ENABLE)
+static const struct device_attribute sfe_esp_spi_passthrough_feature_attr =
+	__ATTR(esp_spi_passthrough_feature,  0644, sfe_get_esp_spi_passthrough_feature, sfe_set_esp_spi_passthrough_feature);
 #endif
 
 /*
@@ -2835,6 +3003,15 @@ int sfe_init_if(void)
 		goto exit2;
 	}
 #endif
+
+#if defined(SFE_ESP_SPI_PASSTH_ENABLE)
+	result = sysfs_create_file(sfe_ctx->sys_sfe, &sfe_esp_spi_passthrough_feature_attr.attr);
+	if (result) {
+		DEBUG_ERROR("failed to register PPE ESP SPI based passthrough feature flag sysfs file: %d\n", result);
+		goto exit2;
+	}
+#endif
+
 	/*
 	 * Create sys/sfe/tso_clear_fixed_id
 	 */
@@ -2860,6 +3037,13 @@ int sfe_init_if(void)
 	 */
 #if defined(SFE_RFS_SUPPORTED)
 	sfe_ctx->ppe_rfs_feature_support = 1;
+#endif
+
+	/*
+	 * Disable the ESP SPI based passthrough by default
+	 */
+#if defined(SFE_ESP_SPI_PASSTH_ENABLE)
+	sfe_ctx->spi_esp_passthrough_support = 0;
 #endif
 
 	spin_lock_init(&sfe_ctx->lock);

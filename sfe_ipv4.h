@@ -195,10 +195,6 @@ struct sfe_ipv4_connection_match {
 #ifdef CONFIG_NF_FLOW_COOKIE
 	u32 flow_cookie;		/* used flow cookie, for debug */
 #endif
-#ifdef CONFIG_XFRM
-	u32 flow_accel;             /* The flow accelerated or not */
-#endif
-
 	struct sfe_ipv4_connection *connection;
 	struct sfe_ipv4_connection_match *counter_match;
 					/* Matches the flow in the opposite direction as the one in *connection */
@@ -293,7 +289,7 @@ struct sfe_ipv4_connection_match {
 	struct dst_cache dst_cache;     /* Destination route cache */
 
 #if defined(SFE_RFS_SUPPORTED)
-	bool rfs_enabled;		/* Stores information of RFS eligibility for the connection entry. */
+	u32 rfs_valid_flags;	/* Stores information whether different fields are valid for the flow. */
 	u32 flow_mtu;			/* Store flow mtu to pass directly to RFS create rule. */
 	u32 return_mtu;			/* Store return mtu to pass directly to RFS create rule. */
 	s32 flow_interface_num;		/* Store namely interface number to pass directly to RFS create rule. */
@@ -302,6 +298,7 @@ struct sfe_ipv4_connection_match {
 	s32 return_top_interface_num;	/* Store namely interface number to pass directly to RFS create rule. */
 
 #endif
+	bool flow_accel;		/* The flow accelerated or not */
 };
 
 /*
@@ -422,6 +419,7 @@ enum sfe_ipv4_exception_events {
 	SFE_IPV4_EXCEPTION_EVENT_TCP_CHECKSUM_ERROR,
 	SFE_IPV4_EXCEPTION_EVENT_UDP_CHECKSUM_ERROR,
 	SFE_IPV4_EXCEPTION_EVENT_VXLAN_GPE_NO_ROUTE,
+	SFE_IPV4_EXCEPTION_EVENT_FLOW_DIR_NOT_ACCEL,
 	SFE_IPV4_EXCEPTION_EVENT_LAST
 };
 

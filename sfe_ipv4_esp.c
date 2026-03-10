@@ -23,6 +23,9 @@
 #include <net/ip.h>
 #include <linux/etherdevice.h>
 #include <linux/lockdep.h>
+#ifdef CONFIG_XFRM
+#include <net/xfrm.h>
+#endif
 
 #include "sfe_debug.h"
 #include "sfe_api.h"
@@ -56,6 +59,15 @@ int sfe_ipv4_recv_esp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 	bool ret;
 	u8 ttl;
 	u8 ingress_flags = 0;
+	__be16 sport = 0;
+	__be16 dport = 0;
+#if defined(SFE_ESP_SPI_PASSTH_ENABLE)
+	struct ip_esp_hdr *esp = NULL;
+	u32 spi = 0;
+#ifdef CONFIG_XFRM
+	struct xfrm_state *x = NULL;
+#endif
+#endif
 
 	/*
 	 * Is our packet too short to contain a valid ESP header?
@@ -65,6 +77,34 @@ int sfe_ipv4_recv_esp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 		DEBUG_TRACE("%px: packet too short for ESP header\n", skb);
 		return 0;
 	}
+
+#if defined(SFE_ESP_SPI_PASSTH_ENABLE)
+	/*
+	 * For IPSec passthrough with SPI cases, extract the SPI from the
+	 * packet and use it as sport and dport for connection lookup.
+	 * The upper 16 bits shall be used as sport and lower 16 as dport.
+	 */
+	if (sfe_is_spi_based_esp_passthrough_enabled()) {
+		/*
+		 * If this is not a passthrough packet, then dont use ESP index to match the connection.
+		 */
+		esp = (struct ip_esp_hdr *)((uint8_t *)iph + ihl);
+#ifdef CONFIG_XFRM
+		x = xfrm_state_lookup_byspi(dev_net(skb->dev), esp->spi, AF_INET);
+		if (x) {
+			xfrm_state_put(x);
+			goto xfrm_check_exit;
+		}
+#endif
+		spi = ntohl(esp->spi);
+		sport = SFE_ESP_SPI_TO_SPORT(spi);
+		dport = SFE_ESP_SPI_TO_DPORT(spi);
+	}
+
+#ifdef CONFIG_XFRM
+xfrm_check_exit:
+#endif
+#endif
 
 	/*
 	 * Read the IP address from the iphdr, and set the src/dst ports to 0.
@@ -79,10 +119,10 @@ int sfe_ipv4_recv_esp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 #ifdef CONFIG_NF_FLOW_COOKIE
 	cm = si->sfe_flow_cookie_table[skb->flow_cookie & SFE_FLOW_COOKIE_MASK].match;
 	if (unlikely(!cm)) {
-		cm = sfe_ipv4_find_ipv4_connection_match_rcu(si, dev, IPPROTO_ESP, src_ip, 0, dest_ip, 0);
+		cm = sfe_ipv4_find_ipv4_connection_match_rcu(si, dev, IPPROTO_ESP, src_ip, sport, dest_ip, dport);
 	}
 #else
-	cm = sfe_ipv4_find_connection_match_rcu(si, dev, IPPROTO_ESP, src_ip, 0, dest_ip, 0);
+	cm = sfe_ipv4_find_connection_match_rcu(si, dev, IPPROTO_ESP, src_ip, sport, dest_ip, dport);
 #endif
 	if (unlikely(!cm)) {
 		rcu_read_unlock();
@@ -231,6 +271,20 @@ int sfe_ipv4_recv_esp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 	 * Enable HW csum if rx checksum is verified and xmit interface is CSUM offload capable.
 	 */
 	hw_csum = !!(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_CSUM_OFFLOAD) && (skb->ip_summed == CHECKSUM_UNNECESSARY);
+
+	/*
+	 * Do we have to perform translations of the source address?
+	 */
+	if (unlikely(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_XLATE_SRC)) {
+		iph->saddr = cm->xlate_src_ip;
+	}
+
+	/*
+	 * Do we have to perform translations of the destination address?
+	 */
+	if (unlikely(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_XLATE_DEST)) {
+		iph->daddr = cm->xlate_dest_ip;
+	}
 
 	/*
 	 * proto decap packet.

@@ -60,6 +60,10 @@ ifdef SFE_BRIDGE_VLAN_FILTERING_ENABLE
 ccflags-y += -DSFE_BRIDGE_VLAN_FILTERING_ENABLE
 endif
 
+ifdef SFE_ESP_SPI_PASSTH_ENABLE
+ccflags-y += -DSFE_ESP_SPI_PASSTH_ENABLE
+endif
+
 #Uncomment the below line to enable the L4 checksum verification by software
 #ccflags-y += -DSFE_SW_L4_CHECKSUM_VERIFICATION
 

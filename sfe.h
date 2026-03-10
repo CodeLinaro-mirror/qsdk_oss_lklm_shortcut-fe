@@ -3,19 +3,8 @@
  *	Shortcut forwarding engine.
  *
  * Copyright (c) 2013-2016, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2025 Qualcomm Innovation Center, Inc. All rights reserved.
- *
- * Permission to use, copy, modify, and/or distribute this software for any
- * purpose with or without fee is hereby granted, provided that the above
- * copyright notice and this permission notice appear in all copies.
- *
- * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
- * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
- * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
- * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
- * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
- * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
- * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+ * SPDX-License-Identifier: ISC
  */
 
 #ifndef __SFE_H
@@ -36,6 +25,16 @@
 #define SFE_L2_PARSE_FLAGS_TRUSTSEC_INGRESS 0x02	/* Indicates presence of a valid trustsec header */
 #define SFE_L2_PARSE_FLAGS_VLAN_HW_TAG_SET 0x04		/* Indicates presence of a skb tag set by linux */
 #define SFE_L2_PARSE_FLAGS_VLAN_LINUX_UNTAGGED 0x08	/* Indicates vlan dev in skb set by linunx */
+
+/*
+ * Bit valid flags for RFS connection match, common for IPv4/IPv6.
+ */
+#define SFE_CONN_MATCH_RFS_VALID_FLAG_RFS_ENABLED			0x01
+		/* Tells if RFS is enabled for this connection match direction. */
+#define SFE_CONN_MATCH_RFS_VALID_FLAG_TUNNEL_OUTER_FLOW		0x02
+		/* Tells if this connection match is an entry of tunnel outer flow. */
+#define SFE_CONN_MATCH_RFS_VALID_FLAG_TUNNEL_FLOW			0x04
+		/* Tells if this connection match is an entry of tunnel flow. */
 
 /*
  * IPv6 address structure
@@ -181,6 +180,13 @@ bool sfe_is_ppe_rfs_feature_enabled(void);
 #endif
 
 /*
+ * sfe_is_spi_based_esp_passthrough_enabled()
+ */
+#if defined(SFE_ESP_SPI_PASSTH_ENABLE)
+bool sfe_is_spi_based_esp_passthrough_enabled(void);
+#endif
+
+/*
  * This callback will be called in a timer
  * at 100 times per second to sync stats back to
  * Linux connection track.
@@ -202,7 +208,7 @@ void sfe_ipv4_destroy_all_rules_for_dev(struct net_device *dev);
 sfe_response_t sfe_ipv4_create_mc_rule(struct sfe_ipv4_mc_rule_create_msg *msg);
 void sfe_ipv4_destroy_mc_rule(struct sfe_ipv4_mc_rule_destroy_msg *msg);
 void sfe_ipv4_register_sync_rule_callback(sfe_sync_rule_callback_t callback);
-void sfe_ipv4_update_rule(struct sfe_ipv4_rule_create_msg *msg);
+bool sfe_ipv4_rule_update(struct sfe_rule_update_msg *update_msg);
 bool sfe_dev_has_hw_csum(struct net_device *dev);
 bool sfe_dev_is_ipip6(struct net_device *dev);
 
@@ -220,7 +226,7 @@ void sfe_ipv6_destroy_all_rules_for_dev(struct net_device *dev);
 sfe_response_t sfe_ipv6_create_mc_rule(struct sfe_ipv6_mc_rule_create_msg *msg);
 void sfe_ipv6_destroy_mc_rule(struct sfe_ipv6_mc_rule_destroy_msg *msg);
 void sfe_ipv6_register_sync_rule_callback(sfe_sync_rule_callback_t callback);
-void sfe_ipv6_update_rule(struct sfe_ipv6_rule_create_msg *msg);
+bool sfe_ipv6_rule_update(struct sfe_rule_update_msg *update_msg);
 bool sfe_ipv6_sync_invoke(uint16_t index);
 void sfe_ipv6_register_many_sync_callback(sfe_ipv6_many_sync_callback_t cb);
 void sfe_ipv6_stats_convert(struct sfe_ipv6_conn_sync *sync_msg, struct sfe_connection_sync *sis);
@@ -260,9 +266,9 @@ static inline void sfe_ipv6_register_sync_rule_callback(sfe_sync_rule_callback_t
 	return;
 }
 
-static inline void sfe_ipv6_update_rule(struct sfe_ipv6_rule_create_msg *msg)
+static inline bool sfe_ipv6_rule_update(struct sfe_rule_update_msg *msg)
 {
-	return;
+	return false;
 }
 
 static inline bool sfe_ipv6_sync_invoke(uint16_t index)

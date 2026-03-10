@@ -300,17 +300,15 @@ int sfe_ipv4_recv_tcp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 		return 0;
 	}
 
-#ifdef CONFIG_XFRM
 	/*
 	 * We can't accelerate the flow on this direction, just let it go
 	 * through the slow path.
 	 */
 	if (unlikely(!cm->flow_accel)) {
 		rcu_read_unlock();
-		this_cpu_inc(si->stats_pcpu->packets_not_forwarded64);
+		sfe_ipv4_exception_stats_inc(si, SFE_IPV4_EXCEPTION_EVENT_FLOW_DIR_NOT_ACCEL);
 		return 0;
 	}
-#endif
 
 	/*
 	 * Do we expect an ingress VLAN tag for this flow?
