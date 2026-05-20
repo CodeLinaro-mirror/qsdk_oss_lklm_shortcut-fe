@@ -693,6 +693,9 @@ void sfe_ipv4_stats_convert(struct sfe_ipv4_conn_sync *sync_msg, struct sfe_conn
 	case SFE_RULE_SYNC_REASON_FLUSH_SWITCH_AE:
 		sync_msg->reason = SFE_RULE_SYNC_REASON_FLUSH_SWITCH_AE;
 		break;
+	case SFE_RULE_SYNC_REASON_FLOW_CLASSIFIED:
+		sync_msg->reason = SFE_RULE_SYNC_REASON_FLOW_CLASSIFIED;
+		break;
 	default:
 		sync_msg->reason = SFE_RULE_SYNC_REASON_STATS;
 		break;
@@ -1496,6 +1499,9 @@ void sfe_ipv6_stats_convert(struct sfe_ipv6_conn_sync *sync_msg, struct sfe_conn
 		break;
 	case SFE_RULE_SYNC_REASON_FLUSH_SWITCH_AE:
 		sync_msg->reason = SFE_RULE_SYNC_REASON_FLUSH_SWITCH_AE;
+		break;
+	case SFE_RULE_SYNC_REASON_FLOW_CLASSIFIED:
+		sync_msg->reason = SFE_RULE_SYNC_REASON_FLOW_CLASSIFIED;
 		break;
 	default:
 		sync_msg->reason = SFE_RULE_SYNC_REASON_STATS;

@@ -251,7 +251,8 @@ typedef enum /** @cond */ sfe_rule_sync_reason /** @endcond */ {
 	SFE_RULE_SYNC_REASON_FLUSH,		/**< Synchronize to flush an entry. */
 	SFE_RULE_SYNC_REASON_EVICT,		/**< Synchronize to evict an entry. */
 	SFE_RULE_SYNC_REASON_DESTROY,		/**< Synchronize to destroy an entry (requested by the connection manager). */
-	SFE_RULE_SYNC_REASON_FLUSH_SWITCH_AE	/**< Synchronize to flush an entry and direct ECM switch acceleration engine */
+	SFE_RULE_SYNC_REASON_FLUSH_SWITCH_AE,	/**< Synchronize to flush an entry and direct ECM switch acceleration engine */
+	SFE_RULE_SYNC_REASON_FLOW_CLASSIFIED	/**< Synchronize for classified flow, mark 17th bit for IPA offload */
 
 } sfe_rule_sync_reason_t;
 
