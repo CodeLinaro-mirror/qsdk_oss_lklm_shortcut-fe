@@ -246,7 +246,29 @@ int sfe_ipv6_recv_tcp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 			if (!(fls_ret & SFE_FLS_CONNECTION_FLAG_DEF_ENABLE) || fls_ret & SFE_FLS_CONNECTION_FLAG_HWM_EXCEEDED)
 				cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_FLS_DISABLED;
 
-			if (fls_ret & SFE_FLS_CONNECTION_FLAG_HWM_EXCEEDED && sfe_fls_flush_on_hwm_enable) {
+			/*
+			 * Handle FLS classification and HWM exceeded separately
+			 */
+			if (!(fls_ret & SFE_FLS_CONNECTION_FLAG_DEF_ENABLE)) {
+				/*
+				 * FLS classified the flow - notify ECM to mark 17th bit
+				 * Do NOT flush the connection, just send sync message
+				 */
+				struct sfe_ipv6_connection *c = cm->connection;
+
+				DEBUG_TRACE("FLS classified flow, notifying ECM to mark 17th bit\n");
+
+				/* Send sync to ECM with new reason */
+				sfe_ipv6_sync_status(si, c, SFE_RULE_SYNC_REASON_FLOW_CLASSIFIED);
+
+				/* Connection stays in SFE, packet continues to be accelerated */
+				/* Do NOT return 0, continue processing */
+			}
+
+			if ((fls_ret & SFE_FLS_CONNECTION_FLAG_HWM_EXCEEDED) && sfe_fls_flush_on_hwm_enable) {
+				/*
+				 * HWM exceeded - flush connection from SFE
+				 */
 				struct sfe_ipv6_connection *c = cm->connection;
 				DEBUG_TRACE("flush on source interface check failure\n");
 				spin_lock_bh(&si->lock);
@@ -257,7 +279,7 @@ int sfe_ipv6_recv_tcp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 				}
 				rcu_read_unlock();
 				sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_FLS_HWM_FLUSH);
-				DEBUG_TRACE("Connection flushed from SFE due to FLS HWM breach\n");
+				DEBUG_TRACE("Connection flushed from SFE due to FLS HWM exceeded\n");
 				return 0;
 			}
 		}
