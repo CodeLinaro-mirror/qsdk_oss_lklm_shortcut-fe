@@ -341,8 +341,23 @@ struct sfe_ipv6_connection {
 
 /*
  * IPv6 connections and hash table size information.
+ * SFE_IPV6_CONNECTION_HASH_SHIFT is log2(SFE_MAX_CONNECTION_NUM), determined
+ * at compile time via preprocessor if-checks to avoid any runtime cost.
+ * SFE_MAX_CONNECTION_NUM must be a power of 2 between 512 and 8192.
  */
+#if (SFE_MAX_CONNECTION_NUM == 512)
+#define SFE_IPV6_CONNECTION_HASH_SHIFT 9
+#elif (SFE_MAX_CONNECTION_NUM == 1024)
+#define SFE_IPV6_CONNECTION_HASH_SHIFT 10
+#elif (SFE_MAX_CONNECTION_NUM == 2048)
+#define SFE_IPV6_CONNECTION_HASH_SHIFT 11
+#elif (SFE_MAX_CONNECTION_NUM == 4096)
 #define SFE_IPV6_CONNECTION_HASH_SHIFT 12
+#elif (SFE_MAX_CONNECTION_NUM == 8192)
+#define SFE_IPV6_CONNECTION_HASH_SHIFT 13
+#else
+#error "SFE_MAX_CONNECTION_NUM must be a power of 2 between 512 and 8192"
+#endif
 #define SFE_IPV6_CONNECTION_HASH_SIZE (1 << SFE_IPV6_CONNECTION_HASH_SHIFT)
 #define SFE_IPV6_CONNECTION_HASH_MASK (SFE_IPV6_CONNECTION_HASH_SIZE - 1)
 

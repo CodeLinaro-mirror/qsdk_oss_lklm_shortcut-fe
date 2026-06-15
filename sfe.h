@@ -11,8 +11,12 @@
 #define __SFE_H
 
 /*
- * Maximum number of accelerated IPv4 or IPv6 connections
+ * Maximum number of accelerated IPv4 or IPv6 connections.
+ * SFE_MAX_CONNECTION_NUM can be overridden at build time by passing
+ * -DSFE_MAX_CONNECTION_NUM=<value> via the Makefile. It must be a power of 2.
+ * If not explicitly defined, it falls back to a profile-based default.
  */
+#ifndef SFE_MAX_CONNECTION_NUM
 #if defined(SFE_MEM_PROFILE_LOW)
 #define SFE_MAX_CONNECTION_NUM 512
 #elif defined(SFE_MEM_PROFILE_MEDIUM)
@@ -20,6 +24,7 @@
 #else
 #define SFE_MAX_CONNECTION_NUM 4096
 #endif
+#endif /* SFE_MAX_CONNECTION_NUM */
 
 #define SFE_L2_PARSE_FLAGS_PPPOE_INGRESS 0x01		/* Indicates presence of a valid PPPoE header */
 #define SFE_L2_PARSE_FLAGS_TRUSTSEC_INGRESS 0x02	/* Indicates presence of a valid trustsec header */
