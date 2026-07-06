@@ -34,6 +34,8 @@ int sfe_ipv6_recv_etherip(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_d
 	struct net_device *xmit_dev;
 	struct inet6_protocol *ipprot;
 	netdev_features_t features;
+	struct net_device *offload_xmit_dev = NULL;
+	u64 __percpu *offload_stat = NULL;
 	bool bridge_flow;
 	bool passthrough;
 	bool fast_xmit;
@@ -273,8 +275,31 @@ int sfe_ipv6_recv_etherip(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_d
 	features = cm->features;
 	fast_xmit = !!(cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_FAST_XMIT);
 
-	rcu_read_unlock();
+	/*
+	 * Check if TX dev is tun vp.
+	 */
+	if (unlikely(cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_PPE_TUN_VP_VALID)) {
+		offload_xmit_dev = xmit_dev;
+		offload_stat = &si->stats_pcpu->ppe_tun_vp_tx64;
+	}
+
 	this_cpu_inc(si->stats_pcpu->packets_forwarded64);
+
+	/*
+	 * For tunnel Packets check if tunnel is active in PPE.
+	 * If tunnel is active queue the packet to tunnel VP.
+	 */
+	if (unlikely(offload_xmit_dev)) {
+		struct netdev_hw_offload_ops *offload_ops = rcu_dereference(offload_xmit_dev->offload_ops);
+		mem_debug_update_skb(skb);
+		if (likely(offload_ops && offload_ops->xmit && offload_ops->xmit(offload_xmit_dev, skb))) {
+			this_cpu_inc(*offload_stat);
+			rcu_read_unlock();
+			return 1;
+		}
+	}
+
+	rcu_read_unlock();
 	prefetch(skb_shinfo(skb));
 
 	/*
@@ -282,6 +307,7 @@ int sfe_ipv6_recv_etherip(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_d
 	 * packet.
 	 */
 	mem_debug_update_skb(skb);
+
 	if (likely(fast_xmit && dev_fast_xmit(skb, xmit_dev, features))) {
 		this_cpu_inc(si->stats_pcpu->packets_fast_xmited64);
 		return 1;
