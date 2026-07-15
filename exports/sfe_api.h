@@ -106,6 +106,8 @@
 #define SFE_RULE_CREATE_FLAG_FLOW_DEST_TUN_VP	 (1<<21) 	/**< TUNNEL VP is destination interface flow direction*/
 #define SFE_RULE_CREATE_FLAG_RETURN_DEST_TUN_VP	 (1<<22) 	/**< TUNNEL VP is destination interface in return direction*/
 #define SFE_RULE_CREATE_FLAG_ESP_PASSTHROUGH (1<<23)		/**< IPSec Passthrough. */
+#define SFE_RULE_CREATE_FLAG_FLOW_DEST_VEIP_PON_VP (1<<24)	/**< VEIP PON VP is destination interface in flow direction. */
+#define SFE_RULE_CREATE_FLAG_RETURN_DEST_VEIP_PON_VP (1<<25)	/**< VEIP PON VP is destination interface in return direction. */
 
 /*
  * Rule creation validity flags.
@@ -359,6 +361,9 @@ struct sfe_ipv4_connection_rule {
 	s32 return_interface_num;	/**< Return interface number. */
 	s32 flow_top_interface_num;	/**< Top flow interface number. */
 	s32 return_top_interface_num;	/**< Top return interface number. */
+#ifdef CONFIG_IPQ_PON
+	s32 veip_xmit_interface_num;	/**< VEIP offload xmit interface number. */
+#endif
 	u32 flow_mtu;			/**< Flow interface`s MTU. */
 	u32 return_mtu;			/**< Return interface`s MTU. */
 	__be32 flow_ip_xlate;		/**< Translated flow IP address. */
@@ -793,6 +798,9 @@ struct sfe_ipv6_connection_rule {
 	s32 return_interface_num;	/**< Return interface number. */
 	s32 flow_top_interface_num;	/**< Top flow interface number. */
 	s32 return_top_interface_num;	/**< Top return interface number. */
+#ifdef CONFIG_IPQ_PON
+	s32 veip_xmit_interface_num;	/**< VEIP offload xmit interface number. */
+#endif
 	u32 flow_mtu;			/**< Flow interface's MTU. */
 	u32 return_mtu;			/**< Return interface's MTU. */
 	__be32 flow_ip_xlate[4];		/**< Translated flow IP address. */

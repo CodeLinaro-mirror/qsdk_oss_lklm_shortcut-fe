@@ -483,6 +483,9 @@ static void sfe_ipv4_update_summary_stats(struct sfe_ipv4 *si,  struct sfe_ipv4_
 		stats->connection_create_requests_overflow64 += s->connection_create_requests_overflow64;
 		stats->bridge_vlan_passthrough_forwarded64 += s->bridge_vlan_passthrough_forwarded64;
 		stats->ppe_tun_vp_tx64 += s->ppe_tun_vp_tx64;
+#ifdef CONFIG_IPQ_PON
+		stats->ppe_veip_pon_vp_tx64 += s->ppe_veip_pon_vp_tx64;
+#endif
 	}
 
 }
@@ -701,6 +704,12 @@ bool sfe_ipv4_remove_connection(struct sfe_ipv4 *si, struct sfe_ipv4_connection 
 			dev_put(c->reply_match->top_interface_dev);
 		}
 
+#ifdef CONFIG_IPQ_PON
+		if (c->reply_match->offload_xmit_dev) {
+			dev_put(c->reply_match->offload_xmit_dev);
+		}
+#endif
+
 		/*
 		 * If qdisc_xmit_dev is present, dereference qdisc net dev.
 		 */
@@ -720,6 +729,12 @@ bool sfe_ipv4_remove_connection(struct sfe_ipv4 *si, struct sfe_ipv4_connection 
 	if (c->original_match->top_interface_dev) {
 		dev_put(c->original_match->top_interface_dev);
 	}
+
+#ifdef CONFIG_IPQ_PON
+	if (c->original_match->offload_xmit_dev) {
+		dev_put(c->original_match->offload_xmit_dev);
+	}
+#endif
 
 
 	/*
@@ -2819,6 +2834,10 @@ sfe_response_t sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 
 	original_cm->top_interface_dev = NULL;
 	reply_cm->top_interface_dev = NULL;
+#ifdef CONFIG_IPQ_PON
+	original_cm->offload_xmit_dev = NULL;
+	reply_cm->offload_xmit_dev = NULL;
+#endif
 
 	/*
 	 * Enable qdisc fast xmit path if single qdisc is present on non-bottom interface.
@@ -2857,6 +2876,20 @@ sfe_response_t sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	if (msg->rule_flags & SFE_RULE_CREATE_FLAG_FLOW_DEST_TUN_VP) {
                original_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_PPE_TUN_VP_VALID;
 	}
+
+#ifdef CONFIG_IPQ_PON
+	if ((msg->rule_flags & SFE_RULE_CREATE_FLAG_FLOW_DEST_VEIP_PON_VP) &&
+			!(original_cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_FAST_QDISC_XMIT)) {
+		original_cm->offload_xmit_dev = dev_get_by_index(&init_net,
+				msg->conn_rule.veip_xmit_interface_num);
+		if (unlikely(!original_cm->offload_xmit_dev)) {
+			status = SFE_RET_DEST_DEV_NOT_FOUND;
+			goto free_reply_cm;
+		}
+
+		original_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_PPE_VEIP_PON_VP_VALID;
+	}
+#endif
 
 	original_cm->connection = c;
 	original_cm->counter_match = reply_cm;
@@ -3280,6 +3313,20 @@ sfe_response_t sfe_ipv4_create_rule(struct sfe_ipv4_rule_create_msg *msg)
 	if (msg->rule_flags & SFE_RULE_CREATE_FLAG_RETURN_DEST_TUN_VP) {
                reply_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_PPE_TUN_VP_VALID;
 	}
+
+#ifdef CONFIG_IPQ_PON
+	if ((msg->rule_flags & SFE_RULE_CREATE_FLAG_RETURN_DEST_VEIP_PON_VP) &&
+			!(reply_cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_FAST_QDISC_XMIT)) {
+		reply_cm->offload_xmit_dev = dev_get_by_index(&init_net,
+				msg->conn_rule.veip_xmit_interface_num);
+		if (unlikely(!reply_cm->offload_xmit_dev)) {
+			status = SFE_RET_DEST_DEV_NOT_FOUND;
+			goto free_reply_cm;
+		}
+
+		reply_cm->flags |= SFE_IPV4_CONNECTION_MATCH_FLAG_PPE_VEIP_PON_VP_VALID;
+	}
+#endif
 
 	reply_cm->connection = c;
 	reply_cm->counter_match = original_cm;
@@ -3904,6 +3951,12 @@ free_reply_cm:
 		dev_put(reply_cm->top_interface_dev);
 	}
 
+#ifdef CONFIG_IPQ_PON
+	if (reply_cm->offload_xmit_dev) {
+		dev_put(reply_cm->offload_xmit_dev);
+	}
+#endif
+
 	kfree(reply_cm);
 
 free_original_cm:
@@ -3914,6 +3967,12 @@ free_original_cm:
 	if (original_cm->top_interface_dev) {
 		dev_put(original_cm->top_interface_dev);
 	}
+
+#ifdef CONFIG_IPQ_PON
+	if (original_cm->offload_xmit_dev) {
+		dev_put(original_cm->offload_xmit_dev);
+	}
+#endif
 
 	kfree(original_cm);
 
@@ -4696,7 +4755,11 @@ static int sfe_ipv4_debug_dev_read_stats(struct sfe_ipv4 *si, struct sfe_ipv4_de
 			      "pppoe_bridge_pkts_3tuple_fwded=\"%llu\" "
 			      "connection_create_requests_overflow64=\"%llu\" "
 			      "bridge_vlan_passthrough_forwarded64=\"%llu\" />\n"
-			      "ppe_tun_vp_tx64 =\"%llu\" />\n",
+			      "ppe_tun_vp_tx64 =\"%llu\" />\n"
+#ifdef CONFIG_IPQ_PON
+			      "ppe_veip_pon_vp_tx64 =\"%llu\" />\n"
+#endif
+			      ,
 				num_conn,
 				stats.packets_dropped64,
 				stats.packets_fast_xmited64,
@@ -4717,7 +4780,11 @@ static int sfe_ipv4_debug_dev_read_stats(struct sfe_ipv4 *si, struct sfe_ipv4_de
 				stats.pppoe_bridge_packets_3tuple_forwarded64,
 				stats.connection_create_requests_overflow64,
 				stats.bridge_vlan_passthrough_forwarded64,
-				stats.ppe_tun_vp_tx64);
+				stats.ppe_tun_vp_tx64
+#ifdef CONFIG_IPQ_PON
+				, stats.ppe_veip_pon_vp_tx64
+#endif
+				);
 
         ws->msgp = ws->msg;
 
