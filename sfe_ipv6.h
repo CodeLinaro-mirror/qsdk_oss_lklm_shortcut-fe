@@ -123,6 +123,8 @@ struct sfe_ipv6_vlan_filter_connection_match {
 					/* VXLAN-GPE flow */
 #define SFE_IPV6_CONNECTION_MATCH_FLAG_PPE_TUN_VP_VALID (1<<28)
 					/* TUN VP valid */
+#define SFE_IPV6_CONNECTION_MATCH_FLAG_PPE_VEIP_PON_VP_VALID (1<<29)
+					/* VEIP PON VP valid */
 /*
  * IPv6 multicast destination structure
  */
@@ -175,6 +177,10 @@ struct sfe_ipv6_connection_match {
 	 * Packet transmit information.
 	 */
 	struct net_device *xmit_dev;	/* Network device on which to transmit */
+#ifdef CONFIG_IPQ_PON
+	struct net_device *offload_xmit_dev;
+					/* Device used for PPE offload xmit handoff */
+#endif
 	struct net_device *qdisc_xmit_dev;      /* Interface used for fast qdisc xmit */
 
 	/*
@@ -488,6 +494,9 @@ struct sfe_ipv6_stats {
 	u64 fragment_forwarded64;	/*Number of fragments forwarded. */
 	u64 fragment_dropped64;		/*Number of fragments dropped. */
 	u64 fragment_id_timeout64;	/*Number of fragment id timeouts. */
+#ifdef CONFIG_IPQ_PON
+	u64 ppe_veip_pon_vp_tx64;	/* Number of IPv6 packets queued to PPE VEIP GW VP */
+#endif
 	u64 fragment_exception64;	/*Number of fragment exception to host. */
 	u64 bridge_vlan_passthrough_forwarded64;	/* Number of IPV6 bridge vlan passthrough packets forwarded */
 	u64 ppe_tun_vp_tx64;				/* Number of IPV6 packets queued to PPE tunnel VP  */

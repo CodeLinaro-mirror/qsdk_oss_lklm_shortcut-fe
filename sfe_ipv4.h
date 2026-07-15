@@ -112,6 +112,8 @@ struct sfe_ipv4_vlan_filter_connection_match {
 					/* VXLAN-GPE flow */
 #define SFE_IPV4_CONNECTION_MATCH_FLAG_PPE_TUN_VP_VALID (1<<29)
 					/* TUN VP valid */
+#define SFE_IPV4_CONNECTION_MATCH_FLAG_PPE_VEIP_PON_VP_VALID (1<<30)
+					/* VEIP PON VP valid */
 
 /*
  * IPv4 multicast destination structure
@@ -281,6 +283,9 @@ struct sfe_ipv4_connection_match {
 	struct list_head mc_list;
 
 	struct net_device *top_interface_dev;	/* Used by tun6rd to store decap VLAN netdevice.*/
+#ifdef CONFIG_IPQ_PON
+	struct net_device *offload_xmit_dev;	/* Device used for PPE offload xmit handoff. */
+#endif
 
 	void *fls_conn;
 
@@ -476,6 +481,9 @@ struct sfe_ipv4_stats {
 	u64 connection_create_requests_overflow64;	/* Number of IPV4 connection create requests after reaching max limit */
 	u64 bridge_vlan_passthrough_forwarded64;	/* Number of IPV4 bridge vlan passthrough packets forwarded */
 	u64 ppe_tun_vp_tx64;				/* Number of IPV4 packets queued to PPE tunnel VP  */
+#ifdef CONFIG_IPQ_PON
+	u64 ppe_veip_pon_vp_tx64;			/* Number of IPV4 packets queued to PPE VEIP GW VP */
+#endif
 };
 
 /*
