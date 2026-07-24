@@ -145,6 +145,9 @@ int sfe_ipv6_recv_udp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 #endif
 	struct netdev_hw_offload_ops *offload_ops = NULL;
 	bool tun_vp_tx = false;
+#ifdef CONFIG_IPQ_PON
+	bool veip_pon_vp_tx = false;
+#endif
 
 	DEBUG_TRACE("%px: sfe: sfe_ipv6_recv_udp called.\n", skb);
 
@@ -751,12 +754,16 @@ int sfe_ipv6_recv_udp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 
 	fast_xmit = !!(cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_FAST_XMIT);
 	tun_vp_tx = !!(cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_PPE_TUN_VP_VALID);
+#ifdef CONFIG_IPQ_PON
+	veip_pon_vp_tx = !!(cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_PPE_VEIP_PON_VP_VALID);
+#endif
 
 	this_cpu_inc(si->stats_pcpu->packets_forwarded64);
 
 	/*
-	 * For tunnel Packets check if tunnel is active in PPE.
-	 * If tunnel is active queue the packet to tunnel VP
+	 * For tunnel packets, queue the packet to the tunnel VP when the tunnel
+	 * is active in PPE. For VEIP packets, queue the packet to the VEIP PON
+	 * VP using the resolved offload handoff device.
 	 */
 	if (unlikely(tun_vp_tx)) {
 		offload_ops = rcu_dereference(xmit_dev->offload_ops);
@@ -769,6 +776,23 @@ int sfe_ipv6_recv_udp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 			}
 		}
 	}
+#ifdef CONFIG_IPQ_PON
+	else if (unlikely(veip_pon_vp_tx)) {
+		struct net_device *offload_xmit_dev = cm->offload_xmit_dev;
+
+		if (likely(offload_xmit_dev)) {
+			offload_ops = rcu_dereference(offload_xmit_dev->offload_ops);
+			if (likely(offload_ops && offload_ops->xmit)) {
+				mem_debug_update_skb(skb);
+				if (likely(offload_ops->xmit(offload_xmit_dev, skb))) {
+					this_cpu_inc(si->stats_pcpu->ppe_veip_pon_vp_tx64);
+					rcu_read_unlock();
+					return 1;
+				}
+			}
+		}
+	}
+#endif
 
 	rcu_read_unlock();
 

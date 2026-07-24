@@ -37,6 +37,10 @@ int sfe_ipv4_recv_esp(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_devic
 	struct net_device *xmit_dev;
 	struct net_protocol *ipprot;
 	netdev_features_t features;
+#ifdef CONFIG_IPQ_PON
+	struct net_device *offload_xmit_dev;
+	struct netdev_hw_offload_ops *offload_ops;
+#endif
 	bool vlan_passthrough = false;
 	bool passthrough;
 	bool bridge_flow;
@@ -453,8 +457,27 @@ xfrm_check_exit:
 	features = cm->features;
 	fast_xmit = !!(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_FAST_XMIT);
 
-	rcu_read_unlock();
 	this_cpu_inc(si->stats_pcpu->packets_forwarded64);
+
+#ifdef CONFIG_IPQ_PON
+	if (unlikely(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_PPE_VEIP_PON_VP_VALID)) {
+		offload_xmit_dev = cm->offload_xmit_dev;
+
+		if (likely(offload_xmit_dev)) {
+			offload_ops = rcu_dereference(offload_xmit_dev->offload_ops);
+			if (likely(offload_ops && offload_ops->xmit)) {
+				mem_debug_update_skb(skb);
+				if (likely(offload_ops->xmit(offload_xmit_dev, skb))) {
+					this_cpu_inc(si->stats_pcpu->ppe_veip_pon_vp_tx64);
+					rcu_read_unlock();
+					return 1;
+				}
+			}
+		}
+	}
+#endif
+
+	rcu_read_unlock();
 	prefetch(skb_shinfo(skb));
 
 
