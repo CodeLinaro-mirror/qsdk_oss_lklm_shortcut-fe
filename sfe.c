@@ -114,6 +114,7 @@ struct sfe_ctx_instance_internal {
 	spinlock_t lock;		/* Lock to protect message queue */
 
 	struct work_struct work;	/* Work to send response message back to caller*/
+	unsigned int work_cpu;		/* The core to run response message processing on */
 
 	sfe_ipv4_msg_callback_t __rcu ipv4_stats_sync_cb;	/* Callback to call to sync ipv4 statistics */
 	sfe_ipv4_msg_callback_t __rcu ipv4_stats_sync_many_cb;	/* Callback to call to sync many ipv4 statistics */
@@ -475,7 +476,7 @@ static void sfe_process_response_msg(struct work_struct *work)
 	 * If having more msg in the queue, schedule it again.
 	 */
 	if (response) {
-		schedule_work(&sfe_ctx->work);
+		schedule_work_on(sfe_ctx->work_cpu, &sfe_ctx->work);
 	}
 }
 
@@ -580,7 +581,7 @@ static inline void sfe_enqueue_msg(struct sfe_ctx_instance_internal *sfe_ctx, st
 	list_add_tail(&response->node, &sfe_ctx->msg_queue);
 	spin_unlock_bh(&sfe_ctx->lock);
 
-	schedule_work(&sfe_ctx->work);
+	schedule_work_on(sfe_ctx->work_cpu, &sfe_ctx->work);
 }
 
 /*
@@ -3065,6 +3066,12 @@ int sfe_init_if(void)
 
 	INIT_LIST_HEAD(&sfe_ctx->msg_queue);
 	INIT_WORK(&sfe_ctx->work, sfe_process_response_msg);
+
+	/*
+	 * Pin response processing to a fixed core so it isn't starved by
+	 * contention on whichever CPU the generic system_wq happens to pick.
+	 */
+	sfe_ctx->work_cpu = NR_CPUS - 1;
 
 	/*
 	 * Hook the receive path in the network stack.
