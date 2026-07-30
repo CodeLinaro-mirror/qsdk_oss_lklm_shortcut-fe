@@ -299,7 +299,7 @@ struct sfe_ipv6_connection_match {
 	s32 flow_top_interface_num;	/* Store namely interface number to pass directly to RFS create rule. */
 	s32 return_interface_num;	/* Store namely interface number to pass directly to RFS create rule. */
 	s32 return_top_interface_num;	/* Store namely interface number to pass directly to RFS create rule. */
-
+	bool is_mcast_flow;		/* The flow is multicast or not */
 #endif
 	bool flow_accel;		/* The flow accelerated or not */
 };
