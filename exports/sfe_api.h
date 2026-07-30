@@ -1315,6 +1315,36 @@ void sfe_fls_register(sfe_fls_conn_create_t create_cb, sfe_fls_conn_delete_t del
 void sfe_fls_unregister(void);
 
 /**
+ * Re-enables FLS stats for the IPv4 connection match(es) with this 5-tuple.
+ *
+ * @param	protocol	IP protocol.
+ * @param	src_ip		Source IP address.
+ * @param	src_port	Source port.
+ * @param	dest_ip		Destination IP address.
+ * @param	dest_port	Destination port.
+ *
+ * @return
+ * true if a matching connection was found and re-enabled.
+ */
+extern bool sfe_ipv4_fls_enable(uint8_t protocol, __be32 src_ip, __be16 src_port,
+				 __be32 dest_ip, __be16 dest_port);
+
+/**
+ * Re-enables FLS stats for the IPv6 connection match(es) with this 5-tuple.
+ *
+ * @param	protocol	IP protocol.
+ * @param	src_ip		Source IP address (4 x __be32 words).
+ * @param	src_port	Source port.
+ * @param	dest_ip		Destination IP address (4 x __be32 words).
+ * @param	dest_port	Destination port.
+ *
+ * @return
+ * true if a matching connection was found and re-enabled.
+ */
+extern bool sfe_ipv6_fls_enable(uint8_t protocol, __be32 *src_ip, __be16 src_port,
+				 __be32 *dest_ip, __be16 dest_port);
+
+/**
  * @}
  */
 
