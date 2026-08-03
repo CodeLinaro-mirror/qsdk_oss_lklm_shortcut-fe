@@ -759,6 +759,66 @@ bool sfe_is_ppe_rfs_feature_enabled(void)
 	return (sfe_ctx->ppe_rfs_feature_support == 1);
 }
 
+/*
+ * sfe_get_ppe_rfs_feature()
+ *	PPE rfs feature is enabled/disabled
+ */
+ssize_t sfe_get_ppe_rfs_feature(struct device *dev,
+				     struct device_attribute *attr,
+				     char *buf)
+{
+	struct sfe_ctx_instance_internal *sfe_ctx = &__sfe_ctx;
+	ssize_t len;
+
+	spin_lock_bh(&sfe_ctx->lock);
+	len = snprintf(buf, (ssize_t)(PAGE_SIZE), "PPE RFS feature is %s\n", sfe_ctx->ppe_rfs_feature_support ? "enabled" : "disabled");
+	spin_unlock_bh(&sfe_ctx->lock);
+	return len;
+}
+
+/*
+ * sfe_set_ppe_rfs_feature()
+ *	Enable or disable ppe rfs features flag.
+ */
+ssize_t sfe_set_ppe_rfs_feature(struct device *dev, struct device_attribute *attr,
+                         const char *buf, size_t count)
+{
+        unsigned long val;
+	struct sfe_ctx_instance_internal *sfe_ctx = &__sfe_ctx;
+	int ret;
+        ret = sscanf(buf, "%lu", &val);
+
+	if (ret != 1) {
+		pr_err("Wrong input, %s\n", buf);
+		return -EINVAL;
+	}
+
+	if (val != 1 && val != 0) {
+		pr_err("Input should be either 1 or 0, (%s)\n", buf);
+		return -EINVAL;
+	}
+
+	spin_lock_bh(&sfe_ctx->lock);
+
+	if (sfe_ctx->ppe_rfs_feature_support && val) {
+		spin_unlock_bh(&sfe_ctx->lock);
+		pr_err("PPE RFS feature is already enabled\n");
+		return -EINVAL;
+	}
+
+	if (!sfe_ctx->ppe_rfs_feature_support && !val) {
+		spin_unlock_bh(&sfe_ctx->lock);
+		pr_err("PPE RFS feature is already disabled\n");
+		return -EINVAL;
+	}
+
+	sfe_ctx->ppe_rfs_feature_support = val;
+	spin_unlock_bh(&sfe_ctx->lock);
+
+	return count;
+}
+#endif
+
 #if defined(SFE_ESP_SPI_PASSTH_ENABLE)
 /*
  * sfe_get_esp_spi_passthrough_feature()
@@ -814,66 +874,6 @@ ssize_t sfe_set_esp_spi_passthrough_feature(struct device *dev, struct device_at
 	}
 
 	sfe_ctx->spi_esp_passthrough_support = val;
-	spin_unlock_bh(&sfe_ctx->lock);
-
-	return count;
-}
-#endif
-
-/*
- * sfe_get_ppe_rfs_feature()
- *	PPE rfs feature is enabled/disabled
- */
-ssize_t sfe_get_ppe_rfs_feature(struct device *dev,
-				     struct device_attribute *attr,
-				     char *buf)
-{
-	struct sfe_ctx_instance_internal *sfe_ctx = &__sfe_ctx;
-	ssize_t len;
-
-	spin_lock_bh(&sfe_ctx->lock);
-	len = snprintf(buf, (ssize_t)(PAGE_SIZE), "PPE RFS feature is %s\n", sfe_ctx->ppe_rfs_feature_support ? "enabled" : "disabled");
-	spin_unlock_bh(&sfe_ctx->lock);
-	return len;
-}
-
-/*
- * sfe_set_ppe_rfs_feature()
- *	Enable or disable ppe rfs features flag.
- */
-ssize_t sfe_set_ppe_rfs_feature(struct device *dev, struct device_attribute *attr,
-                         const char *buf, size_t count)
-{
-        unsigned long val;
-	struct sfe_ctx_instance_internal *sfe_ctx = &__sfe_ctx;
-	int ret;
-        ret = sscanf(buf, "%lu", &val);
-
-	if (ret != 1) {
-		pr_err("Wrong input, %s\n", buf);
-		return -EINVAL;
-	}
-
-	if (val != 1 && val != 0) {
-		pr_err("Input should be either 1 or 0, (%s)\n", buf);
-		return -EINVAL;
-	}
-
-	spin_lock_bh(&sfe_ctx->lock);
-
-	if (sfe_ctx->ppe_rfs_feature_support && val) {
-		spin_unlock_bh(&sfe_ctx->lock);
-		pr_err("PPE RFS feature is already enabled\n");
-		return -EINVAL;
-	}
-
-	if (!sfe_ctx->ppe_rfs_feature_support && !val) {
-		spin_unlock_bh(&sfe_ctx->lock);
-		pr_err("PPE RFS feature is already disabled\n");
-		return -EINVAL;
-	}
-
-	sfe_ctx->ppe_rfs_feature_support = val;
 	spin_unlock_bh(&sfe_ctx->lock);
 
 	return count;
