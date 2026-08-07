@@ -32,6 +32,8 @@ int sfe_ipv4_recv_tun6rd(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_de
 			     unsigned int len, struct iphdr *iph, unsigned int ihl,
 				 bool sync_on_find, struct sfe_l2_info *l2_info, bool tun_outer)
 {
+	struct net_device *offload_xmit_dev = NULL;
+	u64 __percpu *offload_stat = NULL;
 	__be32 src_ip;
 	__be32 dest_ip;
 	__be16 src_port = 0;
@@ -40,10 +42,6 @@ int sfe_ipv4_recv_tun6rd(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_de
 	bool bridge_flow;
 	bool hw_csum;
 	struct sfe_ipv4_connection_match *cm;
-#ifdef CONFIG_IPQ_PON
-	struct net_device *offload_xmit_dev;
-	struct netdev_hw_offload_ops *offload_ops;
-#endif
 
 	DEBUG_TRACE("%px: sfe: sfe_ipv4_recv_tun6rd called.\n", skb);
 
@@ -348,6 +346,20 @@ int sfe_ipv4_recv_tun6rd(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_de
 	}
 
 	/*
+	 * Check if TX dev is tun vp.
+	 */
+	if (unlikely(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_PPE_TUN_VP_VALID)) {
+		offload_xmit_dev = cm->xmit_dev;
+		offload_stat = &si->stats_pcpu->ppe_tun_vp_tx64;
+	}
+#ifdef CONFIG_IPQ_PON
+	else if (unlikely(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_PPE_VEIP_PON_VP_VALID)) {
+		offload_xmit_dev = cm->offload_xmit_dev;
+		offload_stat = &si->stats_pcpu->ppe_veip_pon_vp_tx64;
+	}
+#endif
+
+	/*
 	 * Update priority of skb.
 	 */
 	if (unlikely(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_PRIORITY_REMARK)) {
@@ -363,23 +375,19 @@ int sfe_ipv4_recv_tun6rd(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_de
 
 	this_cpu_inc(si->stats_pcpu->packets_forwarded64);
 
-#ifdef CONFIG_IPQ_PON
-	if (unlikely(cm->flags & SFE_IPV4_CONNECTION_MATCH_FLAG_PPE_VEIP_PON_VP_VALID)) {
-		offload_xmit_dev = cm->offload_xmit_dev;
-
-		if (likely(offload_xmit_dev)) {
-			offload_ops = rcu_dereference(offload_xmit_dev->offload_ops);
-			if (likely(offload_ops && offload_ops->xmit)) {
-				mem_debug_update_skb(skb);
-				if (likely(offload_ops->xmit(offload_xmit_dev, skb))) {
-					this_cpu_inc(si->stats_pcpu->ppe_veip_pon_vp_tx64);
-					rcu_read_unlock();
-					return 1;
-				}
-			}
+	/*
+	 * For tunnel Packets check if tunnel is active in PPE.
+	 * If tunnel is active queue the packet to tunnel VP.
+	 */
+	if (unlikely(offload_xmit_dev)) {
+		struct netdev_hw_offload_ops *offload_ops = rcu_dereference(offload_xmit_dev->offload_ops);
+		mem_debug_update_skb(skb);
+		if (likely(offload_ops && offload_ops->xmit && offload_ops->xmit(offload_xmit_dev, skb))) {
+			this_cpu_inc(*offload_stat);
+			rcu_read_unlock();
+			return 1;
 		}
 	}
-#endif
 
 	rcu_read_unlock();
 
@@ -394,6 +402,7 @@ int sfe_ipv4_recv_tun6rd(struct sfe_ipv4 *si, struct sk_buff *skb, struct net_de
 	 */
 	skb->fast_forwarded = 1;
 	mem_debug_update_skb(skb);
+
 	dev_queue_xmit(skb);
 
 	return 1;
