@@ -286,15 +286,17 @@ int sfe_ipv6_recv_tcp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 #ifdef SFE_BRIDGE_VLAN_FILTERING_ENABLE
 	ingress_flags = cm->vlan_filter_rule.ingress_flags;
 #endif
-	if (unlikely(!sfe_vlan_validate_ingress_tag(skb, cm->ingress_vlan_hdr_cnt, cm->ingress_vlan_hdr, l2_info, ingress_flags))) {
-		if (!(cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_BRIDGE_VLAN_PASSTHROUGH)) {
-			rcu_read_unlock();
-			sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_INGRESS_VLAN_TAG_MISMATCH);
-			DEBUG_TRACE("VLAN tag mismatch. skb=%px\n", skb);
-			return 0;
+	if (likely(!(cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_VLAN_INGRESS_AGNOSTIC))) {
+		if (unlikely(!sfe_vlan_validate_ingress_tag(skb, cm->ingress_vlan_hdr_cnt, cm->ingress_vlan_hdr, l2_info, ingress_flags))) {
+			if (!(cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_BRIDGE_VLAN_PASSTHROUGH)) {
+				rcu_read_unlock();
+				sfe_ipv6_exception_stats_inc(si, SFE_IPV6_EXCEPTION_EVENT_INGRESS_VLAN_TAG_MISMATCH);
+				DEBUG_TRACE("VLAN tag mismatch. skb=%px\n", skb);
+				return 0;
+			}
+			vlan_passthrough = true;
+			this_cpu_inc(si->stats_pcpu->bridge_vlan_passthrough_forwarded64);
 		}
-		vlan_passthrough = true;
-		this_cpu_inc(si->stats_pcpu->bridge_vlan_passthrough_forwarded64);
 	}
 
 	/*
@@ -932,6 +934,14 @@ int sfe_ipv6_recv_tcp(struct sfe_ipv6 *si, struct sk_buff *skb, struct net_devic
 	}
 
 	rcu_read_unlock();
+
+#ifdef CONFIG_IPQ_PON
+	/*
+	 * A GEM-tagged skb is not allowed to take the fast xmit path, so drop
+	 * only the GEM extension here.
+	 */
+	skb_ext_del(skb, SKB_EXT_GEM);
+#endif
 
 	/*
 	 * We do per packet condition check before we could fast xmit the

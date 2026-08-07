@@ -1544,6 +1544,7 @@ void sfe_ipv6_unidir_rule_update(struct sfe_ipv6_connection *conn, struct sfe_ru
 	struct sfe_ipv6_connection_match *match_dir;
 	u32 qos_tag;
 	u8 int_pri, dscp;
+	u8 old_egress_vlan_hdr_cnt;
 	char direction[] = "reply";
 
 	if (update_msg->info.unidir.update_dir == SFE_FLOW_RULE_DIRECTION_FLOW) {
@@ -1558,8 +1559,6 @@ void sfe_ipv6_unidir_rule_update(struct sfe_ipv6_connection *conn, struct sfe_ru
 		dscp = update_msg->info.unidir.dscp.return_dscp;
 	}
 
-	match_dir->flow_accel = true;
-
 	if (update_msg->flags & SFE_UPDATE_RULE_QOS_VALID) {
 		match_dir->priority = qos_tag;
 		match_dir->dscp = dscp << SFE_IPV6_DSCP_SHIFT;
@@ -1568,11 +1567,48 @@ void sfe_ipv6_unidir_rule_update(struct sfe_ipv6_connection *conn, struct sfe_ru
 #endif
 	}
 
+	if (update_msg->flags & SFE_UPDATE_RULE_VLAN_INGRESS_AGNOSTIC) {
+		match_dir->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_VLAN_INGRESS_AGNOSTIC;
+		match_dir->flags &= ~SFE_IPV6_CONNECTION_MATCH_FLAG_BRIDGE_VLAN_PASSTHROUGH;
+	}
+
+	if (update_msg->flags & SFE_UPDATE_RULE_VLAN_VALID) {
+		old_egress_vlan_hdr_cnt = match_dir->egress_vlan_hdr_cnt;
+
+		match_dir->egress_vlan_hdr_cnt = 0;
+		memset(match_dir->egress_vlan_hdr, 0, sizeof(match_dir->egress_vlan_hdr));
+
+		sfe_ipv6_match_entry_set_vlan_hdr(&match_dir->egress_vlan_hdr_cnt, match_dir->egress_vlan_hdr,
+				update_msg->info.unidir.vlan_primary_rule.egress_vlan_tag,
+				update_msg->info.unidir.vlan_secondary_rule.egress_vlan_tag);
+
+		if (match_dir->egress_vlan_hdr_cnt) {
+			match_dir->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_INSERT_EGRESS_VLAN_TAG;
+		} else {
+			match_dir->flags &= ~SFE_IPV6_CONNECTION_MATCH_FLAG_INSERT_EGRESS_VLAN_TAG;
+		}
+
+		match_dir->l2_hdr_size -= old_egress_vlan_hdr_cnt * VLAN_HLEN;
+		match_dir->l2_hdr_size += match_dir->egress_vlan_hdr_cnt * VLAN_HLEN;
+	}
+
+	/*
+	 * Mark accel ready only after all the fields above have been updated,
+	 * so a concurrent reader never sees a partially-updated match entry.
+	 */
+	match_dir->flow_accel = true;
+
 	if (update_msg->info.unidir.update_dir == SFE_FLOW_RULE_DIRECTION_FLOW) {
 		snprintf(direction, sizeof(direction), "%s", "orig");
 	}
 
-	DEBUG_TRACE("%px: matched direction(%s) updated qos_tag:%x int_pri:%x\n", conn, direction, qos_tag, int_pri);
+	DEBUG_TRACE("%px: matched direction(%s) updated qos_tag:%x int_pri:%x vlan_ingress_agnostic:%d egress_vlan_hdr_cnt:%u egress_vlan_tag:%x,%x l2_hdr_size:%u\n",
+			conn, direction, qos_tag, int_pri,
+			!!(update_msg->flags & SFE_UPDATE_RULE_VLAN_INGRESS_AGNOSTIC),
+			match_dir->egress_vlan_hdr_cnt,
+			update_msg->info.unidir.vlan_primary_rule.egress_vlan_tag,
+			update_msg->info.unidir.vlan_secondary_rule.egress_vlan_tag,
+			match_dir->l2_hdr_size);
 }
 
 /*
@@ -2606,6 +2642,9 @@ sfe_response_t sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 	if (msg->rule_flags & SFE_RULE_CREATE_FLAG_BRIDGE_FLOW) {
 		original_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_BRIDGE_FLOW;
 	}
+	if (msg->rule_flags & SFE_RULE_CREATE_FLAG_FLOW_VLAN_INGRESS_AGNOSTIC) {
+		original_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_VLAN_INGRESS_AGNOSTIC;
+	}
 	if (msg->rule_flags & SFE_RULE_CREATE_FLAG_FLOW_TRANSMIT_FAST) {
 		original_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_FAST_XMIT_DEV_ADMISSION;
 	}
@@ -2904,6 +2943,13 @@ sfe_response_t sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 	}
 
 	/*
+	 * VLAN-ingress-agnostic and bridge-VLAN-passthrough are mutually exclusive.
+	 */
+	if (original_cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_VLAN_INGRESS_AGNOSTIC) {
+		original_cm->flags &= ~SFE_IPV6_CONNECTION_MATCH_FLAG_BRIDGE_VLAN_PASSTHROUGH;
+	}
+
+	/*
 	 * Fill in the "reply" direction connection matching object.
 	 */
 	reply_cm->match_dev = dest_dev;
@@ -3038,6 +3084,9 @@ sfe_response_t sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 	}
 	if (msg->rule_flags & SFE_RULE_CREATE_FLAG_BRIDGE_FLOW) {
 		reply_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_BRIDGE_FLOW;
+	}
+	if (msg->rule_flags & SFE_RULE_CREATE_FLAG_RETURN_VLAN_INGRESS_AGNOSTIC) {
+		reply_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_VLAN_INGRESS_AGNOSTIC;
 	}
 	if (msg->rule_flags & SFE_RULE_CREATE_FLAG_RETURN_TRANSMIT_FAST) {
 		reply_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_FAST_XMIT_DEV_ADMISSION;
@@ -3501,6 +3550,10 @@ sfe_response_t sfe_ipv6_create_rule(struct sfe_ipv6_rule_create_msg *msg)
 				reply_cm->flags |= SFE_IPV6_CONNECTION_MATCH_FLAG_BRIDGE_VLAN_PASSTHROUGH;
 			}
 		}
+	}
+
+	if (reply_cm->flags & SFE_IPV6_CONNECTION_MATCH_FLAG_VLAN_INGRESS_AGNOSTIC) {
+		reply_cm->flags &= ~SFE_IPV6_CONNECTION_MATCH_FLAG_BRIDGE_VLAN_PASSTHROUGH;
 	}
 
 	if ((!sfe_ipv6_addr_equal((struct sfe_ipv6_addr *)tuple->return_ip, (struct sfe_ipv6_addr *)msg->conn_rule.return_ip_xlate)) ||

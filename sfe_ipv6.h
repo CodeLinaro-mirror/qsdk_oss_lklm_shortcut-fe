@@ -125,6 +125,8 @@ struct sfe_ipv6_vlan_filter_connection_match {
 					/* TUN VP valid */
 #define SFE_IPV6_CONNECTION_MATCH_FLAG_PPE_VEIP_PON_VP_VALID (1<<29)
 					/* VEIP PON VP valid */
+#define SFE_IPV6_CONNECTION_MATCH_FLAG_VLAN_INGRESS_AGNOSTIC (1<<30)
+					/* Ignore ingress VLAN tag(s); apply only the configured egress VLAN tag(s) */
 /*
  * IPv6 multicast destination structure
  */

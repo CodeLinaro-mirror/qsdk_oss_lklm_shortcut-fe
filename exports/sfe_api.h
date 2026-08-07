@@ -108,6 +108,8 @@
 #define SFE_RULE_CREATE_FLAG_ESP_PASSTHROUGH (1<<23)		/**< IPSec Passthrough. */
 #define SFE_RULE_CREATE_FLAG_FLOW_DEST_VEIP_PON_VP (1<<24)	/**< VEIP PON VP is destination interface in flow direction. */
 #define SFE_RULE_CREATE_FLAG_RETURN_DEST_VEIP_PON_VP (1<<25)	/**< VEIP PON VP is destination interface in return direction. */
+#define SFE_RULE_CREATE_FLAG_FLOW_VLAN_INGRESS_AGNOSTIC (1<<26)	/**< Ignore ingress VLAN tag(s) and apply only the configured egress VLAN tag(s) in the flow direction. */
+#define SFE_RULE_CREATE_FLAG_RETURN_VLAN_INGRESS_AGNOSTIC (1<<27)	/**< Ignore ingress VLAN tag(s) and apply only the configured egress VLAN tag(s) in the return direction. */
 
 /*
  * Rule creation validity flags.
@@ -232,6 +234,10 @@
 		/**< QoS mark is set for this flow. */
 #define SFE_UPDATE_RULE_DSCP_VALID		(1<<4)
 		/**< DSCP values are valid in update rule. */
+#define SFE_UPDATE_RULE_VLAN_VALID		(1<<5)
+		/**< VLAN rules are valid in update rule. */
+#define SFE_UPDATE_RULE_VLAN_INGRESS_AGNOSTIC	(1<<6)
+		/**< Ignore ingress VLAN tag(s) and apply only the configured egress VLAN tag(s) in the selected direction. */
 
 /**
  * @}
@@ -533,6 +539,8 @@ struct sfe_update_msg_unidir_t {
 	struct sfe_qos_rule qos;		/**< QoS rule information. */
 	struct sfe_dscp_rule dscp;		/**< DSCP-related acceleration parameters. */
 	sfe_flow_rule_direction_t update_dir;	/**< Direction to update. */
+	struct sfe_vlan_rule vlan_primary_rule;	/**< Primary VLAN rule information. */
+	struct sfe_vlan_rule vlan_secondary_rule;	/**< Secondary VLAN rule information. */
 };
 
 /**

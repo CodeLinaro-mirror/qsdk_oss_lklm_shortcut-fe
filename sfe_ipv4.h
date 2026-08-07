@@ -114,6 +114,8 @@ struct sfe_ipv4_vlan_filter_connection_match {
 					/* TUN VP valid */
 #define SFE_IPV4_CONNECTION_MATCH_FLAG_PPE_VEIP_PON_VP_VALID (1<<30)
 					/* VEIP PON VP valid */
+#define SFE_IPV4_CONNECTION_MATCH_FLAG_VLAN_INGRESS_AGNOSTIC (1U<<31)
+					/* Ignore ingress VLAN tag(s); apply only the configured egress VLAN tag(s) */
 
 /*
  * IPv4 multicast destination structure

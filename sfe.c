@@ -560,12 +560,6 @@ bool sfe_fast_xmit_check(struct sk_buff *skb, netdev_features_t features)
 		return false;
 	}
 
-#if defined(CONFIG_SKB_EXTENSIONS) && defined(CONFIG_IPQ_PON)
-	if (skb->active_extensions) {
-		DEBUG_INFO("%px: skb has active extensions\n", skb);
-		return false;
-	}
-#endif
 	return true;
 }
 
