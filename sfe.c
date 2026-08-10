@@ -47,6 +47,7 @@ uint8_t sfe_fls_flush_on_hwm_enable;
 #define sfe_ipv4_stopped(CTX) (rcu_dereference((CTX)->ipv4_stats_sync_cb) == NULL)
 #define sfe_ipv6_stopped(CTX) (rcu_dereference((CTX)->ipv6_stats_sync_cb) == NULL)
 #define SFE_IPSEC_TUNNEL_TYPE 31
+#define SFE_RFS_MCAST_RET_INTF_INVALID -1
 
 typedef enum sfe_exception {
 	SFE_EXCEPTION_IPV4_MSG_UNKNOWN,
@@ -978,6 +979,10 @@ static void sfe_create_ipv4_ppe_rfs_rule(struct sfe_ipv4_connection_match *match
 		pr4rc.rule_flags |= PPE_RFS_V4_RULE_FLAG_BRIDGE_FLOW;
 	}
 
+	if (match_dir->is_mcast_flow) {
+		pr4rc.rule_flags |= PPE_RFS_V4_RULE_FLAG_MCAST_FLOW;
+	}
+
 	pr4rc.rule_flags |= PPE_RFS_V4_RULE_FLAG_FLOW_VALID | PPE_RFS_V4_RULE_FLAG_PASSIVE_FLOW;
 	pr4rc.tuple.protocol = match_dir->match_protocol;
 	pr4rc.tuple.flow_ip =  ntohl(match_dir->match_src_ip);
@@ -990,9 +995,13 @@ static void sfe_create_ipv4_ppe_rfs_rule(struct sfe_ipv4_connection_match *match
 	pr4rc.conn_rule.return_ip_xlate = ntohl(match_dir->xlate_dest_ip);
 	pr4rc.conn_rule.return_ident_xlate = ntohs(match_dir->xlate_src_ip);
 	pr4rc.conn_rule.flow_interface_num = match_dir->flow_interface_num;
-	pr4rc.conn_rule.return_interface_num = match_dir->return_interface_num;
 	pr4rc.conn_rule.flow_top_interface_num = match_dir->flow_top_interface_num;
-	pr4rc.conn_rule.return_top_interface_num = match_dir->return_top_interface_num;
+
+	if (!match_dir->is_mcast_flow) {
+		pr4rc.conn_rule.return_interface_num = match_dir->return_interface_num;
+		pr4rc.conn_rule.return_top_interface_num = match_dir->return_top_interface_num;
+	}
+
 	pr4rc.conn_rule.flow_mtu = match_dir->flow_mtu;
 	pr4rc.conn_rule.return_mtu = match_dir->return_mtu;
 
@@ -1108,8 +1117,8 @@ enum sfe_cmn_response sfe_create_ipv4_mc_rule_msg(struct sfe_ctx_instance_intern
 #if defined(SFE_RFS_SUPPORTED)
                 struct sfe_ipv4_connection *conn;
                 struct sfe_ipv4_connection_match *flow_match;
-		s32 flow_interface_num = msg->msg.rule_create.conn_rule.flow_interface_num;
-		s32 return_interface_num = msg->msg.rule_create.conn_rule.return_interface_num;
+		s32 flow_interface_num = msg->msg.mc_rule_create.conn_rule.flow_interface_num;
+		s32 return_interface_num = SFE_RFS_MCAST_RET_INTF_INVALID;
 		u32 return_qos_tag = 0;
 		bool is_mcast = true;
 
@@ -1122,6 +1131,7 @@ enum sfe_cmn_response sfe_create_ipv4_mc_rule_msg(struct sfe_ctx_instance_intern
 		if (sfe_is_ppe_rfs_feature_enabled()) {
 			if (ppe_rfs_rule_eligible_get(flow_interface_num, return_interface_num,
 												is_mcast, flow_match->rfs_valid_flags)) {
+				flow_match->is_mcast_flow = is_mcast;
 				sfe_create_ipv4_ppe_rfs_rule(flow_match, return_qos_tag);
 			} else {
 				DEBUG_TRACE("%p: SFE mcast flow is not RFS eligible (false), flow interface num %d, return interface num %d. \n",
@@ -1281,6 +1291,7 @@ enum sfe_cmn_response sfe_create_ipv4_rule_msg(struct sfe_ctx_instance_internal 
 			 */
 			if (ppe_rfs_rule_eligible_get(flow_interface_num, return_interface_num,
 											is_mcast, flow_match->rfs_valid_flags)) {
+				flow_match->is_mcast_flow = is_mcast;
 				sfe_create_ipv4_ppe_rfs_rule(flow_match, return_match->priority);
 			} else {
 				DEBUG_TRACE("%p: SFE forward flow is not RFS eligible (false), flow interface num %d, return interface num %d. \n",
@@ -1289,6 +1300,7 @@ enum sfe_cmn_response sfe_create_ipv4_rule_msg(struct sfe_ctx_instance_internal 
 
 			if (ppe_rfs_rule_eligible_get(return_interface_num, flow_interface_num,
 											is_mcast, return_match->rfs_valid_flags)) {
+				return_match->is_mcast_flow = is_mcast;
 				sfe_create_ipv4_ppe_rfs_rule(return_match, flow_match->priority);
 			} else {
 				DEBUG_TRACE("%p: SFE return flow is not RFS eligible (false), flow interface num %d, return interface num %d. \n",
@@ -1722,6 +1734,10 @@ static void sfe_create_ipv6_ppe_rfs_rule(struct sfe_ipv6_connection_match *match
 		pr6rc.rule_flags |= PPE_RFS_V6_RULE_FLAG_BRIDGE_FLOW;
 	}
 
+	if (match_dir->is_mcast_flow) {
+		pr6rc.rule_flags |= PPE_RFS_V6_RULE_FLAG_MCAST_FLOW;
+	}
+
 	pr6rc.rule_flags |= PPE_RFS_V6_RULE_FLAG_FLOW_VALID | PPE_RFS_V6_RULE_FLAG_PASSIVE_FLOW;
 	pr6rc.tuple.protocol = match_dir->match_protocol;
 	pr6rc.tuple.flow_ip[0] = ntohl(match_dir->match_src_ip[0].addr[3]);
@@ -1736,9 +1752,13 @@ static void sfe_create_ipv6_ppe_rfs_rule(struct sfe_ipv6_connection_match *match
 	pr6rc.tuple.return_ident = ntohs(match_dir->match_dest_port);
 	pr6rc.tuple.flow_rule_id = match_dir->connection->flow_rule_id;
 	pr6rc.conn_rule.flow_interface_num = match_dir->flow_interface_num;
-	pr6rc.conn_rule.return_interface_num = match_dir->return_interface_num;
 	pr6rc.conn_rule.flow_top_interface_num = match_dir->flow_top_interface_num;
-	pr6rc.conn_rule.return_top_interface_num = match_dir->return_top_interface_num;
+
+	if (!match_dir->is_mcast_flow) {
+		pr6rc.conn_rule.return_interface_num = match_dir->return_interface_num;
+		pr6rc.conn_rule.return_top_interface_num = match_dir->return_top_interface_num;
+	}
+
 	pr6rc.conn_rule.flow_mtu = match_dir->flow_mtu;
 	pr6rc.conn_rule.return_mtu = match_dir->return_mtu;
 
@@ -1862,8 +1882,8 @@ enum sfe_cmn_response sfe_create_ipv6_mc_rule_msg(struct sfe_ctx_instance_intern
 #if defined(SFE_RFS_SUPPORTED)
                 struct sfe_ipv6_connection *conn;
                 struct sfe_ipv6_connection_match *flow_match;
-		s32 flow_interface_num = msg->msg.rule_create.conn_rule.flow_interface_num;
-		s32 return_interface_num = msg->msg.rule_create.conn_rule.return_interface_num;
+		s32 flow_interface_num = msg->msg.mc_rule_create.conn_rule.flow_interface_num;
+		s32 return_interface_num = SFE_RFS_MCAST_RET_INTF_INVALID;
 		u32 return_qos_tag = 0;
 		bool is_mcast = true;
 
@@ -1876,6 +1896,7 @@ enum sfe_cmn_response sfe_create_ipv6_mc_rule_msg(struct sfe_ctx_instance_intern
 		if (sfe_is_ppe_rfs_feature_enabled()) {
 			if (ppe_rfs_rule_eligible_get(flow_interface_num, return_interface_num,
 											is_mcast, flow_match->rfs_valid_flags)) {
+				flow_match->is_mcast_flow = is_mcast;
 				sfe_create_ipv6_ppe_rfs_rule(flow_match, return_qos_tag);
 			} else {
 				DEBUG_TRACE("%p: SFE mcast flow is not RFS eligible (false), flow interface num %d, return interface num %d. \n",
@@ -2078,6 +2099,7 @@ enum sfe_cmn_response sfe_create_ipv6_rule_msg(struct sfe_ctx_instance_internal 
 			 */
 			if (ppe_rfs_rule_eligible_get(flow_interface_num, return_interface_num,
 											is_mcast, flow_match->rfs_valid_flags)) {
+				flow_match->is_mcast_flow = is_mcast;
 				sfe_create_ipv6_ppe_rfs_rule(flow_match, return_match->priority);
 			} else {
 				DEBUG_TRACE("%p: SFE forward flow is not RFS eligible (false), flow interface num %d, return interface num %d. \n",
@@ -2086,6 +2108,7 @@ enum sfe_cmn_response sfe_create_ipv6_rule_msg(struct sfe_ctx_instance_internal 
 
 			if (ppe_rfs_rule_eligible_get(return_interface_num, flow_interface_num,
 											is_mcast, return_match->rfs_valid_flags)) {
+				return_match->is_mcast_flow = is_mcast;
 				sfe_create_ipv6_ppe_rfs_rule(return_match, flow_match->priority);
 			} else {
 				DEBUG_TRACE("%p: SFE return flow is not RFS eligible (false), flow interface num %d, return interface num %d. \n",
