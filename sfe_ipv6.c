@@ -988,6 +988,57 @@ void sfe_ipv6_fls_clear(void)
 }
 
 /*
+ * sfe_ipv6_fls_enable()
+ *	Re-enable FLS stats for the connection match(es) with this 5-tuple.
+ */
+bool sfe_ipv6_fls_enable(uint8_t protocol, __be32 *src_ip, __be16 src_port,
+			  __be32 *dest_ip, __be16 dest_port)
+{
+	struct sfe_ipv6 *si6 = &__si6;
+	struct sfe_ipv6_addr *src_addr = (struct sfe_ipv6_addr *)src_ip;
+	struct sfe_ipv6_addr *dest_addr = (struct sfe_ipv6_addr *)dest_ip;
+	struct sfe_ipv6_connection_match *cm;
+	bool found = false;
+	uint32_t i;
+
+	/*
+	 * The FLS connection tuple stores the translated (xlate) destination
+	 * rather than the pre-NAT match destination (see create_cb usage in
+	 * sfe_ipv6_create_rule()), so the destination side of this tuple may be
+	 * either representation depending on whether NAT is in play. That means
+	 * the hash bucket used at connection-match insertion time (which is keyed
+	 * off match_dest_ip/port) cannot be reliably recomputed from the caller's
+	 * tuple, so we scan every bucket instead of hashing directly.
+	 */
+	rcu_read_lock();
+	for (i = 0; i < SFE_IPV6_CONNECTION_HASH_SIZE && !found; i++) {
+		hlist_for_each_entry_rcu(cm, &si6->hlist_conn_match_hash_head[i], hnode) {
+			if (cm->match_protocol != protocol ||
+			    !sfe_ipv6_addr_equal(cm->match_src_ip, src_addr) ||
+			    cm->match_src_port != src_port) {
+				continue;
+			}
+
+			if ((!sfe_ipv6_addr_equal(cm->match_dest_ip, dest_addr) || cm->match_dest_port != dest_port) &&
+			    (!sfe_ipv6_addr_equal(cm->xlate_dest_ip, dest_addr) || cm->xlate_dest_port != dest_port)) {
+				continue;
+			}
+
+			cm->flags &= ~SFE_IPV6_CONNECTION_MATCH_FLAG_FLS_DISABLED;
+			if (cm->counter_match) {
+				cm->counter_match->flags &= ~SFE_IPV6_CONNECTION_MATCH_FLAG_FLS_DISABLED;
+			}
+			found = true;
+			break;
+		}
+	}
+	rcu_read_unlock();
+
+	return found;
+}
+EXPORT_SYMBOL(sfe_ipv6_fls_enable);
+
+/*
  * sfe_ipv6_sync_status()
  *	update a connection status to its connection manager.
  *
