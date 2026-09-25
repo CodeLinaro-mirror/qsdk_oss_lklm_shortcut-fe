@@ -1233,7 +1233,7 @@ int sfe_ipv4_frag_prepare( struct sfe_ipv4 *si, struct sfe_ipv4_connection_match
 		}
 
 		skb_reserve(skb2, headroom);
-		skb_reset_network_header(skb2);
+		skb_reset_mac_header(skb2);
 		__skb_queue_tail(head, skb2);
 	}
 
@@ -1406,7 +1406,10 @@ void sfe_ipv4_frag(struct sfe_ipv4 *si, struct sfe_ipv4_connection_match *cm, st
 				csum = (u16)csum;
 				iph2->check = (u16)csum;
 			}
-				payload_copied += copy_len;
+
+			skb_set_network_header(iter, ip_offset);
+			skb_set_transport_header(iter, hdr_len);
+			payload_copied += copy_len;
 		}
 	}
 
